@@ -29,14 +29,14 @@ np.set_printoptions(linewidth=120)
 
 
 def main():
-  num_instances = 128
+  num_instances = 32
   num_predictors = 8
-  instances_emb_size = 32
-  predictors_emb_size = 32
+  instances_emb_size = 128
+  predictors_emb_size = 128
 
   data = SyntheticBinaryGenerator().generate(
     num_instances=num_instances,
-    predictor_qualities=[0.95, 0.60, 0.45, 0.85, 0.59, 0.98, 0.94, 0.76])
+    predictor_qualities=[0.90, 0.75, 0.45, 0.85, 0.59, 0.90, 0.90, 0.76])
 
   instances = np.array(data.predictions['instances'], dtype=np.int32)[:, None]
   predictor_indices = np.array(data.predictions['predictor_indices'], dtype=np.int32)
@@ -63,21 +63,19 @@ def main():
       num_inputs=num_predictors,
       emb_size=predictors_emb_size,
       name='predictor_embeddings'),
-    model_hidden_units=[128, 64, 32],
-    error_hidden_units=[128, 64, 32])
+    model_hidden_units=[64, 32],
+    error_hidden_units=[64, 32])
 
-  learner.train(dataset)
+  learner.train(dataset, max_steps=10000)
 
   predictions = learner.predict(instances)
   qualities = learner.qualities(instances, predictor_indices)
-  qualities_a = np.exp(qualities[:, :, 0])
-  qualities_b = np.exp(qualities[:, :, 1])
+  qualities_b = 1.0 + np.exp(qualities[:, :, 0])
+  qualities_a = 1.0 + np.exp(qualities[:, :, 1])
   qualities_mean = np.mean(qualities_a / (qualities_a + qualities_b), axis=0)
-  qualities_mode = np.mean((qualities_a - 1) / (qualities_a + qualities_b - 2), axis=0)
 
   print('Accuracy: %.4f' % np.mean((predictions[:, 0] >= 0.5) == data.true_labels))
   print('Qualities mean: {}'.format(qualities_mean))
-  print('Qualities mode: {}'.format(qualities_mode))
 
   print('haha Christoph')
 

@@ -25,9 +25,11 @@ __author__ = 'eaplatanios'
 
 __all__ = []
 
+np.set_printoptions(linewidth=120)
+
 
 def main():
-  num_instances = 32
+  num_instances = 128
   num_predictors = 8
   instances_emb_size = 32
   predictors_emb_size = 32
@@ -68,10 +70,14 @@ def main():
 
   predictions = learner.predict(instances)
   qualities = learner.qualities(instances, predictor_indices)
-  mean_qualities = np.mean(qualities[:, :, 1] / (qualities[:, :, 0] + qualities[:, :, 1]), axis=0)
+  qualities_a = np.exp(qualities[:, :, 0])
+  qualities_b = np.exp(qualities[:, :, 1])
+  qualities_mean = np.mean(qualities_a / (qualities_a + qualities_b), axis=0)
+  qualities_mode = np.mean((qualities_a - 1) / (qualities_a + qualities_b - 2), axis=0)
 
   print('Accuracy: %.4f' % np.mean((predictions[:, 0] >= 0.5) == data.true_labels))
-  print(mean_qualities)
+  print('Qualities mean: {}'.format(qualities_mean))
+  print('Qualities mode: {}'.format(qualities_mode))
 
   print('haha Christoph')
 
@@ -79,5 +85,5 @@ def main():
 
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
   main()

@@ -55,8 +55,8 @@ class BinaryNoisyLearnerConfig(NoisyLearnerConfig):
     p = predictions
     a = tf.exp(qualities_prior[:, :, 0])
     b = tf.exp(qualities_prior[:, :, 1])
-    temp0 = tf.cast(predictor_values, tf.float32)
-    temp1 = 1 - temp0
+    temp1 = tf.cast(predictor_values, tf.float32)
+    temp0 = 1 - temp1
     term0 = tf.pow(a, temp1)
     term0 *= tf.pow(b, temp0)
     term0 /= (a + b)

@@ -18,6 +18,7 @@ import numpy as np
 import tensorflow as tf
 
 from .data.synthetic import SyntheticBinaryGenerator
+from .models.layers import *
 from .models.learners import *
 from .models.transformations import *
 
@@ -50,10 +51,24 @@ def main():
     .repeat() \
     .batch(128)
 
-  learner = NoisyMLPLearner(
+  model_fn = MLP(
+    hidden_units=[64, 32],
+    num_outputs=1,
+    activation=tf.nn.leaky_relu,
+    output_projection=tf.sigmoid,
+    name='model_fn')
+
+  qualities_fn = MLP(
+    hidden_units=[64, 32],
+    num_outputs=2,
+    activation=tf.nn.leaky_relu,
+    name='qualities_fn')
+
+  learner = NoisyLearner(
     inputs_size=1,
-    predictors_size=1,
-    config=BinaryNoisyLearnerConfig(),
+    config=BinaryNoisyLearnerConfig(
+      model_fn=model_fn,
+      qualities_fn=qualities_fn),
     optimizer=tf.train.AdamOptimizer(),
     instances_input_fn=Embedding(
       num_inputs=num_instances,
@@ -63,16 +78,13 @@ def main():
       num_inputs=num_predictors,
       emb_size=predictors_emb_size,
       name='predictor_embeddings'),
-    model_hidden_units=[64, 32],
-    error_hidden_units=[64, 32])
+    qualities_input_fn=InstancesPredictorsConcatenation())
 
   learner.train(dataset, max_steps=10000)
 
   predictions = learner.predict(instances)
   qualities = learner.qualities(instances, predictor_indices)
-  qualities_b = 1.0 + np.exp(qualities[:, :, 0])
-  qualities_a = 1.0 + np.exp(qualities[:, :, 1])
-  qualities_mean = np.mean(qualities_a / (qualities_a + qualities_b), axis=0)
+  qualities_mean = np.mean(qualities, axis=0)
 
   print('Accuracy: %.4f' % np.mean((predictions[:, 0] >= 0.5) == data.true_labels))
   print('Qualities mean: {}'.format(qualities_mean))

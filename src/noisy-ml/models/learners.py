@@ -20,11 +20,13 @@ import tensorflow as tf
 
 from six import with_metaclass
 
+from .transformations import *
+
 __author__ = 'eaplatanios'
 
 __all__ = [
   'NoisyLearnerConfig', 'BinaryNoisyLearnerConfig',
-  'NoisyLearner', 'NoisyMLPLearner']
+  'NoisyLearner']
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,10 @@ class NoisyLearnerConfig(with_metaclass(abc.ABCMeta, object)):
     pass
 
   @abc.abstractmethod
+  def qualities_mean(self, *args):
+    pass
+
+  @abc.abstractmethod
   def loss_fn(
       self, predictions, qualities_prior,
       predictor_indices, predictor_values):
@@ -42,13 +48,22 @@ class NoisyLearnerConfig(with_metaclass(abc.ABCMeta, object)):
 
 
 class BinaryNoisyLearnerConfig(NoisyLearnerConfig):
-  def __init__(self, prior_correct=0.99, max_param_value=1e6, eps=1e-12):
+  def __init__(
+      self, model_fn, qualities_fn,
+      prior_correct=0.99, max_param_value=1e6, eps=1e-12):
+    self.model_fn = model_fn
+    self.qualities_fn = qualities_fn
     self.prior_correct = prior_correct
     self.max_param_value = max_param_value
     self.eps = eps
+    self.alpha = None
+    self.beta = None
 
   def num_outputs(self):
     return 1
+
+  def qualities_mean(self, alpha, beta):
+    return alpha / (alpha + beta)
 
   def loss_fn(
       self, predictions, qualities_prior,
@@ -58,10 +73,11 @@ class BinaryNoisyLearnerConfig(NoisyLearnerConfig):
     predictor_values = tf.squeeze(predictor_values, axis=-1)
     predictor_values = tf.cast(predictor_values, tf.float32)
     p = predictions
-    b = 1.0 + tf.exp(qualities_prior[:, :, 0])
-    a = 1.0 + tf.exp(qualities_prior[:, :, 1])
+    a = 1.0 + tf.exp(qualities_prior[:, :, 0])
+    b = 1.0 + tf.exp(qualities_prior[:, :, 1])
     a = tf.minimum(a, self.max_param_value)
     b = tf.minimum(b, self.max_param_value)
+    self.alpha, self.beta = a, b
 
     # Main Likelihood Terms
     y_1 = predictor_values
@@ -95,28 +111,21 @@ class BinaryNoisyLearnerConfig(NoisyLearnerConfig):
     return -tf.reduce_sum(loss)
 
 
-class NoisyLearner(with_metaclass(abc.ABCMeta, object)):
+class NoisyLearner(object):
   def __init__(
-      self, inputs_size, predictors_size,
+      self, inputs_size,
       config, optimizer,
       instances_input_fn=lambda x: x,
-      predictors_input_fn=lambda x: x):
+      predictors_input_fn=lambda x: x,
+      qualities_input_fn=InstancesPredictorsConcatenation()):
     self.inputs_size = inputs_size
-    self.predictors_size = predictors_size
     self.config = config
     self.optimizer = optimizer
     self.instances_input_fn = instances_input_fn
     self.predictors_input_fn = predictors_input_fn
+    self.qualities_input_fn = qualities_input_fn
     self._build_model()
     self._session = None
-
-  @abc.abstractmethod
-  def model_fn(self, instances):
-    pass
-
-  @abc.abstractmethod
-  def error_fn(self, instances, predictors):
-    pass
 
   def _build_iterators(self):
     # The train data batches are of the form:
@@ -152,15 +161,15 @@ class NoisyLearner(with_metaclass(abc.ABCMeta, object)):
     predictor_values = self.predictor_values
     instances = self.instances_input_fn(instances)
     predictors = self.predictors_input_fn(predictor_indices)
-    with tf.variable_scope('model_fn'):
-      self.predictions = self.model_fn(instances)
-    with tf.variable_scope('error_fn'):
-      self.qualities_prior = self.error_fn(instances, predictors)
+    self.predictions = self.config.model_fn(instances)
+    self.qualities_prior = self.config.qualities_fn(
+      self.qualities_input_fn(instances, predictors))
     self.loss = self.config.loss_fn(
-      self.predictions, self.qualities_prior, predictor_indices,
-      predictor_values)
+      self.predictions, self.qualities_prior,
+      predictor_indices, predictor_values)
     global_step = tf.train.get_or_create_global_step()
-    self.train_op = self.optimizer.minimize(self.loss, global_step=global_step)
+    self.train_op = self.optimizer.minimize(
+      self.loss, global_step=global_step)
     self.init_op = tf.global_variables_initializer()
 
   def _init_session(self):
@@ -185,83 +194,9 @@ class NoisyLearner(with_metaclass(abc.ABCMeta, object)):
 
   def qualities(self, instances, predictor_indices):
     self._init_session()
-    return self._session.run(
-      self.qualities_prior,
+    qualities_prior = self._session.run(
+      (self.config.alpha, self.config.beta),
       feed_dict={
         self.instances: instances,
         self.predictor_indices: predictor_indices})
-
-
-class NoisyMLPLearner(NoisyLearner):
-  def __init__(
-      self, inputs_size, predictors_size,
-      config, optimizer,
-      model_hidden_units, error_hidden_units,
-      instances_input_fn=lambda x: x,
-      predictors_input_fn=lambda x: x,
-      model_activation=tf.nn.leaky_relu,
-      error_activation=tf.nn.leaky_relu,
-      feed_inputs_to_error_fn=True):
-    self.model_hidden_units = model_hidden_units
-    self.error_hidden_units = error_hidden_units
-    self.model_activation = model_activation
-    self.error_activation = error_activation
-    self.feed_inputs_to_error_fn = feed_inputs_to_error_fn
-    super(NoisyMLPLearner, self).__init__(
-      inputs_size=inputs_size,
-      predictors_size=predictors_size,
-      config=config,
-      optimizer=optimizer,
-      instances_input_fn=instances_input_fn,
-      predictors_input_fn=predictors_input_fn)
-
-  def model_fn(self, instances):
-    w_initializer = tf.glorot_uniform_initializer(
-      dtype=instances.dtype)
-    b_initializer = tf.zeros_initializer(
-      dtype=instances.dtype)
-    hidden = instances
-    layers = enumerate(self.model_hidden_units + [1])
-    for i, num_units in layers:
-      with tf.variable_scope('layer_{}'.format(i)):
-        w = tf.get_variable(
-          name='weights',
-          shape=[hidden.shape[-1], num_units],
-          initializer=w_initializer)
-        b = tf.get_variable(
-          name='bias',
-          shape=[num_units],
-          initializer=b_initializer)
-        hidden = tf.nn.xw_plus_b(
-          x=hidden, weights=w, biases=b, name='linear')
-        if i < len(self.model_hidden_units):
-          hidden = self.model_activation(hidden)
-    return tf.sigmoid(hidden)
-
-  def error_fn(self, instances, predictors):
-    w_initializer = tf.glorot_uniform_initializer(
-      dtype=instances.dtype)
-    b_initializer = tf.zeros_initializer(
-      dtype=instances.dtype)
-    if self.feed_inputs_to_error_fn:
-      instances = tf.tile(instances[:, None, :], [1, tf.shape(predictors)[1], 1])
-      hidden = tf.concat([predictors, instances], axis=2)
-    else:
-      hidden = predictors
-    layers = enumerate(self.error_hidden_units + [2])
-    for i, num_units in layers:
-      with tf.variable_scope('layer_{}'.format(i)):
-        w = tf.get_variable(
-          name='weights',
-          shape=[hidden.shape[-1], num_units],
-          initializer=w_initializer)
-        b = tf.get_variable(
-          name='bias',
-          shape=[num_units],
-          initializer=b_initializer)
-        hidden = tf.tensordot(
-          hidden, w, axes=[[2], [0]], name='linear')
-        hidden += b
-        if i < len(self.error_hidden_units):
-          hidden = self.error_activation(hidden)
-    return hidden
+    return self.config.qualities_mean(*qualities_prior)

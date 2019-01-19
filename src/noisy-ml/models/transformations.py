@@ -22,7 +22,9 @@ from six import with_metaclass
 
 __author__ = 'eaplatanios'
 
-__all__ = ['Transformation', 'Embedding']
+__all__ = [
+  'Transformation', 'Embedding',
+  'PredictorsSelection', 'InstancesPredictorsConcatenation']
 
 logger = logging.getLogger(__name__)
 
@@ -56,3 +58,24 @@ class Embedding(Transformation):
       if inputs.shape[-1] == 1:
         inputs = tf.squeeze(inputs, axis=-1)
       return tf.nn.embedding_lookup(emb_matrix, inputs)
+
+
+class PredictorsSelection(Transformation):
+  """Selects just the predictions to be fed in
+    the quality model."""
+
+  def apply(self, *args, **kwargs):
+    return args[1]
+
+
+class InstancesPredictorsConcatenation(Transformation):
+  """Concatenates instances and predictions to be fed in
+  the quality model."""
+
+  def apply(self, *args, **kwargs):
+    instances = args[0]
+    predictors = args[1]
+    instances = tf.tile(
+      input=instances[:, None, :],
+      multiples=[1, tf.shape(predictors)[1], 1])
+    return tf.concat([predictors, instances], axis=2)

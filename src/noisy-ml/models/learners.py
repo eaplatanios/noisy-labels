@@ -32,6 +32,10 @@ logger = logging.getLogger(__name__)
 
 
 class NoisyLearnerConfig(with_metaclass(abc.ABCMeta, object)):
+  def __init__(self, warm_up_steps=1000, eps=1e-12):
+    self.warm_up_steps = warm_up_steps
+    self.eps = eps
+
   @abc.abstractmethod
   def num_outputs(self):
     pass
@@ -49,14 +53,14 @@ class NoisyLearnerConfig(with_metaclass(abc.ABCMeta, object)):
 
 class BinaryNoisyLearnerConfig(NoisyLearnerConfig):
   def __init__(
-      self, model_fn, qualities_fn, warm_up_steps=1000,
-      prior_correct=0.99, max_param_value=1e6, eps=1e-12):
+      self, model_fn, qualities_fn, prior_correct=0.99,
+      max_param_value=1e6, warm_up_steps=1000, eps=1e-12):
+    super(BinaryNoisyLearnerConfig, self).__init__(
+      warm_up_steps, eps)
     self.model_fn = model_fn
     self.qualities_fn = qualities_fn
-    self.warm_up_steps = warm_up_steps
     self.prior_correct = prior_correct
     self.max_param_value = max_param_value
-    self.eps = eps
     self.alpha = None
     self.beta = None
 
@@ -106,6 +110,11 @@ class BinaryNoisyLearnerConfig(NoisyLearnerConfig):
     term1 = (1 - p_prior) * term1 + p_prior * prior_term1
     term0 = (1 - p_prior) * term0 + p_prior * prior_term0
     loss = p * term1 + (1 - p) * term0
+
+    loss = tf.cond(
+      tf.reduce_any(tf.is_nan(loss)),
+      lambda: tf.Print(loss, [qualities_prior[:, :, 0], qualities_prior[:, :, 1]], 'L: ', 10000, 10),
+      lambda: loss)
 
     loss = tf.log(loss + self.eps)
     return -tf.reduce_sum(loss)
@@ -171,7 +180,9 @@ class NoisyLearner(object):
       self.predictions, self.qualities_prior,
       predictor_values)
     global_step = tf.train.get_or_create_global_step()
-    self.train_op = self.optimizer.minimize(
+    self.phase_one_train_op = self.optimizer.minimize(
+      self.loss, global_step=global_step)
+    self.phase_two_train_op = self.optimizer.minimize(
       self.loss, global_step=global_step)
     self.init_op = tf.global_variables_initializer()
 
@@ -184,10 +195,17 @@ class NoisyLearner(object):
     self._init_session()
     iterator_init_op = self.train_iterator.make_initializer(dataset)
     self._session.run(iterator_init_op)
+    loss_accumulator = 0.0
     for step in range(max_steps):
-      loss, _ = self._session.run([self.loss, self.train_op])
-      if step % log_steps == 0:
+      if step < self.config.warm_up_steps:
+        loss, _ = self._session.run([self.loss, self.phase_one_train_op])
+      else:
+        loss, _ = self._session.run([self.loss, self.phase_two_train_op])
+      loss_accumulator += loss
+      if step % log_steps == 0 or step == max_steps - 1:
+        loss = loss_accumulator / log_steps
         logger.info('Step: %5d | Loss: %.8f' % (step, loss))
+        loss_accumulator = 0.0
 
   def predict(self, instances):
     self._init_session()

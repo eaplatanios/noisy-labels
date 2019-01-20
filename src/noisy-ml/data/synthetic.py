@@ -40,7 +40,7 @@ class SyntheticBinaryGenerator(object):
     true_labels = (true_labels >= 0.5).astype(np.int32)
     true_qualities = predictor_qualities
     prediction_instances = []
-    prediction_predictor_indices = []
+    prediction_predictors = []
     prediction_predictor_values = []
     for i in instances:
       mistakes = np.random.uniform(0, 1, len(predictors))
@@ -50,11 +50,11 @@ class SyntheticBinaryGenerator(object):
       predictor_values = true_label * (1 - mistakes) + (1 - true_label) * mistakes
       predictor_indices = list(range(len(predictors)))
       prediction_instances.append(i)
-      prediction_predictor_indices.append(predictor_indices)
+      prediction_predictors.append(predictor_indices)
       prediction_predictor_values.append(predictor_values)
     predictions = {
       'instances': prediction_instances,
-      'predictors': prediction_predictor_indices,
+      'predictors': prediction_predictors,
       'predictor_values': prediction_predictor_values}
     return GeneratedDataset(
       instances, predictors, predictions, true_labels, true_qualities)

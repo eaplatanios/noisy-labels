@@ -54,7 +54,7 @@ class SyntheticBinaryGenerator(object):
       prediction_predictor_values.append(predictor_values)
     predictions = {
       'instances': prediction_instances,
-      'predictor_indices': prediction_predictor_indices,
+      'predictors': prediction_predictor_indices,
       'predictor_values': prediction_predictor_values}
     return GeneratedDataset(
       instances, predictors, predictions, true_labels, true_qualities)

@@ -43,7 +43,7 @@ class NoisyLearnerConfig(with_metaclass(abc.ABCMeta, object)):
   @abc.abstractmethod
   def loss_fn(
       self, predictions, qualities_prior,
-      predictor_indices, predictor_values):
+      predictor_values):
     pass
 
 
@@ -68,8 +68,7 @@ class BinaryNoisyLearnerConfig(NoisyLearnerConfig):
 
   def loss_fn(
       self, predictions, qualities_prior,
-      predictor_indices, predictor_values):
-    qualities_prior = tf.batch_gather(qualities_prior, predictor_indices)
+      predictor_values):
     predictions = tf.squeeze(predictions, axis=-1)
     predictor_values = tf.squeeze(predictor_values, axis=-1)
     predictor_values = tf.cast(predictor_values, tf.float32)
@@ -99,8 +98,8 @@ class BinaryNoisyLearnerConfig(NoisyLearnerConfig):
     p_prior = tf.cond(global_step < self.warm_up_steps, lambda: 1.0, lambda: 0.0)
     p_correct = self.prior_correct
     prior_term1 = tf.reduce_sum(tf.log(y_1 * p_correct + y_0 * (1 - p_correct)), axis=1)
-    prior_term0 = tf.reduce_sum(tf.log(y_0 * p_correct + y_1 * (1 - p_correct)), axis=1)
     prior_term1 = tf.exp(prior_term1)
+    prior_term0 = tf.reduce_sum(tf.log(y_0 * p_correct + y_1 * (1 - p_correct)), axis=1)
     prior_term0 = tf.exp(prior_term0)
 
     # Combine all the likelihood terms
@@ -114,14 +113,19 @@ class BinaryNoisyLearnerConfig(NoisyLearnerConfig):
 
 class NoisyLearner(object):
   def __init__(
-      self, inputs_size,
+      self, instances_input_size, predictors_input_size,
       config, optimizer,
+      instances_dtype=tf.int32,
+      predictors_dtype=tf.int32,
       instances_input_fn=lambda x: x,
       predictors_input_fn=lambda x: x,
       qualities_input_fn=InstancesPredictorsConcatenation()):
-    self.inputs_size = inputs_size
+    self.instances_input_size = instances_input_size
+    self.predictors_input_size = predictors_input_size
     self.config = config
     self.optimizer = optimizer
+    self.instances_dtype = instances_dtype
+    self.predictors_dtype = predictors_dtype
     self.instances_input_fn = instances_input_fn
     self.predictors_input_fn = predictors_input_fn
     self.qualities_input_fn = qualities_input_fn
@@ -129,27 +133,25 @@ class NoisyLearner(object):
     self._session = None
 
   def _build_iterators(self):
-    # The train data batches are of the form:
-    #   [InstanceFeatures, PredictorFeatures, Prediction]
     self.train_iterator = tf.data.Iterator.from_structure(
       output_types={
-        'instances': tf.int32,
-        'predictor_indices': tf.int32,
+        'instances': self.instances_dtype,
+        'predictors': self.predictors_dtype,
         'predictor_values': tf.int32},
       output_shapes={
-        'instances': [None, self.inputs_size],
-        'predictor_indices': [None, None],
+        'instances': [None, self.instances_input_size],
+        'predictors': [None, None, self.predictors_input_size],
         'predictor_values': [None, None, self.config.num_outputs()]},
       shared_name='train_iterator')
     iter_next = self.train_iterator.get_next()
     self.instances = tf.placeholder_with_default(
       iter_next['instances'],
-      shape=[None, self.inputs_size],
+      shape=[None, self.instances_input_size],
       name='instances')
-    self.predictor_indices = tf.placeholder_with_default(
-      iter_next['predictor_indices'],
-      shape=[None, None],
-      name='predictor_indices')
+    self.predictors = tf.placeholder_with_default(
+      iter_next['predictors'],
+      shape=[None, None, self.predictors_input_size],
+      name='predictors')
     self.predictor_values = tf.placeholder_with_default(
       iter_next['predictor_values'],
       shape=[None, None, self.config.num_outputs()],
@@ -158,16 +160,16 @@ class NoisyLearner(object):
   def _build_model(self):
     self._build_iterators()
     instances = self.instances
-    predictor_indices = self.predictor_indices
+    predictors = self.predictors
     predictor_values = self.predictor_values
     instances = self.instances_input_fn(instances)
-    predictors = self.predictors_input_fn(predictor_indices)
+    predictors = self.predictors_input_fn(predictors)
     self.predictions = self.config.model_fn(instances)
     self.qualities_prior = self.config.qualities_fn(
       self.qualities_input_fn(instances, predictors))
     self.loss = self.config.loss_fn(
       self.predictions, self.qualities_prior,
-      predictor_indices, predictor_values)
+      predictor_values)
     global_step = tf.train.get_or_create_global_step()
     self.train_op = self.optimizer.minimize(
       self.loss, global_step=global_step)
@@ -199,5 +201,5 @@ class NoisyLearner(object):
       (self.config.alpha, self.config.beta),
       feed_dict={
         self.instances: instances,
-        self.predictor_indices: predictor_indices})
+        self.predictors: predictor_indices})
     return self.config.qualities_mean(*qualities_prior)

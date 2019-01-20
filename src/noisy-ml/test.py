@@ -40,12 +40,12 @@ def main():
     predictor_qualities=[0.90, 0.75, 0.45, 0.85, 0.59, 0.90, 0.90, 0.76])
 
   instances = np.array(data.predictions['instances'], dtype=np.int32)[:, None]
-  predictor_indices = np.array(data.predictions['predictor_indices'], dtype=np.int32)
+  predictor_indices = np.array(data.predictions['predictors'], dtype=np.int32)[:, :, None]
   predictor_values = np.array(data.predictions['predictor_values'], dtype=np.int32)[:, :, None]
 
   dataset = tf.data.Dataset.from_tensor_slices({
     'instances': instances,
-    'predictor_indices': predictor_indices,
+    'predictors': predictor_indices,
     'predictor_values': predictor_values}) \
     .shuffle(128) \
     .repeat() \
@@ -77,7 +77,8 @@ def main():
     name='qualities_fn')
 
   learner = NoisyLearner(
-    inputs_size=1,
+    instances_input_size=1,
+    predictors_input_size=1,
     config=BinaryNoisyLearnerConfig(
       model_fn=model_fn,
       qualities_fn=qualities_fn,
@@ -85,6 +86,8 @@ def main():
       prior_correct=0.99,
       max_param_value=1e6),
     optimizer=tf.train.AdamOptimizer(),
+    instances_dtype=tf.int32,
+    predictors_dtype=tf.int32,
     instances_input_fn=instances_input_fn,
     predictors_input_fn=predictors_input_fn,
     qualities_input_fn=qualities_input_fn)

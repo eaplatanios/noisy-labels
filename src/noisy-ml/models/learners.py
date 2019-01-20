@@ -196,16 +196,19 @@ class NoisyLearner(object):
     iterator_init_op = self.train_iterator.make_initializer(dataset)
     self._session.run(iterator_init_op)
     loss_accumulator = 0.0
+    accumulator_steps = 0
     for step in range(max_steps):
       if step < self.config.warm_up_steps:
         loss, _ = self._session.run([self.loss, self.phase_one_train_op])
       else:
         loss, _ = self._session.run([self.loss, self.phase_two_train_op])
       loss_accumulator += loss
+      accumulator_steps += 1
       if step % log_steps == 0 or step == max_steps - 1:
-        loss = loss_accumulator / log_steps
+        loss = loss_accumulator / accumulator_steps
         logger.info('Step: %5d | Loss: %.8f' % (step, loss))
         loss_accumulator = 0.0
+        accumulator_steps = 0
 
   def predict(self, instances):
     self._init_session()

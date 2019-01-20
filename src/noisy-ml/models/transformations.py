@@ -57,7 +57,7 @@ class Embedding(Transformation):
       inputs = args[0]
       if inputs.shape[-1] == 1:
         inputs = tf.squeeze(inputs, axis=-1)
-      return tf.nn.embedding_lookup(emb_matrix, inputs)
+      return tf.gather(emb_matrix, inputs)
 
 
 class PredictorsSelection(Transformation):

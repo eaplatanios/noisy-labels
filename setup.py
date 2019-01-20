@@ -15,5 +15,5 @@ setup(
     long_description=read('README.md'),
     url='https://github.com/eaplatanios/noisy-labels',
     install_requires=[
-        'numpy>=1.5', 'six', 'tensorflow>=1.11',
-        'tensorflow-probability>=0.5.0'])
+        'numpy>=1.5', 'scikit-learn>=0.20.1', 'six',
+        'tensorflow>=1.11'])

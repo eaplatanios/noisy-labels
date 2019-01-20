@@ -19,7 +19,7 @@ import os
 import tensorflow as tf
 import six
 
-from .data.loaders import NELLLoader
+from .data.loaders import BrainLoader, NELLLoader
 from .data.utilities import compute_binary_qualities
 from .evaluation.metrics import *
 from .models.layers import *
@@ -31,17 +31,17 @@ __author__ = 'eaplatanios'
 __all__ = []
 
 
-def run_experiment(label):
-  instances_emb_size = 128
-  predictors_emb_size = 128
-  batch_size = 512
+def run_experiment(loader, label):
+  instances_emb_size = 32
+  predictors_emb_size = 32
+  batch_size = 128
 
   working_dir = os.getcwd()
   data_dir = os.path.join(working_dir, os.pardir, 'data')
-  data = NELLLoader(
+  data = loader.load_binary(
+    working_dir=data_dir,
     label=label,
-    small_version=False
-  ).load(data_dir)
+    small_version=True)
 
   num_instances = len(data['instances'])
   num_predictors = len(data['classifiers'])
@@ -54,7 +54,7 @@ def run_experiment(label):
     'instances': instances,
     'predictors': predictor_indices,
     'predictor_values': predictor_values}) \
-    .shuffle(20733) \
+    .shuffle(1000) \
     .repeat() \
     .batch(batch_size)
 
@@ -73,14 +73,14 @@ def run_experiment(label):
   model_fn = MLP(
     hidden_units=[128, 64, 32],
     num_outputs=1,
-    activation=tf.nn.leaky_relu,
+    activation=tf.nn.selu,
     output_projection=tf.sigmoid,
     name='model_fn')
 
   qualities_fn = MLP(
     hidden_units=[128, 64, 32],
     num_outputs=2,
-    activation=tf.nn.leaky_relu,
+    activation=tf.nn.selu,
     name='qualities_fn')
 
   learner = NoisyLearner(
@@ -93,14 +93,20 @@ def run_experiment(label):
       max_param_value=1e6,
       warm_up_steps=1000,
       eps=1e-12),
-    optimizer=tf.train.AdamOptimizer(),
+    phase_one_optimizer=tf.train.AdamOptimizer(),
+    phase_two_optimizer=tf.train.AdamOptimizer(),
     instances_dtype=tf.int32,
     predictors_dtype=tf.int32,
     instances_input_fn=instances_input_fn,
     predictors_input_fn=predictors_input_fn,
     qualities_input_fn=qualities_input_fn)
 
-  learner.train(dataset, max_steps=10000, log_steps=1000)
+  learner.train(
+    dataset=dataset,
+    max_steps=10000,
+    loss_abs_threshold=-np.log(0.99),
+    min_steps_below_threshold=20,
+    log_steps=1000)
 
   predictions = learner.predict(instances)[:, 0]
   predicted_qualities = learner.qualities(instances, predictor_indices)
@@ -113,7 +119,9 @@ def run_experiment(label):
     'predictions': predictions,
     'true_labels': np.array(data['true_labels']),
     'predicted_qualities': np.array(predicted_qualities),
-    'true_qualities': np.array(true_qualities)}
+    'true_qualities': np.array(true_qualities),
+    'predictor_values': np.array(data['predictor_values'], dtype=np.int32),
+    'predictor_values_soft': np.array(data['predictor_values_soft'], dtype=np.float32)}
 
 
 def evaluate(results):
@@ -126,41 +134,60 @@ def evaluate(results):
   auc_target = compute_auc(
     results['predictions'],
     results['true_labels'])
-  print('Current MAD_error_rank: {}'.format(mad_error_rank))
-  print('Current MAD_error: {}'.format(mad_error))
-  print('Current AUC_target: {}'.format(auc_target))
+  maj_soft_auc_target = compute_auc(
+    results['maj_soft_predictions'],
+    results['true_labels'])
+  maj_hard_auc_target = compute_auc(
+    results['maj_hard_predictions'],
+    results['true_labels'])
+  return {
+    'mad_error_rank': mad_error_rank,
+    'mad_error': mad_error,
+    'auc_target': auc_target,
+    'maj_soft_auc_target': maj_soft_auc_target,
+    'maj_hard_auc_target': maj_hard_auc_target}
 
 
 def main():
-  labels = [
+  nell_labels = [
     'animal', 'beverage', 'bird', 'bodypart', 'city',
     'disease', 'drug', 'fish', 'food', 'fruit', 'muscle',
     'person', 'protein', 'river', 'vegetable']
 
-  results = None
+  brain_labels = [
+    'region_1', 'region_2', 'region_3', 'region_4',
+    'region_5', 'region_6', 'region_7', 'region_8',
+    'region_9', 'region_10', 'region_11']
 
-  for label in labels:
+  results = {
+    'mad_error_rank': [],
+    'mad_error': [],
+    'auc_target': [],
+    'maj_soft_auc_target': [],
+    'maj_hard_auc_target': []}
+
+  for label in brain_labels:
     with tf.Graph().as_default():
-      label_results = run_experiment(label)
-    if results is None:
-      results = {
-        'predictions': label_results['predictions'],
-        'true_labels': label_results['true_labels'],
-        'predicted_qualities': label_results['predicted_qualities'],
-        'true_qualities': label_results['true_qualities']}
-    else:
-      results = {
-        'predictions': np.concatenate(
-          [results['predictions'], label_results['predictions']]),
-        'true_labels': np.concatenate(
-          [results['true_labels'], label_results['true_labels']]),
-        'predicted_qualities': np.concatenate(
-          [results['predicted_qualities'], label_results['predicted_qualities']]),
-        'true_qualities': np.concatenate(
-          [results['true_qualities'], label_results['true_qualities']])}
+      label_results = run_experiment(BrainLoader, label)
+    label_results = evaluate({
+      'maj_soft_predictions': np.mean(label_results['predictor_values_soft'], axis=1),
+      'maj_hard_predictions': np.mean(label_results['predictor_values'], axis=1),
+      'predictions': label_results['predictions'],
+      'true_labels': label_results['true_labels'],
+      'predicted_qualities': label_results['predicted_qualities'][None, :],
+      'true_qualities': label_results['true_qualities'][None, :]})
+    results['mad_error_rank'].append(label_results['mad_error_rank'])
+    results['mad_error'].append(label_results['mad_error'])
+    results['auc_target'].append(label_results['auc_target'])
+    results['maj_soft_auc_target'].append(label_results['maj_soft_auc_target'])
+    results['maj_hard_auc_target'].append(label_results['maj_hard_auc_target'])
 
     print('Results so far:')
-    evaluate(results)
+    print('Current MAD_error_rank: {}'.format(np.mean(results['mad_error_rank'])))
+    print('Current MAD_error: {}'.format(np.mean(results['mad_error'])))
+    print('Current AUC_target: {}'.format(np.mean(results['auc_target'])))
+    print('Current MAJ Soft AUC_target: {}'.format(np.mean(results['maj_soft_auc_target'])))
+    print('Current MAJ Hard AUC_target: {}'.format(np.mean(results['maj_hard_auc_target'])))
 
   print('haha Christoph')
 

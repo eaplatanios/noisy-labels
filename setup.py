@@ -12,7 +12,6 @@ setup(
     packages=find_packages('src'),
     package_dir={'': 'src'},
     description='Learning from Noisy Labels',
-    long_description=read('README.md'),
     url='https://github.com/eaplatanios/noisy-labels',
     install_requires=[
         'numpy>=1.5', 'six', 'tensorflow>=1.11',

@@ -51,6 +51,18 @@ def main():
     .repeat() \
     .batch(128)
 
+  instances_input_fn = Embedding(
+    num_inputs=num_instances,
+    emb_size=instances_emb_size,
+    name='instance_embeddings')
+
+  predictors_input_fn = Embedding(
+    num_inputs=num_predictors,
+    emb_size=predictors_emb_size,
+    name='predictor_embeddings')
+
+  qualities_input_fn = InstancesPredictorsConcatenation()
+
   model_fn = MLP(
     hidden_units=[64, 32],
     num_outputs=1,
@@ -68,17 +80,14 @@ def main():
     inputs_size=1,
     config=BinaryNoisyLearnerConfig(
       model_fn=model_fn,
-      qualities_fn=qualities_fn),
+      qualities_fn=qualities_fn,
+      warm_up_steps=1000,
+      prior_correct=0.99,
+      max_param_value=1e6),
     optimizer=tf.train.AdamOptimizer(),
-    instances_input_fn=Embedding(
-      num_inputs=num_instances,
-      emb_size=instances_emb_size,
-      name='instance_embeddings'),
-    predictors_input_fn=Embedding(
-      num_inputs=num_predictors,
-      emb_size=predictors_emb_size,
-      name='predictor_embeddings'),
-    qualities_input_fn=InstancesPredictorsConcatenation())
+    instances_input_fn=instances_input_fn,
+    predictors_input_fn=predictors_input_fn,
+    qualities_input_fn=qualities_input_fn)
 
   learner.train(dataset, max_steps=10000)
 
@@ -90,9 +99,6 @@ def main():
   print('Qualities mean: {}'.format(qualities_mean))
 
   print('haha Christoph')
-
-  
-
 
 
 if __name__ == '__main__':

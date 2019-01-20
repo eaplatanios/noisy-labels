@@ -49,10 +49,11 @@ class NoisyLearnerConfig(with_metaclass(abc.ABCMeta, object)):
 
 class BinaryNoisyLearnerConfig(NoisyLearnerConfig):
   def __init__(
-      self, model_fn, qualities_fn,
+      self, model_fn, qualities_fn, warm_up_steps=1000,
       prior_correct=0.99, max_param_value=1e6, eps=1e-12):
     self.model_fn = model_fn
     self.qualities_fn = qualities_fn
+    self.warm_up_steps = warm_up_steps
     self.prior_correct = prior_correct
     self.max_param_value = max_param_value
     self.eps = eps
@@ -95,7 +96,7 @@ class BinaryNoisyLearnerConfig(NoisyLearnerConfig):
 
     # Symmetry-Breaking Prior
     global_step = tf.train.get_or_create_global_step()
-    p_prior = tf.cond(global_step < 1000, lambda: 1.0, lambda: 0.0)
+    p_prior = tf.cond(global_step < self.warm_up_steps, lambda: 1.0, lambda: 0.0)
     p_correct = self.prior_correct
     prior_term1 = tf.reduce_sum(tf.log(y_1 * p_correct + y_0 * (1 - p_correct)), axis=1)
     prior_term0 = tf.reduce_sum(tf.log(y_0 * p_correct + y_1 * (1 - p_correct)), axis=1)
@@ -177,13 +178,13 @@ class NoisyLearner(object):
       self._session = tf.Session()
       self._session.run(self.init_op)
 
-  def train(self, dataset, max_steps=1000):
+  def train(self, dataset, max_steps=1000, log_steps=100):
     self._init_session()
     iterator_init_op = self.train_iterator.make_initializer(dataset)
     self._session.run(iterator_init_op)
     for step in range(max_steps):
       loss, _ = self._session.run([self.loss, self.train_op])
-      if step % 100 == 0:
+      if step % log_steps == 0:
         logger.info('Step: %5d | Loss: %.8f' % (step, loss))
 
   def predict(self, instances):

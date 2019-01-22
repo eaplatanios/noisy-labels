@@ -21,7 +21,9 @@ from sklearn import metrics
 
 __author__ = 'eaplatanios'
 
-__all__ = ['compute_mad_error_rank', 'compute_mad_error', 'compute_auc']
+__all__ = [
+  'compute_mad_error_rank', 'compute_mad_error',
+  'compute_auc', 'compute_accuracy']
 
 logger = logging.getLogger(__name__)
 
@@ -37,4 +39,9 @@ def compute_mad_error(predicted_qualities, true_qualities):
 
 
 def compute_auc(predictions, true_labels):
-  return metrics.roc_auc_score(true_labels, predictions)
+  return metrics.average_precision_score(true_labels, predictions)
+
+
+def compute_accuracy(predictions, true_labels):
+  p = (predictions >= 0.5).astype(np.int32)
+  return np.mean(p == true_labels)

@@ -23,7 +23,7 @@ from six import with_metaclass
 __author__ = 'eaplatanios'
 
 __all__ = [
-  'Transformation', 'Embedding',
+  'Transformation', 'OneHotEncoding', 'Embedding',
   'PredictorsSelection', 'InstancesPredictorsConcatenation']
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,22 @@ class Transformation(with_metaclass(abc.ABCMeta, object)):
 
   def __call__(self, *args, **kwargs):
     return self.apply(*args, **kwargs)
+
+
+class OneHotEncoding(Transformation):
+  def __init__(
+      self, num_inputs, dtype=tf.float32,
+      name='OneHotEncoding'):
+    self.num_inputs = num_inputs
+    self.dtype = dtype
+    self.name = name
+
+  def apply(self, *args, **kwargs):
+    with tf.name_scope(self.name):
+      inputs = args[0]
+      if inputs.shape[-1] == 1:
+        inputs = tf.squeeze(inputs, axis=-1)
+      return tf.one_hot(inputs, depth=self.num_inputs)
 
 
 class Embedding(Transformation):

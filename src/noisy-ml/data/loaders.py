@@ -39,6 +39,7 @@ class NELLLoader(object):
 
     Returns:
       dict: Loaded data as a dictionary that contains:
+        - `'instance_names'`: Instance names.
         - `'instances'`: List of instances.
         - `'predictors'`: List of lists of predictors
           (i.e., predictors for each instance).
@@ -49,12 +50,21 @@ class NELLLoader(object):
         - `'classifiers'`: List containing the
           classifier names.
     """
+    data_dir = os.path.join(working_dir, 'nell', 'unconstrained')
+
+    # Load instance names.
+    filename = '{}.txt'.format(label)
+    filename = os.path.join(data_dir, 'names', filename)
+    with open(filename, 'r') as f:
+      instance_names = [line for line in f]
+
+    # Load predictions.
     if small_version:
-      working_dir = os.path.join(working_dir, 'nell_10')
+      data_dir = os.path.join(data_dir, 'small')
     else:
-      working_dir = os.path.join(working_dir, 'nell')
+      data_dir = os.path.join(data_dir, 'full')
     filename = '{}.csv'.format(label)
-    filename = os.path.join(working_dir, filename)
+    filename = os.path.join(data_dir, filename)
     classifiers = []
     instances = []
     predictors = []
@@ -77,6 +87,7 @@ class NELLLoader(object):
             [float(v) for v in values[1:]])
           true_labels.append(int(values[0]))
     return {
+      'instance_names': instance_names,
       'instances': instances,
       'predictors': predictors,
       'predictor_values': predictor_values,
@@ -110,12 +121,13 @@ class BrainLoader(object):
         - `'classifiers'`: List containing the
           classifier names.
     """
+    data_dir = os.path.join(working_dir, 'brain')
     if small_version:
-      working_dir = os.path.join(working_dir, 'brain_10')
+      data_dir = os.path.join(data_dir, 'small')
     else:
-      working_dir = os.path.join(working_dir, 'brain')
+      data_dir = os.path.join(data_dir, 'full')
     filename = '{}.csv'.format(label)
-    filename = os.path.join(working_dir, filename)
+    filename = os.path.join(data_dir, filename)
     classifiers = []
     instances = []
     predictors = []

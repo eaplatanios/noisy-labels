@@ -24,9 +24,97 @@ from .transformations import *
 
 __author__ = 'eaplatanios'
 
-__all__ = ['BinaryEMConfig', 'EMLearner']
+__all__ = ['EMLearner', 'EMConfig', 'BinaryEMConfig']
 
 logger = logging.getLogger(__name__)
+
+
+class EMLearner(object):
+  def __init__(self, config):
+    self.config = config
+    self._build_model()
+    self._session = None
+
+  def _build_model(self):
+    self._ops = self.config.build_ops()
+    self._init_op = tf.global_variables_initializer()
+
+  def _init_session(self):
+    if self._session is None:
+      self._session = tf.Session()
+      self._session.run(self._init_op)
+
+  def _e_step(self, iterator_init_op, use_maj):
+    self._session.run(iterator_init_op)
+    self._session.run(self._ops['e_step_init'])
+    if use_maj:
+      self._session.run(self._ops['set_use_maj'])
+    else:
+      self._session.run(self._ops['unset_use_maj'])
+    while True:
+      try:
+        self._session.run(self._ops['e_step'])
+      except tf.errors.OutOfRangeError:
+        break
+
+  def _m_step(
+      self, iterator_init_op, warm_start,
+      max_m_steps, log_m_steps):
+    self._session.run(iterator_init_op)
+    if not warm_start:
+      self._session.run(self._ops['m_step_init'])
+    accumulator_ll = 0.0
+    accumulator_steps = 0
+    for m_step in range(max_m_steps):
+      ll, _ = self._session.run([
+        self._ops['neg_log_likelihood'],
+        self._ops['m_step']])
+      accumulator_ll += ll
+      accumulator_steps += 1
+      if m_step % log_m_steps == 0 or m_step == max_m_steps - 1:
+        ll = accumulator_ll / accumulator_steps
+        logger.info(
+          'Step: %5d | Negative Log-Likelihood: %.8f'
+          % (m_step, ll))
+        accumulator_ll = 0.0
+        accumulator_steps = 0
+
+  def train(
+      self, dataset, batch_size=128,
+      warm_start=False, max_m_steps=1000,
+      max_em_steps=100, log_m_steps=100,
+      em_step_callback=None):
+    e_step_dataset = dataset.batch(batch_size)
+    m_step_dataset = dataset.repeat().shuffle(1000).batch(batch_size)
+
+    self._init_session()
+    e_step_iterator_init_op = self._ops['train_iterator'].make_initializer(e_step_dataset)
+    m_step_iterator_init_op = self._ops['train_iterator'].make_initializer(m_step_dataset)
+
+    for em_step in range(max_em_steps):
+      logger.info('Iteration %d - Running E-Step' % em_step)
+      self._e_step(e_step_iterator_init_op, use_maj=em_step == 0)
+      logger.info('Iteration %d - Running M-Step' % em_step)
+      self._m_step(
+        m_step_iterator_init_op, warm_start,
+        max_m_steps, log_m_steps)
+      if em_step_callback is not None:
+        em_step_callback(self)
+
+  def predict(self, instances):
+    self._init_session()
+    return self._session.run(
+      self._ops['h_1_log'],
+      feed_dict={self._ops['x_indices']: instances})
+
+  def qualities(self, instances, predictors):
+    self._init_session()
+    qualities_prior = self._session.run(
+      (self._ops['alpha'], self._ops['beta']),
+      feed_dict={
+        self._ops['x_indices']: instances,
+        self._ops['predictors']: predictors})
+    return self.config.qualities_mean(*qualities_prior)
 
 
 class EMConfig(with_metaclass(abc.ABCMeta, object)):
@@ -39,7 +127,7 @@ class EMConfig(with_metaclass(abc.ABCMeta, object)):
     pass
 
   @abc.abstractmethod
-  def build_ops(self, x_indices, h_1_log, q_params, y_hat, y_hat_soft):
+  def build_ops(self):
     pass
 
 
@@ -47,6 +135,9 @@ class BinaryEMConfig(EMConfig):
   def __init__(
       self, num_instances, num_predictors,
       model_fn, qualities_fn, optimizer,
+      instances_input_fn=lambda x: x,
+      predictors_input_fn=lambda x: x,
+      qualities_input_fn=InstancesPredictorsConcatenation(),
       use_soft_maj=True, use_soft_y_hat=False,
       max_param_value=None):
     super(BinaryEMConfig, self).__init__()
@@ -55,6 +146,9 @@ class BinaryEMConfig(EMConfig):
     self.model_fn = model_fn
     self.qualities_fn = qualities_fn
     self.optimizer = optimizer
+    self.instances_input_fn = instances_input_fn
+    self.predictors_input_fn = predictors_input_fn
+    self.qualities_input_fn = qualities_input_fn
     self.use_soft_maj = use_soft_maj
     self.use_soft_y_hat = use_soft_y_hat
     self.max_param_value = max_param_value
@@ -65,12 +159,43 @@ class BinaryEMConfig(EMConfig):
   def qualities_mean(self, alpha, beta):
     return alpha / (alpha + beta)
 
-  def build_ops(self, x_indices, h_1_log, q_params, y_hat_1, y_hat_1_soft):
-    # x_indices has shape [N]
-    # h_1_log has shape [N, 1]
-    # q_params has shape [N, M, 2]
-    # y_hat has shape [N, M, 1]
-    # y_hat_1_soft has shape [N, M, 1]
+  def build_ops(self):
+    train_iterator = tf.data.Iterator.from_structure(
+      output_types={
+        'instances': tf.int32,
+        'predictors': tf.int32,
+        'predictor_values': tf.int32,
+        'predictor_values_soft': tf.float32},
+      output_shapes={
+        'instances': [None],
+        'predictors': [None, None],
+        'predictor_values': [None, None, self.num_outputs()],
+        'predictor_values_soft': [None, None, self.num_outputs()]},
+      shared_name='train_iterator')
+    iter_next = train_iterator.get_next()
+    x_indices = tf.placeholder_with_default(
+      iter_next['instances'],
+      shape=[None],
+      name='instances')
+    predictors = tf.placeholder_with_default(
+      iter_next['predictors'],
+      shape=[None, None],
+      name='predictors')
+    y_hat_1 = tf.placeholder_with_default(
+      iter_next['predictor_values'],
+      shape=[None, None, self.num_outputs()],
+      name='predictor_values')
+    y_hat_1_soft = tf.placeholder_with_default(
+      iter_next['predictor_values_soft'],
+      shape=[None, None, self.num_outputs()],
+      name='predictor_values_soft')
+
+    x_features = self.instances_input_fn(x_indices)
+    p_features = self.predictors_input_fn(predictors)
+    h_1_log = self.model_fn(x_features)
+    q_params = self.qualities_fn(
+      self.qualities_input_fn(x_features, p_features))
+
     h_1_log = tf.squeeze(h_1_log, axis=-1)
     y_hat_1 = tf.squeeze(y_hat_1, axis=-1)
     y_hat_1_soft = tf.squeeze(y_hat_1_soft, axis=-1)
@@ -220,6 +345,9 @@ class BinaryEMConfig(EMConfig):
     check = tf.add_check_numerics_ops()
 
     return {
+      'train_iterator': train_iterator,
+      'x_indices': x_indices,
+      'predictors': predictors,
       'h_1_log': h_1_log,
       'alpha': a,
       'beta': b,
@@ -234,142 +362,3 @@ class BinaryEMConfig(EMConfig):
       'm_step': m_step,
       'neg_log_likelihood': neg_log_likelihood,
       'check_numerics': check}
-
-
-class EMLearner(object):
-  def __init__(
-      self, config,
-      instances_input_fn=lambda x: x,
-      predictors_input_fn=lambda x: x,
-      qualities_input_fn=InstancesPredictorsConcatenation()):
-    self.config = config
-    self.instances_input_fn = instances_input_fn
-    self.predictors_input_fn = predictors_input_fn
-    self.qualities_input_fn = qualities_input_fn
-    self._build_model()
-    self._session = None
-
-  def _build_iterators(self):
-    self.train_iterator = tf.data.Iterator.from_structure(
-      output_types={
-        'instances': tf.int32,
-        'predictors': tf.int32,
-        'predictor_values': tf.int32,
-        'predictor_values_soft': tf.float32},
-      output_shapes={
-        'instances': [None],
-        'predictors': [None, None],
-        'predictor_values': [None, None, self.config.num_outputs()],
-        'predictor_values_soft': [None, None, self.config.num_outputs()]},
-      shared_name='train_iterator')
-    iter_next = self.train_iterator.get_next()
-    self.instances = tf.placeholder_with_default(
-      iter_next['instances'],
-      shape=[None],
-      name='instances')
-    self.predictors = tf.placeholder_with_default(
-      iter_next['predictors'],
-      shape=[None, None],
-      name='predictors')
-    self.predictor_values = tf.placeholder_with_default(
-      iter_next['predictor_values'],
-      shape=[None, None, self.config.num_outputs()],
-      name='predictor_values')
-    self.predictor_values_soft = tf.placeholder_with_default(
-      iter_next['predictor_values_soft'],
-      shape=[None, None, self.config.num_outputs()],
-      name='predictor_values_soft')
-
-  def _build_model(self):
-    self._build_iterators()
-    instances = self.instances
-    predictors = self.predictors
-    instance_features = self.instances_input_fn(instances)
-    predictors = self.predictors_input_fn(predictors)
-    h_1_log = self.config.model_fn(instance_features)
-    self.qualities_prior = self.config.qualities_fn(
-      self.qualities_input_fn(instance_features, predictors))
-    self._ops = self.config.build_ops(
-      x_indices=instances,
-      h_1_log=h_1_log,
-      q_params=self.qualities_prior,
-      y_hat_1=self.predictor_values,
-      y_hat_1_soft=self.predictor_values_soft)
-    self._init_op = tf.global_variables_initializer()
-
-  def _init_session(self):
-    if self._session is None:
-      self._session = tf.Session()
-      self._session.run(self._init_op)
-
-  def _e_step(self, iterator_init_op, use_maj):
-    self._session.run(iterator_init_op)
-    self._session.run(self._ops['e_step_init'])
-    if use_maj:
-      self._session.run(self._ops['set_use_maj'])
-    else:
-      self._session.run(self._ops['unset_use_maj'])
-    while True:
-      try:
-        self._session.run(self._ops['e_step'])
-      except tf.errors.OutOfRangeError:
-        break
-
-  def _m_step(
-      self, iterator_init_op, warm_start,
-      max_m_steps, log_m_steps):
-    self._session.run(iterator_init_op)
-    if not warm_start:
-      self._session.run(self._ops['m_step_init'])
-    accumulator_ll = 0.0
-    accumulator_steps = 0
-    for m_step in range(max_m_steps):
-      ll, _ = self._session.run([
-        self._ops['neg_log_likelihood'],
-        self._ops['m_step']])
-      accumulator_ll += ll
-      accumulator_steps += 1
-      if m_step % log_m_steps == 0 or m_step == max_m_steps - 1:
-        ll = accumulator_ll / accumulator_steps
-        logger.info(
-          'Step: %5d | Negative Log-Likelihood: %.8f'
-          % (m_step, ll))
-        accumulator_ll = 0.0
-        accumulator_steps = 0
-
-  def train(
-      self, dataset, batch_size=128,
-      warm_start=False, max_m_steps=1000,
-      max_em_steps=100, log_m_steps=100,
-      em_step_callback=None):
-    e_step_dataset = dataset.batch(batch_size)
-    m_step_dataset = dataset.repeat().shuffle(1000).batch(batch_size)
-
-    self._init_session()
-    e_step_iterator_init_op = self.train_iterator.make_initializer(e_step_dataset)
-    m_step_iterator_init_op = self.train_iterator.make_initializer(m_step_dataset)
-
-    for em_step in range(max_em_steps):
-      logger.info('Iteration %d - Running E-Step' % em_step)
-      self._e_step(e_step_iterator_init_op, use_maj=em_step == 0)
-      logger.info('Iteration %d - Running M-Step' % em_step)
-      self._m_step(
-        m_step_iterator_init_op, warm_start,
-        max_m_steps, log_m_steps)
-      if em_step_callback is not None:
-        em_step_callback(self)
-
-  def predict(self, instances):
-    self._init_session()
-    return self._session.run(
-      self._ops['h_1_log'],
-      feed_dict={self.instances: instances})
-
-  def qualities(self, instances, predictors):
-    self._init_session()
-    qualities_prior = self._session.run(
-      (self._ops['alpha'], self._ops['beta']),
-      feed_dict={
-        self.instances: instances,
-        self.predictors: predictors})
-    return self.config.qualities_mean(*qualities_prior)

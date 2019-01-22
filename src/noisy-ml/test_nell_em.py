@@ -99,24 +99,24 @@ def run_experiment(loader, label, small_version):
 
   instances_input_fn = Embedding(
     num_inputs=num_instances,
-    emb_size=512,
+    emb_size=16,
     name='instance_embeddings')
 
   predictors_input_fn = Embedding(
     num_inputs=num_predictors,
-    emb_size=512,
+    emb_size=16,
     name='predictor_embeddings')
 
   qualities_input_fn = InstancesPredictorsConcatenation()
 
   model_fn = MLP(
-    hidden_units=[64, 32, 16],
+    hidden_units=[],
     num_outputs=1,
     activation=tf.nn.selu,
     name='model_fn')
 
   qualities_fn = MLP(
-    hidden_units=[64, 32, 16],
+    hidden_units=[],
     num_outputs=2,
     activation=tf.nn.selu,
     name='qualities_fn')
@@ -128,12 +128,12 @@ def run_experiment(loader, label, small_version):
       model_fn=model_fn,
       qualities_fn=qualities_fn,
       optimizer=tf.train.AdamOptimizer(),
+      instances_input_fn=instances_input_fn,
+      predictors_input_fn=predictors_input_fn,
+      qualities_input_fn=qualities_input_fn,
       use_soft_maj=True,
       use_soft_y_hat=False,
-      max_param_value=None),
-    instances_input_fn=instances_input_fn,
-    predictors_input_fn=predictors_input_fn,
-    qualities_input_fn=qualities_input_fn)
+      max_param_value=None))
 
   def em_step_callback(learner):
     predictions = learner.predict(instances)

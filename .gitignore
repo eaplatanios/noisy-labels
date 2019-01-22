@@ -11,8 +11,16 @@
 *.iml
 *.iws
 
+# Pyenv
+.python-version
+
 # Mac
 .DS_Store
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
 
 # Distribution / Packaging
 __pycache__

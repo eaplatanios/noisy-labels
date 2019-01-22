@@ -318,43 +318,43 @@ class EMLearner(object):
   def _m_step(
       self, iterator_init_op, warm_start,
       max_m_steps, log_m_steps):
+    self._session.run(iterator_init_op)
     if not warm_start:
       self._session.run(self._ops['m_step_init'])
     accumulator_ll = 0.0
     accumulator_steps = 0
-    m_step = 0
-    while m_step < max_m_steps:
-      try:
-        ll, _ = self._session.run([
-          self._ops['neg_log_likelihood'],
-          self._ops['m_step']])
-        accumulator_ll += ll
-        accumulator_steps += 1
-        if m_step % log_m_steps == 0 or m_step == max_m_steps - 1:
-          ll = accumulator_ll / accumulator_steps
-          logger.info(
-            'Step: %5d | Negative Log-Likelihood: %.8f'
-            % (m_step, ll))
-          accumulator_ll = 0.0
-          accumulator_steps = 0
-        m_step += 1
-      except tf.errors.OutOfRangeError:
-        self._session.run(iterator_init_op)
-        continue
+    for m_step in range(max_m_steps):
+      ll, _ = self._session.run([
+        self._ops['neg_log_likelihood'],
+        self._ops['m_step']])
+      accumulator_ll += ll
+      accumulator_steps += 1
+      if m_step % log_m_steps == 0 or m_step == max_m_steps - 1:
+        ll = accumulator_ll / accumulator_steps
+        logger.info(
+          'Step: %5d | Negative Log-Likelihood: %.8f'
+          % (m_step, ll))
+        accumulator_ll = 0.0
+        accumulator_steps = 0
 
   def train(
-      self, dataset, warm_start=False, max_m_steps=1000,
+      self, dataset, batch_size=128,
+      warm_start=False, max_m_steps=1000,
       max_em_steps=100, log_m_steps=100,
       em_step_callback=None):
+    e_step_dataset = dataset.batch(batch_size)
+    m_step_dataset = dataset.repeat().shuffle(1000).batch(batch_size)
+
     self._init_session()
-    iterator_init_op = self.train_iterator.make_initializer(dataset)
+    e_step_iterator_init_op = self.train_iterator.make_initializer(e_step_dataset)
+    m_step_iterator_init_op = self.train_iterator.make_initializer(m_step_dataset)
 
     for em_step in range(max_em_steps):
       logger.info('Iteration %d - Running E-Step' % em_step)
-      self._e_step(iterator_init_op, use_maj=em_step == 0)
+      self._e_step(e_step_iterator_init_op, use_maj=em_step == 0)
       logger.info('Iteration %d - Running M-Step' % em_step)
       self._m_step(
-        iterator_init_op, warm_start,
+        m_step_iterator_init_op, warm_start,
         max_m_steps, log_m_steps)
       if em_step_callback is not None:
         em_step_callback(self)

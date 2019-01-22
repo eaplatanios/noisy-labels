@@ -87,38 +87,36 @@ def run_experiment(loader, label, small_version):
     'instances': instances,
     'predictors': predictor_indices,
     'predictor_values': predictor_values,
-    'predictor_values_soft': predictor_values_soft}) \
-    .shuffle(1000) \
-    .batch(128, drop_remainder=False)
+    'predictor_values_soft': predictor_values_soft})
 
-  instances_input_fn = OneHotEncoding(
-    num_inputs=num_instances,
-    name='instance_embeddings')
-
-  predictors_input_fn = OneHotEncoding(
-    num_inputs=num_predictors,
-    name='predictor_embeddings')
-
-  # instances_input_fn = Embedding(
+  # instances_input_fn = OneHotEncoding(
   #   num_inputs=num_instances,
-  #   emb_size=128,
   #   name='instance_embeddings')
   #
-  # predictors_input_fn = Embedding(
+  # predictors_input_fn = OneHotEncoding(
   #   num_inputs=num_predictors,
-  #   emb_size=128,
   #   name='predictor_embeddings')
+
+  instances_input_fn = Embedding(
+    num_inputs=num_instances,
+    emb_size=512,
+    name='instance_embeddings')
+
+  predictors_input_fn = Embedding(
+    num_inputs=num_predictors,
+    emb_size=512,
+    name='predictor_embeddings')
 
   qualities_input_fn = InstancesPredictorsConcatenation()
 
   model_fn = MLP(
-    hidden_units=[],
+    hidden_units=[64, 32, 16],
     num_outputs=1,
     activation=tf.nn.selu,
     name='model_fn')
 
   qualities_fn = MLP(
-    hidden_units=[],
+    hidden_units=[64, 32, 16],
     num_outputs=2,
     activation=tf.nn.selu,
     name='qualities_fn')
@@ -164,6 +162,7 @@ def run_experiment(loader, label, small_version):
 
   learner.train(
     dataset=dataset,
+    batch_size=128,
     warm_start=False,
     max_m_steps=10000,
     max_em_steps=10,

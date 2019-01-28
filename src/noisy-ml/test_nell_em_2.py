@@ -20,7 +20,7 @@ import tensorflow as tf
 import six
 
 from .data.loaders import BrainLoader, NELLLoader
-from .data.utilities import compute_binary_qualities_legacy
+from .data.utilities import compute_binary_qualities
 from .evaluation.metrics import *
 from .models.layers import *
 from .models.learners import *
@@ -75,24 +75,19 @@ def run_experiment(loader, label, small_version):
     label=label,
     small_version=small_version)
 
-  num_instances = len(data['instances'])
-  num_predictors = len(data['predictors'])
+  num_instances = data['num_instances']
+  num_predictors = data['num_predictors']
+  num_labels = data['num_labels']
 
-  data_2d = loader.train_data_as_2d(data)
   instances = data['instances']
-  predictor_indices = np.tile(data['predictors'][None, :], [len(instances), 1])
-  predictor_values = (data_2d['values'] >= 0.5).astype(np.int32)
-  predictor_values_soft = data_2d['values']
-
-  data['predictors'] = predictor_indices
-  data['predictor_values'] = predictor_values
-  data['predictor_values_soft'] = predictor_values_soft
+  predictors = data['predictors']
+  labels = data['labels']
 
   dataset = tf.data.Dataset.from_tensor_slices({
-    'instances': instances,
-    'predictors': predictor_indices,
-    'predictor_values': predictor_values[:, :, None],
-    'predictor_values_soft': predictor_values_soft[:, :, None]})
+    'instances': data['train_data']['instances'],
+    'predictors': data['train_data']['predictors'],
+    'labels': data['train_data']['labels'],
+    'values': data['train_data']['values']})
 
   # instances_input_fn = OneHotEncoding(
   #   num_inputs=num_instances,
@@ -112,7 +107,12 @@ def run_experiment(loader, label, small_version):
     emb_size=16,
     name='predictor_embeddings')
 
-  qualities_input_fn = InstancesPredictorsConcatenation()
+  labels_input_fn = Embedding(
+    num_inputs=num_labels,
+    emb_size=16,
+    name='label_embeddings')
+
+  qualities_input_fn = Concatenation(arg_indices=[0, 1])
 
   model_fn = MLP(
     hidden_units=[],
@@ -127,32 +127,38 @@ def run_experiment(loader, label, small_version):
     name='qualities_fn')
 
   learner = EMLearner(
-    config=BinaryEMConfig(
+    config=MultiLabelEMConfig(
       num_instances=num_instances,
       num_predictors=num_predictors,
+      num_labels=num_labels,
       model_fn=model_fn,
       qualities_fn=qualities_fn,
       optimizer=tf.train.AdamOptimizer(),
       instances_input_fn=instances_input_fn,
       predictors_input_fn=predictors_input_fn,
+      labels_input_fn=labels_input_fn,
       qualities_input_fn=qualities_input_fn,
       use_soft_maj=True,
       use_soft_y_hat=False,
       max_param_value=None))
 
   def em_step_callback(learner):
-    predictions = learner.predict(instances)
-    predicted_qualities = learner.qualities(instances, predictor_indices, None)
+    predictions = learner.predict(instances)[:, 0]
+    predicted_qualities = learner.qualities(instances, predictors, labels)[:, :, 0]
     predicted_qualities = np.mean(predicted_qualities, axis=0)
 
-    true_qualities = compute_binary_qualities_legacy(data)
+    true_qualities = compute_binary_qualities(data)
     true_qualities = [p[1] for p in sorted(six.iteritems(true_qualities))]
 
+    data_2d = loader.train_data_as_2d(data)
+    values = data_2d['values']
+    values_soft = (values >= 0.5).astype(np.int32)
+
     results = evaluate({
-      'maj_soft_predictions': np.mean(np.array(data['predictor_values_soft'], dtype=np.float32), axis=1),
-      'maj_hard_predictions': np.mean(np.array(data['predictor_values'], dtype=np.int32), axis=1),
+      'maj_soft_predictions': np.mean(values, axis=1),
+      'maj_hard_predictions': np.mean(values_soft, axis=1),
       'predictions': predictions,
-      'true_labels': np.array(data['true_labels']),
+      'true_labels': data['true_labels'],
       'predicted_qualities': np.array(predicted_qualities)[None, :],
       'true_qualities': np.array(true_qualities)[None, :]})
     print('\tResults so far:')
@@ -174,11 +180,11 @@ def run_experiment(loader, label, small_version):
     log_m_steps=1000,
     em_step_callback=em_step_callback)
 
-  predictions = learner.predict(instances)
-  predicted_qualities = learner.qualities(instances, predictor_indices, None)
+  predictions = learner.predict(instances)[:, 0]
+  predicted_qualities = learner.qualities(instances, predictors, labels)[:, :, 0]
   predicted_qualities = np.mean(predicted_qualities, axis=0)
 
-  true_qualities = compute_binary_qualities_legacy(data)
+  true_qualities = compute_binary_qualities(data)
   true_qualities = [p[1] for p in sorted(six.iteritems(true_qualities))]
 
   return {

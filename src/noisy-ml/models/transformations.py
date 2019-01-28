@@ -24,7 +24,8 @@ __author__ = 'eaplatanios'
 
 __all__ = [
   'Transformation', 'OneHotEncoding', 'Embedding',
-  'PredictorsSelection', 'InstancesPredictorsConcatenation']
+  'PredictorsSelection', 'Concatenation',
+  'InstancesPredictorsConcatenation']
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,17 @@ class PredictorsSelection(Transformation):
 
   def apply(self, *args, **kwargs):
     return args[1]
+
+
+class Concatenation(Transformation):
+  """Concatenates selected arguments."""
+
+  def __init__(self, arg_indices):
+    self.arg_indices = arg_indices
+
+  def apply(self, *args, **kwargs):
+    values = [args[i] for i in self.arg_indices]
+    return tf.concat(values, axis=-1)
 
 
 class InstancesPredictorsConcatenation(Transformation):

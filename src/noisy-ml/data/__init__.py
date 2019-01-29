@@ -16,8 +16,7 @@ from __future__ import absolute_import, division, print_function
 
 from . import loaders
 from . import synthetic
-from . import utilities
 
 __author__ = 'eaplatanios'
 
-__all__ = ['loaders', 'synthetic', 'utilities']
+__all__ = ['loaders', 'synthetic']

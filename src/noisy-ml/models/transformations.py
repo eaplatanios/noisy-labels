@@ -24,8 +24,7 @@ __author__ = 'eaplatanios'
 
 __all__ = [
   'Transformation', 'OneHotEncoding', 'Embedding',
-  'PredictorsSelection', 'Concatenation',
-  'InstancesPredictorsConcatenation']
+  'Selection', 'Concatenation']
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +76,14 @@ class Embedding(Transformation):
       return tf.gather(emb_matrix, inputs)
 
 
-class PredictorsSelection(Transformation):
-  """Selects just the predictions to be fed in
-    the quality model."""
+class Selection(Transformation):
+  """Selects one of the arguments."""
+
+  def __init__(self, arg_index):
+    self.arg_index = arg_index
 
   def apply(self, *args, **kwargs):
-    return args[1]
+    return args[self.arg_index]
 
 
 class Concatenation(Transformation):
@@ -94,16 +95,3 @@ class Concatenation(Transformation):
   def apply(self, *args, **kwargs):
     values = [args[i] for i in self.arg_indices]
     return tf.concat(values, axis=-1)
-
-
-class InstancesPredictorsConcatenation(Transformation):
-  """Concatenates instances and predictions to be fed in
-  the quality model."""
-
-  def apply(self, *args, **kwargs):
-    instances = args[0]
-    predictors = args[1]
-    instances = tf.tile(
-      input=instances[:, None, :],
-      multiples=[1, tf.shape(predictors)[1], 1])
-    return tf.concat([predictors, instances], axis=2)

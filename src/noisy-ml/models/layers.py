@@ -22,7 +22,7 @@ from six import with_metaclass
 
 __author__ = 'eaplatanios'
 
-__all__ = ['Layer', 'MLP']
+__all__ = ['Layer', 'LogSigmoid', 'MLP']
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,11 @@ class Layer(with_metaclass(abc.ABCMeta, object)):
 
   def __call__(self, *args, **kwargs):
     return self.apply(*args, **kwargs)
+
+
+class LogSigmoid(Layer):
+  def apply(self, *args, **kwargs):
+    return tf.log_sigmoid(args[0])
 
 
 class MLP(Layer):

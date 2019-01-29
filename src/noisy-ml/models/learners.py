@@ -225,10 +225,8 @@ class MultiLabelEMConfig(EMConfig):
     y_hat_1 = tf.cast(tf.greater_equal(values, 0.5), tf.int32)
     y_hat_0 = 1 - y_hat_1
 
-    temp = predictions
-    predictions = tf.log_sigmoid(temp)
     h_1_log = predictions
-    h_0_log = -temp + h_1_log
+    h_0_log = h_1_log + tf.log(tf.exp(-h_1_log) - 1)
     indices = tf.expand_dims(l_indices, axis=-1)
     h_1_log = tf.squeeze(tf.batch_gather(
       params=h_1_log,

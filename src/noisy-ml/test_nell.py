@@ -65,6 +65,7 @@ def run_experiment(dataset_type, labels, small_version):
     hidden_units=[],
     num_outputs=len(dataset.labels),
     activation=tf.nn.selu,
+    output_projection=LogSigmoid(),
     name='model_fn')
 
   qualities_fn = MLP(

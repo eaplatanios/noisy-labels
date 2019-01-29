@@ -65,7 +65,7 @@ def run_experiment(dataset_type, labels, small_version):
     hidden_units=[],
     num_outputs=len(dataset.labels),
     activation=tf.nn.selu,
-    output_projection=LogSigmoid(),
+    output_layer=LogSigmoid(),
     name='model_fn')
 
   qualities_fn = MLP(
@@ -114,6 +114,6 @@ if __name__ == '__main__':
   results = run_experiment(
     dataset_type='nell',
     labels=None,
-    small_version=True)
+    small_version=False)
   results['em'].log(prefix='EM           ')
   results['maj'].log(prefix='Majority Vote')

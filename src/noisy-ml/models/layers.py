@@ -22,7 +22,7 @@ from six import with_metaclass
 
 __author__ = 'eaplatanios'
 
-__all__ = ['Layer', 'LogSigmoid', 'MLP']
+__all__ = ['Layer', 'LogSigmoid', 'LogSoftmax', 'MLP']
 
 logger = logging.getLogger(__name__)
 
@@ -41,18 +41,23 @@ class LogSigmoid(Layer):
     return tf.log_sigmoid(args[0])
 
 
+class LogSoftmax(Layer):
+  def apply(self, *args, **kwargs):
+    return tf.nn.log_softmax(args[0])
+
+
 class MLP(Layer):
   def __init__(
       self,
       hidden_units,
       num_outputs,
       activation=tf.nn.leaky_relu,
-      output_projection=lambda x: x,
+      output_layer=lambda x: x,
       name='mlp'):
     self.hidden_units = hidden_units
     self.num_outputs = num_outputs
     self.activation = activation
-    self.output_projection = output_projection
+    self.output_projection = output_layer
     self.name = name
 
   def apply(self, *args, **kwargs):

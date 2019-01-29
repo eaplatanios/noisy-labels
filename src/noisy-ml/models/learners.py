@@ -226,7 +226,7 @@ class MultiLabelEMConfig(EMConfig):
     y_hat_0 = 1 - y_hat_1
 
     h_1_log = predictions
-    h_0_log = h_1_log + tf.log(tf.exp(-h_1_log) - 1)
+    h_0_log = tf.log1p(-tf.exp(h_1_log))
     indices = tf.expand_dims(l_indices, axis=-1)
     h_1_log = tf.squeeze(tf.batch_gather(
       params=h_1_log,

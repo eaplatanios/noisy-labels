@@ -106,9 +106,11 @@ class EMLearner(object):
 
   def predict(self, instances):
     self._init_session()
-    return self._session.run(
+    predictions = self._session.run(
       self._ops['predictions'],
       feed_dict={self._ops['x_indices']: instances})
+    predictions = self.config.predictions_output_fn(predictions)
+    return predictions
 
   def qualities(self, instances, predictors, labels):
     def cartesian_transpose(arrays):
@@ -156,6 +158,7 @@ class MultiLabelEMConfig(EMConfig):
       predictors_input_fn=lambda x: x,
       labels_input_fn=lambda x: x,
       qualities_input_fn=Concatenation(arg_indices=[0, 1, 2]),
+      predictions_output_fn=lambda x: x,
       use_soft_maj=True, use_soft_y_hat=False,
       max_param_value=None):
     super(MultiLabelEMConfig, self).__init__()
@@ -169,6 +172,7 @@ class MultiLabelEMConfig(EMConfig):
     self.predictors_input_fn = predictors_input_fn
     self.labels_input_fn = labels_input_fn
     self.qualities_input_fn = qualities_input_fn
+    self.predictions_output_fn = predictions_output_fn
     self.use_soft_maj = use_soft_maj
     self.use_soft_y_hat = use_soft_y_hat
     self.max_param_value = max_param_value
@@ -234,7 +238,6 @@ class MultiLabelEMConfig(EMConfig):
     h_0_log = tf.squeeze(tf.batch_gather(
       params=h_0_log,
       indices=indices), axis=-1)
-    predictions = tf.exp(predictions)
 
     # q_params shape: [BatchSize, 2]
     a_log = q_params[:, 0]
@@ -361,9 +364,12 @@ class MultiLabelEMConfig(EMConfig):
     ll_term1 -= a_plus_b_log
     ll_term1 = tf.reduce_sum(ll_term1)
 
+    # ll_term2 = -tf.exp(h_1_log) * h_1_log - tf.exp(h_0_log) * h_0_log
+    # ll_term2 = tf.reduce_sum(ll_term2)
+
     # We are omitting the last term because it is constant
     # with respect to the parameters of h and g.
-    neg_log_likelihood = -ll_term0 - ll_term1
+    neg_log_likelihood = -ll_term0 - ll_term1 # - ll_term2
 
     # M-step:
     m_step_init = tf.variables_initializer(

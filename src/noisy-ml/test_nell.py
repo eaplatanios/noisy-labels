@@ -15,6 +15,7 @@
 from __future__ import absolute_import, division, print_function
 
 import os
+import numpy as np
 import tensorflow as tf
 
 from .data.loaders import *
@@ -46,33 +47,63 @@ def run_experiment(dataset_type, labels, small_version):
 
   instances_input_fn = Embedding(
     num_inputs=len(dataset.instances),
-    emb_size=128,
+    emb_size=32,
     name='instance_embeddings')
 
   predictors_input_fn = Embedding(
     num_inputs=len(dataset.predictors),
-    emb_size=16,
+    emb_size=32,
     name='predictor_embeddings')
 
   labels_input_fn = Embedding(
     num_inputs=len(dataset.labels),
-    emb_size=16,
+    emb_size=32,
     name='label_embeddings')
 
   qualities_input_fn = Concatenation(arg_indices=[0, 1, 2])
 
+  output_layer = LogSigmoid(
+    num_labels=len(dataset.labels))
+  # output_layer = LogSoftmax(
+  #   num_labels=len(dataset.labels))
+  # output_layer = HierarchicalLogSoftmax(
+  #   num_labels=len(dataset.labels),
+  #   hierarchy=[
+  #     (0, [
+  #       (2, []),
+  #       (7, []),
+  #       (11, [])]),
+  #     (8, [
+  #       (1, []),
+  #       (8, []),
+  #       (12, []),
+  #       (13, [])]),
+  #     (3, []),
+  #     (4, []),
+  #     (5, []),
+  #     (6, []),
+  #     (9, []),
+  #     (10, [])])
+
   model_fn = MLP(
     hidden_units=[],
-    num_outputs=len(dataset.labels),
     activation=tf.nn.selu,
-    output_layer=LogSigmoid(),
+    output_layer=output_layer,
     name='model_fn')
 
   qualities_fn = MLP(
     hidden_units=[],
-    num_outputs=2,
     activation=tf.nn.selu,
+    output_layer=Linear(num_outputs=2),
     name='qualities_fn')
+
+  def predictions_output_fn(predictions):
+    # max_indices = predictions.argmax(1)
+    # predictions[:] = 0.0
+    # predictions[
+    #   np.arange(len(predictions)),
+    #   max_indices] = 1.0
+    return np.exp(predictions)
 
   learner = EMLearner(
     config=MultiLabelEMConfig(
@@ -86,6 +117,7 @@ def run_experiment(dataset_type, labels, small_version):
       predictors_input_fn=predictors_input_fn,
       labels_input_fn=labels_input_fn,
       qualities_input_fn=qualities_input_fn,
+      predictions_output_fn=predictions_output_fn,
       use_soft_maj=True,
       use_soft_y_hat=False,
       max_param_value=None))

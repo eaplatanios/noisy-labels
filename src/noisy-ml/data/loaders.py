@@ -23,7 +23,8 @@ from collections import namedtuple
 
 __author__ = 'eaplatanios'
 
-__all__ = ['TrainData', 'Dataset', 'LegacyLoader']
+__all__ = [
+  'TrainData', 'Dataset', 'LegacyLoader', 'NELLLoader']
 
 logger = logging.getLogger(__name__)
 
@@ -201,12 +202,12 @@ class Dataset(object):
 class LegacyLoader(object):
   @staticmethod
   def load(
-      working_dir, dataset_type='nell',
+      data_dir, dataset_type='nell',
       labels=None, small_version=False):
     """Loads a legacy dataset.
 
     Args:
-      working_dir: Working directory (e.g., for downloading
+      data_dir: Data directory (e.g., for downloading
         and extracting data files).
       dataset_type: Can be `"nell"` or `"brain"`. Defaults
         to all labels for the provided dataset type.
@@ -218,14 +219,12 @@ class LegacyLoader(object):
     Returns: Loaded legacy dataset for the provided labels.
     """
     if dataset_type is 'nell':
-      data_dir = os.path.join(working_dir, 'nell', 'unconstrained')
       if labels is None:
         labels = [
           'animal', 'beverage', 'bird', 'bodypart', 'city',
           'disease', 'drug', 'fish', 'food', 'fruit', 'muscle',
           'person', 'protein', 'river', 'vegetable']
     elif dataset_type is 'brain':
-      data_dir = os.path.join(working_dir, 'brain')
       if labels is None:
         labels = [
           'region_1', 'region_2', 'region_3', 'region_4',
@@ -235,6 +234,13 @@ class LegacyLoader(object):
       raise ValueError('Legacy loader type can be "nell" or "brain".')
 
     if len(labels) == 1:
+      if dataset_type is 'nell':
+        data_dir = os.path.join(data_dir, 'nell', 'unconstrained')
+      elif dataset_type is 'brain':
+        data_dir = os.path.join(data_dir, 'brain')
+      else:
+        raise ValueError('Legacy loader type can be "nell" or "brain".')
+
       label = labels[0]
 
       # Load instance names.
@@ -263,12 +269,12 @@ class LegacyLoader(object):
       with open(filename, 'r') as f:
         for i, line in enumerate(f):
           if is_header:
-            predictors = line.split(',')[1:]
+            predictors = [s.strip() for s in line.split(',')][1:]
             predicted_labels[0] = {
               p: ([], []) for p in range(len(predictors))}
             is_header = False
           else:
-            line_parts = line.split(',')
+            line_parts = [s.strip() for s in line.split(',')]
             if small_version:
               instances.append('label_%d' % (i - 1))
             true_labels[0][i - 1] = int(line_parts[0])
@@ -281,5 +287,45 @@ class LegacyLoader(object):
         true_labels, predicted_labels)
     else:
       return Dataset.join([
-        LegacyLoader.load(working_dir, dataset_type, [l], small_version)
+        LegacyLoader.load(data_dir, dataset_type, [l], small_version)
+        for l in labels])
+
+
+class NELLLoader(object):
+  @staticmethod
+  def load(data_dir, labels, ground_truth_threshold=0.5):
+    if len(labels) == 1:
+      label = labels[0]
+      filename = '{}.extracted_instances.all_predictions.txt'.format(label)
+      filename = os.path.join(data_dir, filename)
+
+      instances = list()
+      predictors = list()
+      labels = [label]
+      true_labels = {0: dict()}
+      predicted_labels = {0: dict()}
+      is_header = True
+
+      with open(filename, 'r') as f:
+        for i, line in enumerate(f):
+          if is_header:
+            predictors = [s.strip() for s in line.split('\t')][2:]
+            predicted_labels[0] = {
+              p: ([], []) for p in range(len(predictors))}
+            is_header = False
+          else:
+            line_parts = [s.strip() for s in line.split('\t')]
+            instances.append(line_parts[0])
+            true_labels[0][i - 1] = int(float(line_parts[1]) >= ground_truth_threshold)
+            for p in range(len(predictors)):
+              if line_parts[p + 2] != '-':
+                predicted_labels[0][p][0].append(i - 1)
+                predicted_labels[0][p][1].append(float(line_parts[p + 2]))
+
+      return Dataset(
+        instances, predictors, labels,
+        true_labels, predicted_labels)
+    else:
+      return Dataset.join([
+        NELLLoader.load(data_dir, [l])
         for l in labels])

@@ -33,7 +33,7 @@ def run_experiment(dataset_type, labels, small_version):
   working_dir = os.getcwd()
   data_dir = os.path.join(working_dir, os.pardir, 'data')
   dataset = LegacyLoader.load(
-    working_dir=data_dir,
+    data_dir=data_dir,
     dataset_type=dataset_type,
     labels=labels,
     small_version=small_version)
@@ -47,17 +47,17 @@ def run_experiment(dataset_type, labels, small_version):
 
   instances_input_fn = Embedding(
     num_inputs=len(dataset.instances),
-    emb_size=32,
+    emb_size=128,
     name='instance_embeddings')
 
   predictors_input_fn = Embedding(
     num_inputs=len(dataset.predictors),
-    emb_size=32,
+    emb_size=16,
     name='predictor_embeddings')
 
   labels_input_fn = Embedding(
     num_inputs=len(dataset.labels),
-    emb_size=32,
+    emb_size=16,
     name='label_embeddings')
 
   qualities_input_fn = Concatenation(arg_indices=[0, 1, 2])
@@ -146,6 +146,6 @@ if __name__ == '__main__':
   results = run_experiment(
     dataset_type='nell',
     labels=None,
-    small_version=False)
+    small_version=True)
   results['em'].log(prefix='EM           ')
   results['maj'].log(prefix='Majority Vote')

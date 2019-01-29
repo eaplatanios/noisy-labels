@@ -283,7 +283,6 @@ class MultiLabelEMConfig(EMConfig):
       trainable=False)
     set_use_maj = use_maj.assign(True)
     unset_use_maj = use_maj.assign(False)
-    use_maj = tf.cast(use_maj, tf.float32)
 
     if self.use_soft_maj:
       e_y_1_maj = y_hat_1_soft
@@ -292,8 +291,8 @@ class MultiLabelEMConfig(EMConfig):
       e_y_1_maj = tf.cast(y_hat_1, tf.float32)
       e_y_0_maj = tf.cast(y_hat_0, tf.float32)
 
-    y_lambda_1_log = use_maj * e_y_1_maj + (1 - use_maj) * y_lambda_log(1)
-    y_lambda_0_log = use_maj * e_y_0_maj + (1 - use_maj) * y_lambda_log(0)
+    y_lambda_1_log = tf.cond(use_maj, lambda: e_y_1_maj, lambda: y_lambda_log(1))
+    y_lambda_0_log = tf.cond(use_maj, lambda: e_y_0_maj, lambda: y_lambda_log(0))
 
     # Create the accumulator variable update ops.
     xl_indices = tf.stack(
@@ -335,7 +334,7 @@ class MultiLabelEMConfig(EMConfig):
       maj = tf.divide(
         accumulated,
         e_y_lambda_1_log + e_y_lambda_0_log)
-      return use_maj * maj + (1 - use_maj) * estimated
+      return tf.cond(use_maj, lambda: maj, lambda: estimated)
 
     e_y_1 = expected_y(1)
     e_y_0 = expected_y(0)
@@ -381,8 +380,6 @@ class MultiLabelEMConfig(EMConfig):
     m_step = self.optimizer.apply_gradients(
       zip(gradients, variables), global_step=global_step)
 
-    check = tf.add_check_numerics_ops()
-
     return {
       'train_iterator': train_iterator,
       'x_indices': x_indices,
@@ -400,5 +397,4 @@ class MultiLabelEMConfig(EMConfig):
       'm_step_init': m_step_init,
       'e_step': e_step,
       'm_step': m_step,
-      'neg_log_likelihood': neg_log_likelihood,
-      'check_numerics': check}
+      'neg_log_likelihood': neg_log_likelihood}

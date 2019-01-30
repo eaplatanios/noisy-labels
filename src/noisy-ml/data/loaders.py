@@ -293,7 +293,7 @@ class LegacyLoader(object):
 
 class NELLLoader(object):
   @staticmethod
-  def load(data_dir, labels, ground_truth_threshold=0.5):
+  def load(data_dir, labels, ground_truth_threshold=0.1):
     if len(labels) == 1:
       label = labels[0]
       filename = '{}.extracted_instances.all_predictions.txt'.format(label)
@@ -329,3 +329,53 @@ class NELLLoader(object):
       return Dataset.join([
         NELLLoader.load(data_dir, [l])
         for l in labels])
+
+  # @staticmethod
+  # def load(data_dir, labels, ground_truth=None):
+  #   if ground_truth is None:
+  #     filename = 'np_labels.tsv'
+  #     filename = os.path.join(data_dir, filename)
+  #     ground_truth = dict()
+  #     with open(filename, 'r') as f:
+  #       for line in f:
+  #         line_parts = [s.strip() for s in line.split('\t')]
+  #         ground_truth[line_parts[0]] = set(line_parts[1].split(','))
+  #
+  #   if len(labels) == 1:
+  #     label = labels[0]
+  #     filename = '{}.extracted_instances.all_predictions.txt'.format(label)
+  #     filename = os.path.join(data_dir, filename)
+  #
+  #     instances = list()
+  #     predictors = list()
+  #     labels = [label]
+  #     true_labels = {0: dict()}
+  #     predicted_labels = {0: dict()}
+  #     is_header = True
+  #     i = 0
+  #
+  #     with open(filename, 'r') as f:
+  #       for line in f:
+  #         if is_header:
+  #           predictors = [s.strip() for s in line.split('\t')][1:]
+  #           predicted_labels[0] = {
+  #             p: ([], []) for p in range(len(predictors))}
+  #           is_header = False
+  #         else:
+  #           line_parts = [s.strip() for s in line.split('\t')]
+  #           if line_parts[0] in ground_truth:
+  #             i += 1
+  #             instances.append(line_parts[0])
+  #             true_labels[0][i - 1] = int(label in ground_truth[line_parts[0]])
+  #             for p in range(len(predictors)):
+  #               if line_parts[p + 1] != '-':
+  #                 predicted_labels[0][p][0].append(i - 1)
+  #                 predicted_labels[0][p][1].append(float(line_parts[p + 1]))
+  #
+  #     return Dataset(
+  #       instances, predictors, labels,
+  #       true_labels, predicted_labels)
+  #   else:
+  #     return Dataset.join([
+  #       NELLLoader.load(data_dir, [l], ground_truth)
+  #       for l in labels])

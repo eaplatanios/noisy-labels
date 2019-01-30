@@ -27,14 +27,14 @@ from .loaders import Dataset
 __author__ = ['alshedivat', 'eaplatanios']
 
 __all__ = [
-  'DucksLoader', 'SentimentPopularityLoader',
+  'BlueBirdsLoader', 'SentimentPopularityLoader',
   'WeatherSentimentLoader']
 
 logger = logging.getLogger(__name__)
 
 
-class DucksLoader(object):
-  """Ducks dataset.
+class BlueBirdsLoader(object):
+  """BlueBirds dataset.
 
   Source: https://github.com/welinder/cubam/tree/public/demo/bluebirds
   """
@@ -42,7 +42,7 @@ class DucksLoader(object):
   @staticmethod
   def load(data_dir):
     data_dir = os.path.join(
-      data_dir, 'crowdsourced', 'ducks')
+      data_dir, 'crowdsourced', 'bluebirds')
 
     def convert_labels_to_ints(dictionary):
       return dict(map(

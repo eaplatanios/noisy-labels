@@ -34,8 +34,8 @@ def run_experiment(dataset_type):
     dataset = SentimentPopularityLoader.load(data_dir)
   elif dataset_type == 'weather_sentiment':
     dataset = WeatherSentimentLoader.load(data_dir)
-  elif dataset_type == 'ducks':
-    dataset = DucksLoader.load(data_dir)
+  elif dataset_type == 'bluebirds':
+    dataset = BlueBirdsLoader.load(data_dir)
   else:
     raise ValueError('Unknown dataset: %s', dataset_type)
 
@@ -48,12 +48,12 @@ def run_experiment(dataset_type):
 
   instances_input_fn = Embedding(
     num_inputs=len(dataset.instances),
-    emb_size=1,
+    emb_size=32,
     name='instance_embeddings')
 
   predictors_input_fn = Embedding(
     num_inputs=len(dataset.predictors),
-    emb_size=1,
+    emb_size=32,
     name='predictor_embeddings')
 
   labels_input_fn = Embedding(
@@ -73,13 +73,13 @@ def run_experiment(dataset_type):
     num_labels=len(dataset.labels))
 
   model_fn = MLP(
-    hidden_units=[],
+    hidden_units=[16],
     activation=tf.nn.selu,
     output_layer=output_layer,
     name='model_fn')
 
   qualities_fn = MLP(
-    hidden_units=[],
+    hidden_units=[16],
     activation=tf.nn.selu,
     output_layer=Linear(num_outputs=2),
     name='qualities_fn')
@@ -139,6 +139,6 @@ if __name__ == '__main__':
   # results = run_experiment(
   #   dataset_type='weather_sentiment')
   results = run_experiment(
-    dataset_type='ducks')
+    dataset_type='bluebirds')
   results['em'].log(prefix='EM           ')
   results['maj'].log(prefix='Majority Vote')

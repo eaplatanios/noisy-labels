@@ -22,6 +22,7 @@ import tensorflow as tf
 from six import with_metaclass
 
 from .transformations import *
+from .utilities import log1mexp
 
 __author__ = 'eaplatanios'
 
@@ -230,7 +231,8 @@ class MultiLabelEMConfig(EMConfig):
     y_hat_0 = 1 - y_hat_1
 
     h_1_log = predictions
-    h_0_log = tf.log1p(-tf.exp(h_1_log))
+    h_0_log = log1mexp(h_1_log)
+
     indices = tf.expand_dims(l_indices, axis=-1)
     h_1_log = tf.squeeze(tf.batch_gather(
       params=h_1_log,
@@ -252,68 +254,69 @@ class MultiLabelEMConfig(EMConfig):
 
     # E-step:
 
-    # Create the accumulator variables:
-    e_y_lambda_1_log = tf.get_variable(
-      name='e_y_lambda_1_log',
-      shape=[self.num_instances, self.num_labels],
-      initializer=tf.zeros_initializer(h_1_log.dtype),
-      trainable=False)
-    e_y_lambda_0_log = tf.get_variable(
-      name='e_y_lambda_0_log',
-      shape=[self.num_instances, self.num_labels],
-      initializer=tf.zeros_initializer(h_1_log.dtype),
-      trainable=False)
+    with tf.name_scope('e_step'):
+      # Create the accumulator variables:
+      e_y_lambda_1_log = tf.get_variable(
+        name='e_y_lambda_1_log',
+        shape=[self.num_instances, self.num_labels],
+        initializer=tf.zeros_initializer(h_1_log.dtype),
+        trainable=False)
+      e_y_lambda_0_log = tf.get_variable(
+        name='e_y_lambda_0_log',
+        shape=[self.num_instances, self.num_labels],
+        initializer=tf.zeros_initializer(h_1_log.dtype),
+        trainable=False)
 
-    def y_lambda_log(k):
-      i = y_hat_0 if k == 1 else y_hat_1
-      lambda_log = h_1_log if k == 1 else h_0_log
-      lambda_log += tf.squeeze(tf.batch_gather(
-        params=ab_log,
-        indices=tf.expand_dims(i, axis=-1)), axis=-1)
-      # lambda_log -= a_plus_b_log
-      return lambda_log
+      def y_lambda_log(k):
+        i = y_hat_0 if k == 1 else y_hat_1
+        lambda_log = h_1_log if k == 1 else h_0_log
+        lambda_log += tf.squeeze(tf.batch_gather(
+          params=ab_log,
+          indices=tf.expand_dims(i, axis=-1)), axis=-1)
+        # lambda_log -= a_plus_b_log
+        return lambda_log
 
-    # Boolean flag about whether or not to use majority vote
-    # estimates for the E-step expectations.
-    use_maj = tf.get_variable(
-      name='use_maj',
-      shape=[],
-      dtype=tf.bool,
-      initializer=tf.zeros_initializer(),
-      trainable=False)
-    set_use_maj = use_maj.assign(True)
-    unset_use_maj = use_maj.assign(False)
+      # Boolean flag about whether or not to use majority vote
+      # estimates for the E-step expectations.
+      use_maj = tf.get_variable(
+        name='use_maj',
+        shape=[],
+        dtype=tf.bool,
+        initializer=tf.zeros_initializer(),
+        trainable=False)
+      set_use_maj = use_maj.assign(True)
+      unset_use_maj = use_maj.assign(False)
 
-    if self.use_soft_maj:
-      e_y_1_maj = y_hat_1_soft
-      e_y_0_maj = y_hat_0_soft
-    else:
-      e_y_1_maj = tf.cast(y_hat_1, tf.float32)
-      e_y_0_maj = tf.cast(y_hat_0, tf.float32)
+      if self.use_soft_maj:
+        e_y_1_maj = y_hat_1_soft
+        e_y_0_maj = y_hat_0_soft
+      else:
+        e_y_1_maj = tf.cast(y_hat_1, tf.float32)
+        e_y_0_maj = tf.cast(y_hat_0, tf.float32)
 
-    y_lambda_1_log = tf.cond(use_maj, lambda: e_y_1_maj, lambda: y_lambda_log(1))
-    y_lambda_0_log = tf.cond(use_maj, lambda: e_y_0_maj, lambda: y_lambda_log(0))
+      y_lambda_1_log = tf.cond(use_maj, lambda: e_y_1_maj, lambda: y_lambda_log(1))
+      y_lambda_0_log = tf.cond(use_maj, lambda: e_y_0_maj, lambda: y_lambda_log(0))
 
-    # Create the accumulator variable update ops.
-    xl_indices = tf.stack(
-      [x_indices, l_indices], axis=-1)
-    e_y_lambda_1_log_update = e_y_lambda_1_log \
-      .scatter_nd_add(
-        indices=xl_indices,
-        updates=y_lambda_1_log)
-    e_y_lambda_0_log_update = e_y_lambda_0_log \
-      .scatter_nd_add(
-        indices=xl_indices,
-        updates=y_lambda_0_log)
+      # Create the accumulator variable update ops.
+      xl_indices = tf.stack(
+        [x_indices, l_indices], axis=-1)
+      e_y_lambda_1_log_update = e_y_lambda_1_log \
+        .scatter_nd_add(
+          indices=xl_indices,
+          updates=y_lambda_1_log)
+      e_y_lambda_0_log_update = e_y_lambda_0_log \
+        .scatter_nd_add(
+          indices=xl_indices,
+          updates=y_lambda_0_log)
 
-    e_step_init = tf.group([
-      e_y_lambda_1_log.initializer,
-      e_y_lambda_0_log.initializer],
-      name='e_step_init')
-    e_step = tf.group([
-      e_y_lambda_1_log_update,
-      e_y_lambda_0_log_update],
-      name='e_step')
+      e_step_init = tf.group([
+        e_y_lambda_1_log.initializer,
+        e_y_lambda_0_log.initializer],
+        name='e_step_init')
+      e_step = tf.group([
+        e_y_lambda_1_log_update,
+        e_y_lambda_0_log_update],
+        name='e_step')
 
     # M-Step:
 
@@ -336,49 +339,50 @@ class MultiLabelEMConfig(EMConfig):
         e_y_lambda_1_log + e_y_lambda_0_log)
       return tf.cond(use_maj, lambda: maj, lambda: estimated)
 
-    e_y_1 = expected_y(1)
-    e_y_0 = expected_y(0)
-    e_y_1 = tf.gather_nd(e_y_1, xl_indices)
-    e_y_0 = tf.gather_nd(e_y_0, xl_indices)
+    with tf.name_scope('m_step'):
+      e_y_1 = expected_y(1)
+      e_y_0 = expected_y(0)
+      e_y_1 = tf.gather_nd(e_y_1, xl_indices)
+      e_y_0 = tf.gather_nd(e_y_0, xl_indices)
 
-    ll_term0 = e_y_1 * h_1_log + e_y_0 * h_0_log
-    ll_term0 = tf.reduce_sum(ll_term0)
+      ll_term0 = e_y_1 * h_1_log + e_y_0 * h_0_log
+      ll_term0 = tf.reduce_sum(ll_term0)
 
-    e_y_1 = tf.expand_dims(e_y_1, axis=-1)
-    e_y_0 = tf.expand_dims(e_y_0, axis=-1)
+      e_y_1 = tf.expand_dims(e_y_1, axis=-1)
+      e_y_0 = tf.expand_dims(e_y_0, axis=-1)
 
-    if self.use_soft_y_hat:
-      e_y_y_hat_1 = e_y_1 * y_hat_1_soft + e_y_0 * y_hat_0_soft
-      e_y_y_hat_0 = e_y_1 * y_hat_0_soft + e_y_0 * y_hat_1_soft
-      ll_term1 = e_y_y_hat_1 * a_log + e_y_y_hat_0 * b_log
-    else:
-      ll_term1 = e_y_1 * tf.batch_gather(
-        ab_log,
-        tf.expand_dims(y_hat_0, axis=-1))
-      ll_term1 += e_y_0 * tf.batch_gather(
-        ab_log,
-        tf.expand_dims(y_hat_1, axis=-1))
-      ll_term1 = tf.squeeze(ll_term1, axis=-1)
+      if self.use_soft_y_hat:
+        e_y_y_hat_1 = e_y_1 * y_hat_1_soft + e_y_0 * y_hat_0_soft
+        e_y_y_hat_0 = e_y_1 * y_hat_0_soft + e_y_0 * y_hat_1_soft
+        ll_term1 = e_y_y_hat_1 * a_log + e_y_y_hat_0 * b_log
+      else:
+        ll_term1 = e_y_1 * tf.batch_gather(
+          ab_log,
+          tf.expand_dims(y_hat_0, axis=-1))
+        ll_term1 += e_y_0 * tf.batch_gather(
+          ab_log,
+          tf.expand_dims(y_hat_1, axis=-1))
+        ll_term1 = tf.squeeze(ll_term1, axis=-1)
 
-    ll_term1 -= a_plus_b_log
-    ll_term1 = tf.reduce_sum(ll_term1)
+      ll_term1 -= a_plus_b_log
+      ll_term1 = tf.reduce_sum(ll_term1)
 
-    # ll_term2 = -tf.exp(h_1_log) * h_1_log - tf.exp(h_0_log) * h_0_log
-    # ll_term2 = tf.reduce_sum(ll_term2)
+      # ll_term2 = -tf.exp(h_1_log) * h_1_log - tf.exp(h_0_log) * h_0_log
+      # ll_term2 = tf.reduce_sum(ll_term2)
 
-    # We are omitting the last term because it is constant
-    # with respect to the parameters of h and g.
-    neg_log_likelihood = -ll_term0 - ll_term1 # - ll_term2
+      # We are omitting the last term because it is constant
+      # with respect to the parameters of h and g.
+      neg_log_likelihood = -ll_term0 - ll_term1 # - ll_term2
 
-    # M-step:
-    m_step_init = tf.variables_initializer(
-      tf.trainable_variables())
-    global_step = tf.train.get_or_create_global_step()
-    gvs = self.optimizer.compute_gradients(neg_log_likelihood)
-    gradients, variables = zip(*gvs)
-    # gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
-    m_step = self.optimizer.apply_gradients(
-      zip(gradients, variables), global_step=global_step)
+      # M-step:
+      m_step_init = tf.variables_initializer(
+        tf.trainable_variables())
+      global_step = tf.train.get_or_create_global_step()
+      gvs = self.optimizer.compute_gradients(neg_log_likelihood)
+      gradients, variables = zip(*gvs)
+      # gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
+      m_step = self.optimizer.apply_gradients(
+        zip(gradients, variables), global_step=global_step)
 
     return {
       'train_iterator': train_iterator,

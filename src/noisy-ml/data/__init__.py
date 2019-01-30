@@ -14,8 +14,9 @@
 
 from __future__ import absolute_import, division, print_function
 
+from . import crowdsourced
 from . import loaders
 
 __author__ = 'eaplatanios'
 
-__all__ = ['loaders']
+__all__ = ['crowdsourced', 'loaders']

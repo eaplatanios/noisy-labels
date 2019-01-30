@@ -230,7 +230,8 @@ class MultiLabelEMConfig(EMConfig):
     y_hat_1 = tf.cast(tf.greater_equal(values, 0.5), tf.int32)
     y_hat_0 = 1 - y_hat_1
 
-    h_1_log = predictions
+    # TODO: Is this necessary?
+    h_1_log = tf.minimum(predictions, -1e-6) # predictions
     h_0_log = log1mexp(h_1_log)
 
     indices = tf.expand_dims(l_indices, axis=-1)

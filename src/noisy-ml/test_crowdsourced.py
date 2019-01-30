@@ -22,7 +22,6 @@ from .data.crowdsourced import *
 from .evaluation.metrics import *
 from .models.layers import *
 from .models.learners import *
-from .models.transformations import *
 
 __author__ = 'alshedivat'
 

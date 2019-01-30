@@ -21,7 +21,7 @@ import tensorflow as tf
 
 from six import with_metaclass
 
-from .transformations import *
+from .layers import Concatenation
 from .utilities import log1mexp
 
 __author__ = 'eaplatanios'
@@ -241,8 +241,8 @@ class MultiLabelEMConfig(EMConfig):
     if self.max_param_value is not None:
       a_log = tf.minimum(a_log, tf.log(self.max_param_value))
       b_log = tf.minimum(b_log, tf.log(self.max_param_value))
-    a = tf.exp(a_log)
-    b = tf.exp(b_log)
+    a = 1 + tf.exp(a_log)
+    b = 1 + tf.exp(b_log)
     ab_log = tf.stack([a_log, b_log], axis=-1)
     a_plus_b_log = tf.reduce_logsumexp(ab_log, axis=-1)
     qualities_mean_log = a_log - a_plus_b_log

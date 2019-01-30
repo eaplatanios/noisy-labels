@@ -22,7 +22,6 @@ from .data.loaders import *
 from .evaluation.metrics import *
 from .models.layers import *
 from .models.learners import *
-from .models.transformations import *
 
 __author__ = 'eaplatanios'
 
@@ -54,11 +53,12 @@ def run_experiment(labels, ground_truth_threshold):
   else:
     instances_input_fn = FeatureMap(
       features=np.array(dataset.instance_features),
+      adjust_magnitude=True,
       name='instance_features')
 
   predictors_input_fn = Embedding(
     num_inputs=len(dataset.predictors),
-    emb_size=1,
+    emb_size=128,
     name='predictor_embeddings')
 
   labels_input_fn = Embedding(
@@ -72,13 +72,13 @@ def run_experiment(labels, ground_truth_threshold):
     num_labels=len(dataset.labels))
 
   model_fn = MLP(
-    hidden_units=[64, 32],
+    hidden_units=[128, 64, 32],
     activation=tf.nn.selu,
     output_layer=output_layer,
     name='model_fn')
 
   qualities_fn = MLP(
-    hidden_units=[64, 32],
+    hidden_units=[128, 64, 32],
     activation=tf.nn.selu,
     output_layer=Linear(num_outputs=2),
     name='qualities_fn')
@@ -90,7 +90,7 @@ def run_experiment(labels, ground_truth_threshold):
       num_labels=len(dataset.labels),
       model_fn=model_fn,
       qualities_fn=qualities_fn,
-      optimizer=tf.train.AdamOptimizer(),
+      optimizer=tf.train.AdamOptimizer(1e-2),
       instances_input_fn=instances_input_fn,
       predictors_input_fn=predictors_input_fn,
       labels_input_fn=labels_input_fn,
@@ -122,7 +122,7 @@ def run_experiment(labels, ground_truth_threshold):
 
 if __name__ == '__main__':
   results = run_experiment(
-    labels=['animal'],
+    labels=['city'],
     ground_truth_threshold=0.1)
   results['em'].log(prefix='EM           ')
   results['maj'].log(prefix='Majority Vote')

@@ -16,10 +16,8 @@ from __future__ import absolute_import, division, print_function
 
 from . import layers
 from . import learners
-from . import transformations
 from . import utilities
 
 __author__ = 'eaplatanios'
 
-__all__ = [
-  'layers', 'learners', 'transformations', 'utilities']
+__all__ = ['layers', 'learners', 'utilities']

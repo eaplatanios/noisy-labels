@@ -339,10 +339,10 @@ class NELLLoader(object):
   @staticmethod
   def load(data_dir, labels, load_features=True, ground_truth_threshold=0.1):
     if load_features:
-      num_features = 167
       f_filename = 'np_features.tsv'
       f_filename = os.path.join(data_dir, f_filename)
-      features = dict()
+      sparse_features = list()
+      num_features = 0
       with open(f_filename, 'r') as f:
         for f_line in f:
           f_line_parts = [s.strip()
@@ -351,11 +351,16 @@ class NELLLoader(object):
           feature_values = []
           for p in f_line_parts[1].split(','):
             pair = p.split(':')
-            feature_indices.append(int(pair[0]) - 1)
+            f_index = int(pair[0])
+            feature_indices.append(f_index - 1)
             feature_values.append(float(pair[1]))
+            num_features = max(num_features, f_index)
+          sparse_features.append((f_line_parts[0], feature_indices, feature_values))
+      features = dict()
+      for instance, feature_indices, feature_values in sparse_features:
           f = np.zeros([num_features], np.float32)
           f[feature_indices] = feature_values
-          features[f_line_parts[0]] = f
+          features[instance] = f
     else:
       features = None
 

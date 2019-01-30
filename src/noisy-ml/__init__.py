@@ -19,13 +19,12 @@ import os
 import yaml
 
 from . import data
-
-from .data import *
+from . import evaluation
+from . import models
 
 __author__ = 'eaplatanios'
 
-__all__ = ['data']
-__all__.extend(data.__all__)
+__all__ = ['data', 'evaluation', 'models']
 
 __LOGGING_CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'logging.yaml')
 if os.path.exists(__LOGGING_CONFIG_PATH):

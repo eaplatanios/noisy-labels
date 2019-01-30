@@ -16,6 +16,7 @@ from __future__ import absolute_import, division, print_function
 
 import abc
 import logging
+import numpy as np
 import tensorflow as tf
 
 from six import with_metaclass
@@ -23,8 +24,9 @@ from six import with_metaclass
 __author__ = 'eaplatanios'
 
 __all__ = [
-  'Layer', 'Linear', 'LogSigmoid', 'LogSoftmax',
-  'HierarchicalLogSoftmax', 'MLP']
+  'FeatureMap', 'OneHotEncoding', 'Embedding', 'Selection',
+  'Concatenation', 'Layer', 'Linear', 'LogSigmoid',
+  'LogSoftmax', 'HierarchicalLogSoftmax', 'MLP']
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,84 @@ class Layer(with_metaclass(abc.ABCMeta, object)):
 
   def __call__(self, *args, **kwargs):
     return self.apply(*args, **kwargs)
+
+
+class FeatureMap(Layer):
+  def __init__(
+      self, features, adjust_magnitude=False,
+      name='FeatureMap'):
+    self.features = features
+    self.name = name
+    if adjust_magnitude:
+      max_magnitude = np.max(np.abs(self.features))
+      self.features /= max_magnitude
+
+  def apply(self, *args, **kwargs):
+    with tf.name_scope(self.name):
+      features = tf.constant(self.features)
+      inputs = args[0]
+      if inputs.shape[-1] == 1:
+        inputs = tf.squeeze(inputs, axis=-1)
+      return tf.gather(features, inputs)
+
+
+class OneHotEncoding(Layer):
+  def __init__(
+      self, num_inputs, dtype=tf.float32,
+      name='OneHotEncoding'):
+    self.num_inputs = num_inputs
+    self.dtype = dtype
+    self.name = name
+
+  def apply(self, *args, **kwargs):
+    with tf.name_scope(self.name):
+      inputs = args[0]
+      if inputs.shape[-1] == 1:
+        inputs = tf.squeeze(inputs, axis=-1)
+      return tf.one_hot(inputs, depth=self.num_inputs)
+
+
+class Embedding(Layer):
+  def __init__(
+      self, num_inputs, emb_size, dtype=tf.float32,
+      name='Embedding'):
+    self.num_inputs = num_inputs
+    self.emb_size = emb_size
+    self.dtype = dtype
+    self.name = name
+
+  def apply(self, *args, **kwargs):
+    with tf.variable_scope(self.name):
+      emb_matrix = tf.get_variable(
+        name='emb_matrix',
+        shape=[self.num_inputs, self.emb_size],
+        initializer=tf.random_normal_initializer(
+          dtype=self.dtype))
+      inputs = args[0]
+      if inputs.shape[-1] == 1:
+        inputs = tf.squeeze(inputs, axis=-1)
+      return tf.gather(emb_matrix, inputs)
+
+
+class Selection(Layer):
+  """Selects one of the arguments."""
+
+  def __init__(self, arg_index):
+    self.arg_index = arg_index
+
+  def apply(self, *args, **kwargs):
+    return args[self.arg_index]
+
+
+class Concatenation(Layer):
+  """Concatenates selected arguments."""
+
+  def __init__(self, arg_indices):
+    self.arg_indices = arg_indices
+
+  def apply(self, *args, **kwargs):
+    values = [args[i] for i in self.arg_indices]
+    return tf.concat(values, axis=-1)
 
 
 class Linear(Layer):

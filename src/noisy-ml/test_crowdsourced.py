@@ -32,6 +32,10 @@ def run_experiment(dataset_type):
   data_dir = os.path.join(working_dir, os.pardir, 'data')
   if dataset_type == 'sentiment_popularity':
     dataset = SentimentPopularityLoader.load(data_dir)
+  elif dataset_type == 'weather_sentiment':
+    dataset = WeatherSentimentLoader.load(data_dir)
+  elif dataset_type == 'ducks':
+    dataset = DucksLoader.load(data_dir)
   else:
     raise ValueError('Unknown dataset: %s', dataset_type)
 
@@ -44,21 +48,27 @@ def run_experiment(dataset_type):
 
   instances_input_fn = Embedding(
     num_inputs=len(dataset.instances),
-    emb_size=128,
+    emb_size=1,
     name='instance_embeddings')
 
   predictors_input_fn = Embedding(
     num_inputs=len(dataset.predictors),
-    emb_size=128,
+    emb_size=1,
     name='predictor_embeddings')
 
   labels_input_fn = Embedding(
     num_inputs=len(dataset.labels),
-    emb_size=16,
+    emb_size=1,
     name='label_embeddings')
 
-  qualities_input_fn = Concatenation(arg_indices=[1])
+  qualities_input_fn = Concatenation(arg_indices=[0, 1])
 
+  # if dataset_type == 'weather_sentiment':
+  #   output_layer = LogSoftmax(
+  #     num_labels=len(dataset.labels))
+  # else:
+  #   output_layer = LogSigmoid(
+  #     num_labels=len(dataset.labels))
   output_layer = LogSigmoid(
     num_labels=len(dataset.labels))
 
@@ -74,6 +84,18 @@ def run_experiment(dataset_type):
     output_layer=Linear(num_outputs=2),
     name='qualities_fn')
 
+  def predictions_output_fn(predictions):
+    # if dataset_type == 'weather_sentiment':
+    #   max_indices = predictions.argmax(1)
+    #   predictions[:] = 0.0
+    #   predictions[
+    #     np.arange(len(predictions)),
+    #     max_indices] = 1.0
+    #   return predictions
+    # else:
+    #   return np.exp(predictions)
+    return np.exp(predictions)
+
   learner = EMLearner(
     config=MultiLabelEMConfig(
       num_instances=len(dataset.instances),
@@ -86,7 +108,7 @@ def run_experiment(dataset_type):
       predictors_input_fn=predictors_input_fn,
       labels_input_fn=labels_input_fn,
       qualities_input_fn=qualities_input_fn,
-      predictions_output_fn=np.exp,
+      predictions_output_fn=predictions_output_fn,
       use_soft_maj=False,
       use_soft_y_hat=False,
       max_param_value=None))
@@ -112,7 +134,11 @@ def run_experiment(dataset_type):
 
 
 if __name__ == '__main__':
+  # results = run_experiment(
+  #   dataset_type='sentiment_popularity')
+  # results = run_experiment(
+  #   dataset_type='weather_sentiment')
   results = run_experiment(
-    dataset_type='sentiment_popularity')
+    dataset_type='ducks')
   results['em'].log(prefix='EM           ')
   results['maj'].log(prefix='Majority Vote')

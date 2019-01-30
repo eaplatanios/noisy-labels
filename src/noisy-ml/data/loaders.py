@@ -37,7 +37,9 @@ TrainData = namedtuple(
 class Dataset(object):
   def __init__(
       self, instances, predictors, labels,
-      true_labels, predicted_labels):
+      true_labels, predicted_labels,
+      instance_features=None, predictor_features=None,
+      label_features=None):
     """Creates a new dataset.
 
     Args:
@@ -51,12 +53,16 @@ class Dataset(object):
         that contains a tuple of two lists (instance
         indices and predicted values) per label and
         per predictor.
+      TODO: Add the rest of the arguments.
     """
     self.instances = instances
     self.predictors = predictors
     self.labels = labels
     self.true_labels = true_labels
     self.predicted_labels = predicted_labels
+    self.instance_features = instance_features
+    self.predictor_features = predictor_features
+    self.label_features = label_features
 
   def instance_indices(self):
     return list(range(len(self.instances)))
@@ -78,6 +84,17 @@ class Dataset(object):
     true_labels = dict()
     predicted_labels = dict()
 
+    has_if = True
+    has_pf = True
+    has_lf = True
+    for d in datasets:
+      has_if = has_if and d.instance_features is not None
+      has_pf = has_pf and d.predictor_features is not None
+      has_lf = has_lf and d.label_features is not None
+    instance_features = list() if has_if else None
+    predictor_features = list() if has_pf else None
+    label_features = list() if has_lf else None
+
     for dataset in datasets:
       for l_old, label in enumerate(dataset.labels):
         l = l_indices.get(label)
@@ -85,6 +102,8 @@ class Dataset(object):
           l = len(labels)
           labels.append(label)
           l_indices[label] = l
+          if has_lf:
+            label_features.append(dataset.label_features[l_old])
 
         # Process the true labels.
         if l not in true_labels:
@@ -96,6 +115,8 @@ class Dataset(object):
             i = len(instances)
             instances.append(instance)
             i_indices[instance] = i
+            if has_if:
+              instance_features.append(dataset.instance_features[i_old])
           true_labels[l][i] = true_label
 
         # Process the predicted labels.
@@ -108,6 +129,8 @@ class Dataset(object):
             p = len(predictors)
             predictors.append(predictor)
             p_indices[predictor] = p
+            if has_pf:
+              predictor_features.append(dataset.predictor_features[p_old])
           if p not in predicted_labels[l]:
             predicted_labels[l][p] = ([], [])
           for i_old, v in zip(*indices_values):
@@ -117,12 +140,16 @@ class Dataset(object):
               i = len(instances)
               instances.append(instance)
               i_indices[instance] = i
+              if has_if:
+                instance_features.append(dataset.instance_features[i_old])
             predicted_labels[l][p][0].append(i)
             predicted_labels[l][p][1].append(v)
 
     return Dataset(
       instances, predictors, labels,
-      true_labels, predicted_labels)
+      true_labels, predicted_labels,
+      instance_features, predictor_features,
+      label_features)
 
   def filter_labels(self, labels):
     i_indices = dict()
@@ -132,8 +159,17 @@ class Dataset(object):
     true_labels = dict()
     predicted_labels = dict()
 
+    has_if = self.instance_features is not None
+    has_pf = self.predictor_features is not None
+    has_lf = self.label_features is not None
+    instance_features = list() if has_if else None
+    predictor_features = list() if has_pf else None
+    label_features = list() if has_lf else None
+
     for l, label in enumerate(labels):
       l_old = self.labels.index(label)
+      if has_lf:
+        label_features.append(self.label_features[l_old])
 
       # Filter the true labels.
       true_labels[l] = dict()
@@ -143,6 +179,8 @@ class Dataset(object):
           i = len(instances)
           instances.append(self.instances[i_old])
           i_indices[i_old] = i
+          if has_if:
+            instance_features.append(self.instance_features[i_old])
         true_labels[l][i] = true_label
 
       # Filter the predicted labels.
@@ -153,6 +191,8 @@ class Dataset(object):
           p = len(predictors)
           predictors.append(self.predictors[p_old])
           p_indices[p_old] = p
+          if has_pf:
+            predictor_features.append(self.predictor_features[p_old])
         predicted_labels[l][p] = ([], [])
         for i_old, v in zip(*indices_values):
           i = i_indices.get(i_old)
@@ -160,12 +200,16 @@ class Dataset(object):
             i = len(instances)
             instances.append(self.instances[i_old])
             i_indices[i_old] = i
+            if has_if:
+              instance_features.append(self.instance_features[i_old])
           predicted_labels[l][p][0].append(i)
           predicted_labels[l][p][1].append(v)
 
     return Dataset(
       instances, predictors, labels,
-      true_labels, predicted_labels)
+      true_labels, predicted_labels,
+      instance_features, predictor_features,
+      label_features)
 
   def to_train(self):
     instances = list()
@@ -293,9 +337,29 @@ class LegacyLoader(object):
 
 class NELLLoader(object):
   @staticmethod
-  def load(data_dir, labels, ground_truth_threshold=0.1):
-    if len(labels) == 1:
-      label = labels[0]
+  def load(data_dir, labels, load_features=True, ground_truth_threshold=0.1):
+    if load_features:
+      num_features = 167
+      f_filename = 'np_features.tsv'
+      f_filename = os.path.join(data_dir, f_filename)
+      features = dict()
+      with open(f_filename, 'r') as f:
+        for f_line in f:
+          f_line_parts = [s.strip()
+                          for s in f_line.split('\t')]
+          feature_indices = []
+          feature_values = []
+          for p in f_line_parts[1].split(','):
+            pair = p.split(':')
+            feature_indices.append(int(pair[0]) - 1)
+            feature_values.append(float(pair[1]))
+          f = np.zeros([num_features], np.float32)
+          f[feature_indices] = feature_values
+          features[f_line_parts[0]] = f
+    else:
+      features = None
+
+    def load_for_label(label):
       filename = '{}.extracted_instances.all_predictions.txt'.format(label)
       filename = os.path.join(data_dir, filename)
 
@@ -304,10 +368,12 @@ class NELLLoader(object):
       labels = [label]
       true_labels = {0: dict()}
       predicted_labels = {0: dict()}
+      instance_features = []
       is_header = True
+      i = 0
 
       with open(filename, 'r') as f:
-        for i, line in enumerate(f):
+        for line in f:
           if is_header:
             predictors = [s.strip() for s in line.split('\t')][2:]
             predicted_labels[0] = {
@@ -315,20 +381,25 @@ class NELLLoader(object):
             is_header = False
           else:
             line_parts = [s.strip() for s in line.split('\t')]
-            instances.append(line_parts[0])
+            instance = line_parts[0]
+            if features is not None and instance not in features:
+              continue
+            i += 1
+            instances.append(instance)
             true_labels[0][i - 1] = int(float(line_parts[1]) >= ground_truth_threshold)
             for p in range(len(predictors)):
               if line_parts[p + 2] != '-':
                 predicted_labels[0][p][0].append(i - 1)
                 predicted_labels[0][p][1].append(float(line_parts[p + 2]))
+            if features is not None:
+              instance_features.append(features[instance])
 
       return Dataset(
         instances, predictors, labels,
-        true_labels, predicted_labels)
-    else:
-      return Dataset.join([
-        NELLLoader.load(data_dir, [l])
-        for l in labels])
+        true_labels, predicted_labels,
+        instance_features=instance_features)
+
+    return Dataset.join([load_for_label(l) for l in labels])
 
   # @staticmethod
   # def load(data_dir, labels, ground_truth=None):

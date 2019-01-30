@@ -128,13 +128,13 @@ class EMLearner(object):
       np.array(predictors)])
 
     self._init_session()
-    qualities_prior = self._session.run(
-      (self._ops['alpha'], self._ops['beta']),
+    qualities_mean_log = self._session.run(
+      self._ops['qualities_mean_log'],
       feed_dict={
         self._ops['x_indices']: temp[0],
         self._ops['p_indices']: temp[2],
         self._ops['l_indices']: temp[1]})
-    qualities = self.config.qualities_mean(*qualities_prior)
+    qualities = np.exp(qualities_mean_log)
     qualities = np.reshape(
       qualities,
       [len(instances), len(labels), len(predictors)])
@@ -142,10 +142,6 @@ class EMLearner(object):
 
 
 class EMConfig(with_metaclass(abc.ABCMeta, object)):
-  @abc.abstractmethod
-  def qualities_mean(self, *args):
-    pass
-
   @abc.abstractmethod
   def build_ops(self):
     pass
@@ -177,9 +173,6 @@ class MultiLabelEMConfig(EMConfig):
     self.use_soft_maj = use_soft_maj
     self.use_soft_y_hat = use_soft_y_hat
     self.max_param_value = max_param_value
-
-  def qualities_mean(self, alpha, beta):
-    return alpha / (alpha + beta)
 
   def build_ops(self):
     train_iterator = tf.data.Iterator.from_structure(
@@ -251,7 +244,8 @@ class MultiLabelEMConfig(EMConfig):
     a = tf.exp(a_log)
     b = tf.exp(b_log)
     ab_log = tf.stack([a_log, b_log], axis=-1)
-    a_plus_b_log = tf.log(a + b)
+    a_plus_b_log = tf.reduce_logsumexp(ab_log, axis=-1)
+    qualities_mean_log = a_log - a_plus_b_log
 
     # E-step:
 
@@ -375,7 +369,6 @@ class MultiLabelEMConfig(EMConfig):
       # with respect to the parameters of h and g.
       neg_log_likelihood = -ll_term0 - ll_term1 # - ll_term2
 
-      # M-step:
       m_step_init = tf.variables_initializer(
         tf.trainable_variables())
       global_step = tf.train.get_or_create_global_step()
@@ -393,6 +386,7 @@ class MultiLabelEMConfig(EMConfig):
       'predictions': predictions,
       'alpha': a,
       'beta': b,
+      'qualities_mean_log': qualities_mean_log,
       'set_use_maj': set_use_maj,
       'unset_use_maj': unset_use_maj,
       'e_step_accumulators': {

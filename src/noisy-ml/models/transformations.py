@@ -23,8 +23,8 @@ from six import with_metaclass
 __author__ = 'eaplatanios'
 
 __all__ = [
-  'Transformation', 'OneHotEncoding', 'Embedding',
-  'Selection', 'Concatenation']
+  'Transformation', 'FeatureMap', 'OneHotEncoding',
+  'Embedding', 'Selection', 'Concatenation']
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,20 @@ class Transformation(with_metaclass(abc.ABCMeta, object)):
 
   def __call__(self, *args, **kwargs):
     return self.apply(*args, **kwargs)
+
+
+class FeatureMap(Transformation):
+  def __init__(self, features, name='FeatureMap'):
+    self.features = features
+    self.name = name
+
+  def apply(self, *args, **kwargs):
+    with tf.name_scope(self.name):
+      features = tf.constant(self.features)
+      inputs = args[0]
+      if inputs.shape[-1] == 1:
+        inputs = tf.squeeze(inputs, axis=-1)
+      return tf.gather(features, inputs)
 
 
 class OneHotEncoding(Transformation):

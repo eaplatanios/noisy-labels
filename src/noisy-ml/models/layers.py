@@ -215,10 +215,10 @@ class Conv2D(Layer):
         self.c_num_filters, self.c_kernel_sizes,
         self.p_num_strides, self.p_kernel_sizes)
       for c_f, c_k, p_f, p_k in layers:
-        hidden = tf.layers.conv2d(
-          hidden, c_f, c_k, activation=self.activation)
-        hidden = tf.layers.max_pooling2d(hidden, p_f, p_k)
-      return tf.layers.flatten(hidden)
+        hidden = tf.keras.layers.Conv2D(
+          c_f, c_k, activation=self.activation)(hidden)
+        hidden = tf.keras.layers.MaxPooling2D((p_f, p_f), p_k)(hidden)
+      return tf.keras.layers.Flatten()(hidden)
 
 
 class LogSigmoid(Layer):
@@ -357,7 +357,7 @@ class DecodeJpeg(Layer):
           contents=i,
           channels=3),
           [self.width, self.height, 3]),
-        tf.float32),
+        tf.float32) / 255,
       inputs,
       dtype=tf.float32,
       back_prop=False)

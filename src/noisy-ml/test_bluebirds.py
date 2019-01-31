@@ -22,14 +22,140 @@ from .data.crowdsourced import *
 from .evaluation.metrics import *
 from .models.layers import *
 from .models.learners import *
+from .models.models import *
 
-__author__ = 'alshedivat'
+__author__ = 'eaplatanios'
+
+
+class BlueBirdsModel(Model):
+  def __init__(self, dataset):
+    self.dataset = dataset
+
+  def build(self, instances, predictors, labels):
+    if self.dataset.instance_features is None:
+      instances_input_fn = Embedding(
+        num_inputs=len(self.dataset.instances),
+        emb_size=32,
+        name='instance_embeddings')
+    else:
+      instances_input_fn = FeatureMap(
+        features=np.array(self.dataset.instance_features),
+        adjust_magnitude=False,
+        name='instance_features/feature_map') \
+        .and_then(DecodeJpeg(
+        width=256,
+        height=256,
+        name='instance_features/decode_jpeg')) \
+        .and_then(Conv2D(
+        c_num_filters=[32, 64],
+        c_kernel_sizes=[8, 5],
+        p_num_strides=[4, 2],
+        p_kernel_sizes=[8, 3],
+        activation=tf.nn.selu,
+        name='instance_features/conv2d'))
+
+    predictors_input_fn = Embedding(
+      num_inputs=len(self.dataset.predictors),
+      emb_size=32,
+      name='predictor_embeddings')
+
+    instances = instances_input_fn(instances)
+    predictors = predictors_input_fn(predictors)
+
+    q_fn_args = predictors
+    # q_fn_args = Concatenation([0, 1])(instances, predictors)
+
+    predictions = MLP(
+      hidden_units=[128, 64, 32],
+      activation=tf.nn.selu,
+      output_layer=LogSigmoid(
+        num_labels=len(self.dataset.labels)),
+      name='m_fn'
+    )(instances)
+
+    q_params = MLP(
+      hidden_units=[128, 64, 32],
+      activation=tf.nn.selu,
+      output_layer=Linear(num_outputs=4),
+      name='q_fn'
+    )(q_fn_args)
+
+    return BuiltModel(predictions, q_params)
+
+
+class BlueBirdsLowRankModel(Model):
+  def __init__(self, dataset, q_latent_size):
+    self.dataset = dataset
+    self.q_latent_size = q_latent_size
+
+  def build(self, instances, predictors, labels):
+    if self.dataset.instance_features is None:
+      instances_input_fn = Embedding(
+        num_inputs=len(self.dataset.instances),
+        emb_size=32,
+        name='instance_embeddings')
+    else:
+      instances_input_fn = FeatureMap(
+        features=np.array(self.dataset.instance_features),
+        adjust_magnitude=False,
+        name='instance_features/feature_map') \
+        .and_then(DecodeJpeg(
+        width=256,
+        height=256,
+        name='instance_features/decode_jpeg')) \
+        .and_then(Conv2D(
+        c_num_filters=[32, 64],
+        c_kernel_sizes=[8, 5],
+        p_num_strides=[4, 2],
+        p_kernel_sizes=[8, 3],
+        activation=tf.nn.selu,
+        name='instance_features/conv2d'))
+
+    predictors_input_fn = Embedding(
+      num_inputs=len(self.dataset.predictors),
+      emb_size=32,
+      name='predictor_embeddings')
+
+    instances = instances_input_fn(instances)
+    predictors = predictors_input_fn(predictors)
+
+    q_fn_args = predictors
+    # q_fn_args = Concatenation([0, 1])(instances, predictors)
+
+    predictions = MLP(
+      hidden_units=[128, 64, 32],
+      activation=tf.nn.selu,
+      output_layer=LogSigmoid(
+        num_labels=len(self.dataset.labels)),
+      name='m_fn'
+    )(instances)
+
+    q_i = MLP(
+      hidden_units=[],
+      activation=tf.nn.selu,
+      output_layer=Linear(num_outputs=4*self.q_latent_size),
+      name='q_i_fn'
+    )(instances)
+
+    q_p = MLP(
+      hidden_units=[],
+      activation=tf.nn.selu,
+      output_layer=Linear(num_outputs=4*self.q_latent_size),
+      name='q_p_fn'
+    )(predictors)
+
+    q_i = tf.reshape(q_i, [-1, 4, self.q_latent_size])
+    q_p = tf.reshape(q_p, [-1, 4, self.q_latent_size])
+
+    q_params = tf.reduce_sum(q_i * q_p, axis=-1)
+
+    return BuiltModel(predictions, q_params)
 
 
 def run_experiment():
   working_dir = os.getcwd()
   data_dir = os.path.join(working_dir, os.pardir, 'data')
-  dataset = BlueBirdsLoader.load(data_dir, load_features=True)
+  dataset = BlueBirdsLoader.load(data_dir, load_features=False)
 
   train_data = dataset.to_train()
   train_dataset = tf.data.Dataset.from_tensor_slices({
@@ -38,70 +164,18 @@ def run_experiment():
     'labels': train_data.labels,
     'values': train_data.values})
 
-  if dataset.instance_features is None:
-    instances_input_fn = Embedding(
-      num_inputs=len(dataset.instances),
-      emb_size=32,
-      name='instance_embeddings')
-  else:
-    instances_input_fn = FeatureMap(
-      features=np.array(dataset.instance_features),
-      adjust_magnitude=False,
-      name='instance_features/feature_map') \
-      .and_then(DecodeJpeg(
-      width=256,
-      height=256,
-      name='instance_features/decode_jpeg')) \
-      .and_then(Conv2D(
-      c_num_filters=[4, 8],
-      c_kernel_sizes=[10, 3],
-      p_num_strides=[5, 2],
-      p_kernel_sizes=[5, 2],
-      activation=tf.nn.selu,
-      name='instance_features/conv2d'))
-
-  predictors_input_fn = Embedding(
-    num_inputs=len(dataset.predictors),
-    emb_size=32,
-    name='predictor_embeddings')
-
-  labels_input_fn = Embedding(
-    num_inputs=len(dataset.labels),
-    emb_size=1,
-    name='label_embeddings')
-
-  qualities_input_fn = Concatenation([0, 1])
-
-  output_layer = LogSigmoid(
-    num_labels=len(dataset.labels))
-
-  model_fn = MLP(
-    hidden_units=[16],
-    activation=tf.nn.selu,
-    output_layer=output_layer,
-    name='model_fn')
-
-  qualities_fn = MLP(
-    hidden_units=[16],
-    activation=tf.nn.selu,
-    output_layer=Linear(num_outputs=4),
-    name='qualities_fn')
+  model = BlueBirdsLowRankModel(dataset, q_latent_size=8)
 
   learner = EMLearner(
     config=MultiLabelFullConfusionEMConfig(
       num_instances=len(dataset.instances),
       num_predictors=len(dataset.predictors),
       num_labels=len(dataset.labels),
-      model_fn=model_fn,
-      qualities_fn=qualities_fn,
-      optimizer=tf.train.AdamOptimizer(),
-      instances_input_fn=instances_input_fn,
-      predictors_input_fn=predictors_input_fn,
-      labels_input_fn=labels_input_fn,
-      qualities_input_fn=qualities_input_fn,
-      predictions_output_fn=np.exp,
+      model=model,
+      optimizer=tf.train.AdamOptimizer(1e-4),
       use_soft_maj=True,
-      use_soft_y_hat=False))
+      use_soft_y_hat=False),
+    predictions_output_fn=np.exp)
 
   evaluator = Evaluator(learner, dataset)
 

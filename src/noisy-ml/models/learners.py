@@ -21,7 +21,6 @@ import tensorflow as tf
 
 from six import with_metaclass
 
-from .layers import Concatenation
 from .utilities import log1mexp
 
 __author__ = 'eaplatanios'
@@ -34,8 +33,10 @@ logger = logging.getLogger(__name__)
 
 
 class EMLearner(object):
-  def __init__(self, config):
+  def __init__(
+      self, config, predictions_output_fn=lambda x: x):
     self.config = config
+    self.predictions_output_fn = predictions_output_fn
     self._build_model()
     self._session = None
 
@@ -110,7 +111,7 @@ class EMLearner(object):
     predictions = self._session.run(
       self._ops['predictions'],
       feed_dict={self._ops['x_indices']: instances})
-    predictions = self.config.predictions_output_fn(predictions)
+    predictions = self.predictions_output_fn(predictions)
     return predictions
 
   def qualities(self, instances, predictors, labels):
@@ -144,31 +145,20 @@ class EMLearner(object):
 class EMConfig(with_metaclass(abc.ABCMeta, object)):
   @abc.abstractmethod
   def build_ops(self):
-    pass
+    raise NotImplementedError
 
 
 class MultiLabelEMConfig(EMConfig):
   def __init__(
       self, num_instances, num_predictors, num_labels,
-      model_fn, qualities_fn, optimizer,
-      instances_input_fn=lambda x: x,
-      predictors_input_fn=lambda x: x,
-      labels_input_fn=lambda x: x,
-      qualities_input_fn=Concatenation(arg_indices=[0, 1, 2]),
-      predictions_output_fn=lambda x: x,
-      use_soft_maj=True, use_soft_y_hat=False):
+      model, optimizer, use_soft_maj=True,
+      use_soft_y_hat=False):
     super(MultiLabelEMConfig, self).__init__()
     self.num_instances = num_instances
     self.num_predictors = num_predictors
     self.num_labels = num_labels
-    self.model_fn = model_fn
-    self.qualities_fn = qualities_fn
+    self.model = model
     self.optimizer = optimizer
-    self.instances_input_fn = instances_input_fn
-    self.predictors_input_fn = predictors_input_fn
-    self.labels_input_fn = labels_input_fn
-    self.qualities_input_fn = qualities_input_fn
-    self.predictions_output_fn = predictions_output_fn
     self.use_soft_maj = use_soft_maj
     self.use_soft_y_hat = use_soft_y_hat
 
@@ -206,13 +196,9 @@ class MultiLabelEMConfig(EMConfig):
     x_indices = instances
     p_indices = predictors
     l_indices = labels
-    x_features = self.instances_input_fn(x_indices)
-    p_features = self.predictors_input_fn(p_indices)
-    l_features = self.labels_input_fn(l_indices)
-    predictions = self.model_fn(x_features)
-    q_input = self.qualities_input_fn(
-      x_features, p_features, l_features)
-    q_params = self.qualities_fn(q_input)
+
+    predictions, q_params = self.model.build(
+      x_indices, p_indices, l_indices)
 
     # y_hat_1 has shape: [BatchSize]
     # y_hat_0 has shape: [BatchSize]
@@ -397,25 +383,14 @@ class MultiLabelEMConfig(EMConfig):
 class MultiLabelFullConfusionEMConfig(EMConfig):
   def __init__(
       self, num_instances, num_predictors, num_labels,
-      model_fn, qualities_fn, optimizer,
-      instances_input_fn=lambda x: x,
-      predictors_input_fn=lambda x: x,
-      labels_input_fn=lambda x: x,
-      qualities_input_fn=Concatenation(arg_indices=[0, 1, 2]),
-      predictions_output_fn=lambda x: x,
-      use_soft_maj=True, use_soft_y_hat=False):
+      model, optimizer, use_soft_maj=True,
+      use_soft_y_hat=False):
     super(MultiLabelFullConfusionEMConfig, self).__init__()
     self.num_instances = num_instances
     self.num_predictors = num_predictors
     self.num_labels = num_labels
-    self.model_fn = model_fn
-    self.qualities_fn = qualities_fn
+    self.model = model
     self.optimizer = optimizer
-    self.instances_input_fn = instances_input_fn
-    self.predictors_input_fn = predictors_input_fn
-    self.labels_input_fn = labels_input_fn
-    self.qualities_input_fn = qualities_input_fn
-    self.predictions_output_fn = predictions_output_fn
     self.use_soft_maj = use_soft_maj
     self.use_soft_y_hat = use_soft_y_hat
 
@@ -453,13 +428,9 @@ class MultiLabelFullConfusionEMConfig(EMConfig):
     x_indices = instances
     p_indices = predictors
     l_indices = labels
-    x_features = self.instances_input_fn(x_indices)
-    p_features = self.predictors_input_fn(p_indices)
-    l_features = self.labels_input_fn(l_indices)
-    predictions = self.model_fn(x_features)
-    q_input = self.qualities_input_fn(
-      x_features, p_features, l_features)
-    q_params = self.qualities_fn(q_input)
+
+    predictions, q_params = self.model.build(
+      x_indices, p_indices, l_indices)
 
     # y_hat_1 has shape: [BatchSize]
     # y_hat_0 has shape: [BatchSize]

@@ -14,11 +14,24 @@
 
 from __future__ import absolute_import, division, print_function
 
-from . import layers
-from . import learners
-from . import models
-from . import utilities
+import abc
+import logging
+
+from collections import namedtuple
+from six import with_metaclass
 
 __author__ = 'eaplatanios'
 
-__all__ = ['layers', 'learners', 'models', 'utilities']
+__all__ = ['BuiltModel', 'Model']
+
+logger = logging.getLogger(__name__)
+
+
+BuiltModel = namedtuple(
+  'BuiltModel', ['predictions', 'q_params'])
+
+
+class Model(with_metaclass(abc.ABCMeta, object)):
+  @abc.abstractmethod
+  def build(self, instances, predictors, labels):
+    raise NotImplementedError

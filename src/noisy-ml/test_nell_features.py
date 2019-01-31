@@ -22,10 +22,110 @@ from .data.loaders import *
 from .evaluation.metrics import *
 from .models.layers import *
 from .models.learners import *
+from .models.models import *
 
 __author__ = 'eaplatanios'
 
 __all__ = []
+
+
+class NELLModel(Model):
+  def __init__(self, dataset):
+    self.dataset = dataset
+
+  def build(self, instances, predictors, labels):
+    if self.dataset.instance_features is None:
+      instances_input_fn = Embedding(
+        num_inputs=len(self.dataset.instances),
+        emb_size=32,
+        name='instance_embeddings')
+    else:
+      instances_input_fn = FeatureMap(
+        features=np.array(self.dataset.instance_features),
+        adjust_magnitude=True,
+        name='instance_features')
+
+    predictors_input_fn = Embedding(
+      num_inputs=len(self.dataset.predictors),
+      emb_size=32,
+      name='predictor_embeddings')
+
+    instances = instances_input_fn(instances)
+    predictors = predictors_input_fn(predictors)
+
+    q_fn_args = predictors
+    # q_fn_args = Concatenation([0, 1])(instances, predictors)
+
+    predictions = MLP(
+      hidden_units=[128, 64, 32],
+      activation=tf.nn.selu,
+      output_layer=LogSigmoid(
+        num_labels=len(self.dataset.labels)),
+      name='m_fn'
+    )(instances)
+
+    q_params = MLP(
+      hidden_units=[128, 64, 32],
+      activation=tf.nn.selu,
+      output_layer=Linear(num_outputs=4),
+      name='q_fn'
+    )(q_fn_args)
+
+    return BuiltModel(predictions, q_params)
+
+
+class NELLLowRankModel(Model):
+  def __init__(self, dataset, q_latent_size):
+    self.dataset = dataset
+    self.q_latent_size = q_latent_size
+
+  def build(self, instances, predictors, labels):
+    if self.dataset.instance_features is None:
+      instances_input_fn = Embedding(
+        num_inputs=len(self.dataset.instances),
+        emb_size=32,
+        name='instance_embeddings')
+    else:
+      instances_input_fn = FeatureMap(
+        features=np.array(self.dataset.instance_features),
+        adjust_magnitude=True,
+        name='instance_features')
+    predictors_input_fn = Embedding(
+      num_inputs=len(self.dataset.predictors),
+      emb_size=32,
+      name='predictor_embeddings')
+
+    instances = instances_input_fn(instances)
+    predictors = predictors_input_fn(predictors)
+
+    predictions = MLP(
+      hidden_units=[128, 64, 32],
+      activation=tf.nn.selu,
+      output_layer=LogSigmoid(
+        num_labels=len(self.dataset.labels)),
+      name='m_fn'
+    )(instances)
+
+    q_i = MLP(
+      hidden_units=[],
+      activation=tf.nn.selu,
+      output_layer=Linear(num_outputs=4*self.q_latent_size),
+      name='q_i_fn'
+    )(instances)
+
+    q_p = MLP(
+      hidden_units=[],
+      activation=tf.nn.selu,
+      output_layer=Linear(num_outputs=4*self.q_latent_size),
+      name='q_p_fn'
+    )(predictors)
+
+    q_i = tf.reshape(q_i, [-1, 4, self.q_latent_size])
+    q_p = tf.reshape(q_p, [-1, 4, self.q_latent_size])
+
+    q_params = tf.reduce_sum(q_i * q_p, axis=-1)
+
+    return BuiltModel(predictions, q_params)
 
 
 def run_experiment(labels, ground_truth_threshold):
@@ -36,7 +136,11 @@ def run_experiment(labels, ground_truth_threshold):
   dataset = NELLLoader.load(
     data_dir=data_dir,
     labels=labels,
+    load_features=False,
     ground_truth_threshold=ground_truth_threshold)
+  # dataset = NELLLoader.load_with_ground_truth(
+  #   data_dir=data_dir,
+  #   labels=labels)
 
   train_data = dataset.to_train()
   train_dataset = tf.data.Dataset.from_tensor_slices({
@@ -45,59 +149,19 @@ def run_experiment(labels, ground_truth_threshold):
     'labels': train_data.labels,
     'values': train_data.values})
 
-  if dataset.instance_features is None:
-    instances_input_fn = Embedding(
-      num_inputs=len(dataset.instances),
-      emb_size=2,
-      name='instance_embeddings')
-  else:
-    instances_input_fn = FeatureMap(
-      features=np.array(dataset.instance_features),
-      adjust_magnitude=True,
-      name='instance_features')
-
-  predictors_input_fn = Embedding(
-    num_inputs=len(dataset.predictors),
-    emb_size=32,
-    name='predictor_embeddings')
-
-  labels_input_fn = Embedding(
-    num_inputs=len(dataset.labels),
-    emb_size=32,
-    name='label_embeddings')
-
-  qualities_input_fn = Concatenation(arg_indices=[0, 1])
-
-  output_layer = LogSigmoid(
-    num_labels=len(dataset.labels))
-
-  model_fn = MLP(
-    hidden_units=[],
-    activation=tf.nn.selu,
-    output_layer=output_layer,
-    name='model_fn')
-
-  qualities_fn = MLP(
-    hidden_units=[],
-    activation=tf.nn.selu,
-    output_layer=Linear(num_outputs=4),
-    name='qualities_fn')
+  # model = NELLModel(dataset)
+  model = NELLLowRankModel(dataset, q_latent_size=8)
 
   learner = EMLearner(
     config=MultiLabelFullConfusionEMConfig(
       num_instances=len(dataset.instances),
       num_predictors=len(dataset.predictors),
       num_labels=len(dataset.labels),
-      model_fn=model_fn,
-      qualities_fn=qualities_fn,
+      model=model,
       optimizer=tf.train.AdamOptimizer(),
-      instances_input_fn=instances_input_fn,
-      predictors_input_fn=predictors_input_fn,
-      labels_input_fn=labels_input_fn,
-      qualities_input_fn=qualities_input_fn,
-      predictions_output_fn=np.exp,
       use_soft_maj=True,
-      use_soft_y_hat=False))
+      use_soft_y_hat=False),
+    predictions_output_fn=np.exp)
 
   evaluator = Evaluator(learner, dataset)
 
@@ -107,7 +171,7 @@ def run_experiment(labels, ground_truth_threshold):
 
   learner.train(
     dataset=train_dataset,
-    batch_size=1024,
+    batch_size=128,
     warm_start=True,
     max_m_steps=10000,
     max_em_steps=10,

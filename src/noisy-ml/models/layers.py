@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 class Layer(with_metaclass(abc.ABCMeta, object)):
   @abc.abstractmethod
   def apply(self, *args, **kwargs):
-    pass
+    raise NotImplementedError
 
   def __call__(self, *args, **kwargs):
     return self.apply(*args, **kwargs)

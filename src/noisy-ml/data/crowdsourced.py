@@ -45,13 +45,14 @@ class BlueBirdsLoader(object):
       data_dir, 'crowdsourced', 'bluebirds')
 
     if load_features:
-      f_dir = os.path.join(data_dir, 'images')
+      f_dir = os.path.join(data_dir, 'resized_images')
       features = dict()
       for f_file in os.listdir(f_dir):
-        instance_id = int(os.path.splitext(f_file)[0])
-        f_file = os.path.join(f_dir, f_file)
-        with open(f_file, 'rb') as f:
-          features[instance_id] = f.read()
+        if f_file.endswith('.jpg'):
+          instance_id = int(os.path.splitext(f_file)[0])
+          f_file = os.path.join(f_dir, f_file)
+          with open(f_file, 'rb') as f:
+            features[instance_id] = f.read()
     else:
       features = None
 

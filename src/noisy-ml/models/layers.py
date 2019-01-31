@@ -24,9 +24,10 @@ from six import with_metaclass
 __author__ = 'eaplatanios'
 
 __all__ = [
-  'FeatureMap', 'OneHotEncoding', 'Embedding', 'Selection',
-  'Concatenation', 'Layer', 'Linear', 'LogSigmoid',
-  'LogSoftmax', 'HierarchicalLogSoftmax', 'MLP']
+  'Layer', 'ComposedLayer', 'FeatureMap', 'OneHotEncoding',
+  'Embedding', 'Selection', 'Concatenation', 'Linear',
+  'MLP', 'Conv2D', 'LogSigmoid', 'LogSoftmax',
+  'HierarchicalLogSoftmax', 'DecodeJpeg']
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,18 @@ class Layer(with_metaclass(abc.ABCMeta, object)):
 
   def __call__(self, *args, **kwargs):
     return self.apply(*args, **kwargs)
+
+  def and_then(self, layer):
+    return ComposedLayer(self, layer)
+
+
+class ComposedLayer(Layer):
+  def __init__(self, layer1, layer2):
+    self.layer1 = layer1
+    self.layer2 = layer2
+
+  def apply(self, *args, **kwargs):
+    return self.layer2(self.layer1(*args, **kwargs))
 
 
 class FeatureMap(Layer):
@@ -141,6 +154,71 @@ class Linear(Layer):
       outputs = tf.nn.xw_plus_b(
         x=inputs, weights=w, biases=b, name='linear')
     return outputs
+
+
+class MLP(Layer):
+  def __init__(
+      self,
+      hidden_units,
+      activation=tf.nn.leaky_relu,
+      output_layer=lambda x: x,
+      name='MLP'):
+    self.hidden_units = hidden_units
+    self.activation = activation
+    self.output_projection = output_layer
+    self.name = name
+
+  def apply(self, *args, **kwargs):
+    with tf.variable_scope(self.name):
+      hidden = args[0]
+      w_initializer = tf.glorot_uniform_initializer(
+        dtype=hidden.dtype)
+      b_initializer = tf.zeros_initializer(
+        dtype=hidden.dtype)
+      layers = enumerate(self.hidden_units)
+      for i, num_units in layers:
+        with tf.variable_scope('layer_{}'.format(i)):
+          w = tf.get_variable(
+            name='weights',
+            shape=[hidden.shape[-1], num_units],
+            initializer=w_initializer)
+          b = tf.get_variable(
+            name='bias',
+            shape=[num_units],
+            initializer=b_initializer)
+          if hidden.shape.rank == 3:
+            hidden = tf.tensordot(
+              hidden, w, axes=[[2], [0]], name='linear')
+          else:
+            hidden = tf.nn.xw_plus_b(
+              x=hidden, weights=w, biases=b, name='linear')
+          hidden = self.activation(hidden)
+      return self.output_projection(hidden)
+
+
+class Conv2D(Layer):
+  def __init__(
+      self, c_num_filters, c_kernel_sizes,
+      p_num_strides, p_kernel_sizes,
+      activation=tf.nn.leaky_relu, name='Conv2D'):
+    self.c_num_filters = c_num_filters
+    self.c_kernel_sizes = c_kernel_sizes
+    self.p_num_strides = p_num_strides
+    self.p_kernel_sizes = p_kernel_sizes
+    self.activation = activation
+    self.name = name
+
+  def apply(self, *args, **kwargs):
+    with tf.variable_scope(self.name):
+      hidden = args[0]
+      layers = zip(
+        self.c_num_filters, self.c_kernel_sizes,
+        self.p_num_strides, self.p_kernel_sizes)
+      for c_f, c_k, p_f, p_k in layers:
+        hidden = tf.layers.conv2d(
+          hidden, c_f, c_k, activation=self.activation)
+        hidden = tf.layers.max_pooling2d(hidden, p_f, p_k)
+      return tf.layers.flatten(hidden)
 
 
 class LogSigmoid(Layer):
@@ -264,41 +342,22 @@ class HierarchicalLogSoftmax(Layer):
     return tf.log(total_output + 1e-12)
 
 
-class MLP(Layer):
-  def __init__(
-      self,
-      hidden_units,
-      activation=tf.nn.leaky_relu,
-      output_layer=lambda x: x,
-      name='MLP'):
-    self.hidden_units = hidden_units
-    self.activation = activation
-    self.output_projection = output_layer
+class DecodeJpeg(Layer):
+  def __init__(self, width, height, name='DecodeJpeg'):
+    self.width = width
+    self.height = height
     self.name = name
 
   def apply(self, *args, **kwargs):
-    with tf.variable_scope(self.name):
-      hidden = args[0]
-      w_initializer = tf.glorot_uniform_initializer(
-        dtype=hidden.dtype)
-      b_initializer = tf.zeros_initializer(
-        dtype=hidden.dtype)
-      layers = enumerate(self.hidden_units)
-      for i, num_units in layers:
-        with tf.variable_scope('layer_{}'.format(i)):
-          w = tf.get_variable(
-            name='weights',
-            shape=[hidden.shape[-1], num_units],
-            initializer=w_initializer)
-          b = tf.get_variable(
-            name='bias',
-            shape=[num_units],
-            initializer=b_initializer)
-          if hidden.shape.rank == 3:
-            hidden = tf.tensordot(
-              hidden, w, axes=[[2], [0]], name='linear')
-          else:
-            hidden = tf.nn.xw_plus_b(
-              x=hidden, weights=w, biases=b, name='linear')
-          hidden = self.activation(hidden)
-      return self.output_projection(hidden)
+    inputs = args[0]
+    return tf.map_fn(
+      lambda i: tf.cast(
+        tf.reshape(
+          tf.image.decode_jpeg(
+          contents=i,
+          channels=3),
+          [self.width, self.height, 3]),
+        tf.float32),
+      inputs,
+      dtype=tf.float32,
+      back_prop=False)

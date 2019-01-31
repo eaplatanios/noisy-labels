@@ -17,6 +17,7 @@ from __future__ import absolute_import, division, print_function
 import logging
 import numpy as np
 import os
+import random
 import six
 
 from collections import namedtuple
@@ -211,7 +212,7 @@ class Dataset(object):
       instance_features, predictor_features,
       label_features)
 
-  def to_train(self):
+  def to_train(self, shuffle=False):
     instances = list()
     predictors = list()
     labels = list()
@@ -222,6 +223,10 @@ class Dataset(object):
         predictors.extend([p for _ in indices])
         labels.extend([l for _ in indices])
         values.extend(l_values)
+    if shuffle:
+      temp = list(zip(instances, predictors, labels, values))
+      random.shuffle(temp)
+      instances, predictors, labels, values = zip(*temp)
     return TrainData(instances, predictors, labels, values)
 
   def compute_binary_qualities(self):
@@ -373,7 +378,7 @@ class NELLLoader(object):
       labels = [label]
       true_labels = {0: dict()}
       predicted_labels = {0: dict()}
-      instance_features = []
+      instance_features = list() if features is not None else None
       is_header = True
       i = 0
 

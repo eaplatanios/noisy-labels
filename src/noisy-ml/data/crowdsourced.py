@@ -40,9 +40,20 @@ class BlueBirdsLoader(object):
   """
 
   @staticmethod
-  def load(data_dir):
+  def load(data_dir, load_features=True):
     data_dir = os.path.join(
       data_dir, 'crowdsourced', 'bluebirds')
+
+    if load_features:
+      f_dir = os.path.join(data_dir, 'images')
+      features = dict()
+      for f_file in os.listdir(f_dir):
+        instance_id = int(os.path.splitext(f_file)[0])
+        f_file = os.path.join(f_dir, f_file)
+        with open(f_file, 'rb') as f:
+          features[instance_id] = f.read()
+    else:
+      features = None
 
     def convert_labels_to_ints(dictionary):
       return dict(map(
@@ -74,6 +85,11 @@ class BlueBirdsLoader(object):
     predictors = list(six.iterkeys(predicted_labels))
     labels = [0]
 
+    if features is not None:
+      instance_features = [features[i] for i in instances]
+    else:
+      instance_features = None
+
     instance_ids = {
       instance: i
       for i, instance in enumerate(instances)}
@@ -96,7 +112,8 @@ class BlueBirdsLoader(object):
 
     return Dataset(
       instances, predictors, labels,
-      true_labels, predicted_labels)
+      true_labels, predicted_labels,
+      instance_features=instance_features)
 
 
 class SentimentPopularityLoader(object):

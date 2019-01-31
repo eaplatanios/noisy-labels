@@ -53,10 +53,10 @@ def run_experiment():
       height=256,
       name='instance_features/decode_jpeg')) \
       .and_then(Conv2D(
-      c_num_filters=[32, 64],
-      c_kernel_sizes=[5, 3],
-      p_num_strides=[2, 2],
-      p_kernel_sizes=[2, 2],
+      c_num_filters=[4, 8],
+      c_kernel_sizes=[10, 3],
+      p_num_strides=[5, 2],
+      p_kernel_sizes=[5, 2],
       activation=tf.nn.selu,
       name='instance_features/conv2d'))
 
@@ -76,19 +76,19 @@ def run_experiment():
     num_labels=len(dataset.labels))
 
   model_fn = MLP(
-    hidden_units=[512],
+    hidden_units=[16],
     activation=tf.nn.selu,
     output_layer=output_layer,
     name='model_fn')
 
   qualities_fn = MLP(
-    hidden_units=[512],
+    hidden_units=[16],
     activation=tf.nn.selu,
-    output_layer=Linear(num_outputs=2),
+    output_layer=Linear(num_outputs=4),
     name='qualities_fn')
 
   learner = EMLearner(
-    config=MultiLabelEMConfig(
+    config=MultiLabelFullConfusionEMConfig(
       num_instances=len(dataset.instances),
       num_predictors=len(dataset.predictors),
       num_labels=len(dataset.labels),
@@ -101,8 +101,7 @@ def run_experiment():
       qualities_input_fn=qualities_input_fn,
       predictions_output_fn=np.exp,
       use_soft_maj=True,
-      use_soft_y_hat=False,
-      max_param_value=None))
+      use_soft_y_hat=False))
 
   evaluator = Evaluator(learner, dataset)
 

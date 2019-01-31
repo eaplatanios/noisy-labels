@@ -34,7 +34,7 @@ def run_experiment(dataset_type):
   elif dataset_type == 'weather_sentiment':
     dataset = WeatherSentimentLoader.load(data_dir)
   elif dataset_type == 'bluebirds':
-    dataset = BlueBirdsLoader.load(data_dir)
+    dataset = BlueBirdsLoader.load(data_dir, load_features=False)
   else:
     raise ValueError('Unknown dataset: %s', dataset_type)
 
@@ -109,8 +109,7 @@ def run_experiment(dataset_type):
       qualities_input_fn=qualities_input_fn,
       predictions_output_fn=predictions_output_fn,
       use_soft_maj=False,
-      use_soft_y_hat=False,
-      max_param_value=None))
+      use_soft_y_hat=False))
 
   evaluator = Evaluator(learner, dataset)
 

@@ -58,12 +58,12 @@ def run_experiment(labels, ground_truth_threshold):
 
   predictors_input_fn = Embedding(
     num_inputs=len(dataset.predictors),
-    emb_size=128,
+    emb_size=32,
     name='predictor_embeddings')
 
   labels_input_fn = Embedding(
     num_inputs=len(dataset.labels),
-    emb_size=1,
+    emb_size=32,
     name='label_embeddings')
 
   qualities_input_fn = Concatenation(arg_indices=[0, 1])
@@ -72,33 +72,32 @@ def run_experiment(labels, ground_truth_threshold):
     num_labels=len(dataset.labels))
 
   model_fn = MLP(
-    hidden_units=[128, 64, 32],
+    hidden_units=[],
     activation=tf.nn.selu,
     output_layer=output_layer,
     name='model_fn')
 
   qualities_fn = MLP(
-    hidden_units=[128, 64, 32],
+    hidden_units=[],
     activation=tf.nn.selu,
-    output_layer=Linear(num_outputs=2),
+    output_layer=Linear(num_outputs=4),
     name='qualities_fn')
 
   learner = EMLearner(
-    config=MultiLabelEMConfig(
+    config=MultiLabelFullConfusionEMConfig(
       num_instances=len(dataset.instances),
       num_predictors=len(dataset.predictors),
       num_labels=len(dataset.labels),
       model_fn=model_fn,
       qualities_fn=qualities_fn,
-      optimizer=tf.train.AdamOptimizer(1e-2),
+      optimizer=tf.train.AdamOptimizer(),
       instances_input_fn=instances_input_fn,
       predictors_input_fn=predictors_input_fn,
       labels_input_fn=labels_input_fn,
       qualities_input_fn=qualities_input_fn,
       predictions_output_fn=np.exp,
       use_soft_maj=True,
-      use_soft_y_hat=False,
-      max_param_value=None))
+      use_soft_y_hat=False))
 
   evaluator = Evaluator(learner, dataset)
 
@@ -108,7 +107,7 @@ def run_experiment(labels, ground_truth_threshold):
 
   learner.train(
     dataset=train_dataset,
-    batch_size=128,
+    batch_size=1024,
     warm_start=True,
     max_m_steps=10000,
     max_em_steps=10,
@@ -123,6 +122,7 @@ def run_experiment(labels, ground_truth_threshold):
 if __name__ == '__main__':
   results = run_experiment(
     labels=['city'],
+    # labels=['bird', 'city', 'country', 'fish', 'lake', 'mammal', 'river'],
     ground_truth_threshold=0.1)
   results['em'].log(prefix='EM           ')
   results['maj'].log(prefix='Majority Vote')

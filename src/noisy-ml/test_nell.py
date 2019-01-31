@@ -118,8 +118,7 @@ def run_experiment(dataset_type, labels, small_version):
       qualities_input_fn=qualities_input_fn,
       predictions_output_fn=predictions_output_fn,
       use_soft_maj=True,
-      use_soft_y_hat=False,
-      max_param_value=None))
+      use_soft_y_hat=False))
 
   evaluator = Evaluator(learner, dataset)
 

@@ -247,6 +247,32 @@ class Dataset(object):
     num_total = np.array(num_total, np.float32)
     return num_correct / num_total
 
+  def compute_binary_qualities_full_confusion(self):
+    num_confused = list()
+    num_total = list()
+    for l, label in enumerate(self.labels):
+      num_confused.append(list())
+      num_total.append(list())
+      true_labels = self.true_labels[l]
+      for p, indices_values in six.iteritems(self.predicted_labels[l]):
+        num_confused[l].append(np.zeros([2, 2], dtype=np.float32))
+        num_total[l].append(np.zeros([1, 1], dtype=np.float32))
+        for i, v in zip(*indices_values):
+          if true_labels[i] == 0:
+            if v >= 0.5:
+              num_confused[l][p][0, 1] += 1
+            else:
+              num_confused[l][p][0, 0] += 1
+          if true_labels[i] == 1:
+            if v >= 0.5:
+              num_confused[l][p][1, 1] += 1
+            else:
+              num_confused[l][p][1, 0] += 1
+          num_total[l][p] += 1
+    num_confused = np.array(num_confused, np.float32)
+    num_total = np.array(num_total, np.float32)
+    return num_confused / num_total
+
 
 class LegacyLoader(object):
   @staticmethod

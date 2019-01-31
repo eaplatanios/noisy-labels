@@ -89,7 +89,7 @@ class EMLearner(object):
       max_em_steps=100, log_m_steps=100,
       em_step_callback=None):
     e_step_dataset = dataset.batch(batch_size)
-    m_step_dataset = dataset.repeat().shuffle(1000).batch(batch_size)
+    m_step_dataset = dataset.repeat().shuffle(10000).batch(batch_size)
 
     self._init_session()
     e_step_iterator_init_op = self._ops['train_iterator'].make_initializer(e_step_dataset)
@@ -599,9 +599,13 @@ class MultiLabelFullConfusionEMConfig(EMConfig):
       e_y_0 = tf.expand_dims(e_y_0, axis=-1)
 
       if self.use_soft_y_hat:
-        e_y_y_hat_1 = e_y_1 * y_hat_1_soft * a_1_log + e_y_0 * y_hat_0_soft * a_0_log
-        e_y_y_hat_0 = e_y_1 * y_hat_0_soft * b_1_log + e_y_0 * y_hat_1_soft * b_0_log
-        ll_term1 = e_y_y_hat_1 + e_y_y_hat_0
+        y_1_term = y_hat_1_soft * a_1_log + y_hat_0_soft * b_1_log
+        y_1_term -= tf.expand_dims(
+          a_1_plus_b_1_log, axis=-1)
+        y_0_term = y_hat_0_soft * a_0_log + y_hat_1_soft * b_0_log
+        y_0_term -= tf.expand_dims(
+          a_0_plus_b_0_log, axis=-1)
+        ll_term1 = e_y_1 * y_1_term + e_y_0 * y_0_term
       else:
         y_1_term = tf.batch_gather(
           ab_1_log,
@@ -614,7 +618,6 @@ class MultiLabelFullConfusionEMConfig(EMConfig):
         y_0_term -= tf.expand_dims(
           a_0_plus_b_0_log, axis=-1)
         ll_term1 = e_y_1 * y_1_term + e_y_0 * y_0_term
-        ll_term1 = tf.squeeze(ll_term1, axis=-1)
 
       ll_term1 = tf.reduce_sum(ll_term1)
 

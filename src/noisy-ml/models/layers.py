@@ -186,7 +186,7 @@ class MLP(Layer):
             name='bias',
             shape=[num_units],
             initializer=b_initializer)
-          if hidden.shape.rank == 3:
+          if hidden.shape.ndims == 3:
             hidden = tf.tensordot(
               hidden, w, axes=[[2], [0]], name='linear')
           else:

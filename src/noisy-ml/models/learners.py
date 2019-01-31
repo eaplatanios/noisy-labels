@@ -236,8 +236,8 @@ class MultiLabelEMConfig(EMConfig):
     # q_params shape: [BatchSize, 2]
     a_log = q_params[:, 0]
     b_log = q_params[:, 1]
-    a = 1 + tf.exp(a_log)
-    b = 1 + tf.exp(b_log)
+    a = tf.exp(a_log)
+    b = tf.exp(b_log)
     ab_log = tf.stack([a_log, b_log], axis=-1)
     a_plus_b_log = tf.reduce_logsumexp(ab_log, axis=-1)
     qualities_mean_log = a_log - a_plus_b_log
@@ -485,17 +485,19 @@ class MultiLabelFullConfusionEMConfig(EMConfig):
     b_0_log = q_params[:, 1]
     a_1_log = q_params[:, 2]
     b_1_log = q_params[:, 3]
-    a_0 = 1 + tf.exp(a_0_log)
-    b_0 = 1 + tf.exp(b_0_log)
-    a_1 = 1 + tf.exp(a_1_log)
-    b_1 = 1 + tf.exp(b_1_log)
+    a_0 = tf.exp(a_0_log)
+    b_0 = tf.exp(b_0_log)
+    a_1 = tf.exp(a_1_log)
+    b_1 = tf.exp(b_1_log)
     ab_0_log = tf.stack([a_0_log, b_0_log], axis=-1)
     ab_1_log = tf.stack([a_1_log, b_1_log], axis=-1)
     a_0_plus_b_0_log = tf.reduce_logsumexp(ab_0_log, axis=-1)
     a_1_plus_b_1_log = tf.reduce_logsumexp(ab_1_log, axis=-1)
     qualities_0_mean_log = a_0_log - a_0_plus_b_0_log
     qualities_1_mean_log = a_1_log - a_1_plus_b_1_log
-    qualities_mean_log = (qualities_0_mean_log + qualities_1_mean_log) / 2
+    qualities_mean_log = tf.stack([qualities_0_mean_log, qualities_1_mean_log], axis=-1)
+    qualities_mean_log = tf.reduce_logsumexp(qualities_mean_log, axis=-1)
+    qualities_mean_log -= np.log(2)
 
     # E-step:
 

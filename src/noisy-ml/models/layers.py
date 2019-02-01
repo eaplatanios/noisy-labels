@@ -188,7 +188,7 @@ class MLP(Layer):
             initializer=b_initializer)
           if hidden.shape.ndims == 3:
             hidden = tf.tensordot(
-              hidden, w, axes=[[2], [0]], name='linear')
+              hidden, w, axes=[[2], [0]], name='linear') + b
           else:
             hidden = tf.nn.xw_plus_b(
               x=hidden, weights=w, biases=b, name='linear')

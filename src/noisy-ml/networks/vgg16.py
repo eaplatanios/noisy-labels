@@ -21,6 +21,6 @@ def VGG16(
     if freeze:
       return tf.stop_gradient(network.output)
     else:
-      return network.output
+      return network
 
   return network

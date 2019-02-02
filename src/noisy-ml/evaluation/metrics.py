@@ -91,7 +91,8 @@ class Evaluator(object):
     predictions = self.learner.predict(
       instances, batch_size=batch_size).T
     predicted_qualities = np.mean(self.learner.qualities(
-      instances, predictors, labels), axis=0)
+      instances, predictors, labels,
+      batch_size=batch_size), axis=0)
     true_qualities = self.dataset.compute_binary_qualities()
 
     results = []

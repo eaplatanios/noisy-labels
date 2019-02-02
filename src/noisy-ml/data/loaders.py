@@ -237,10 +237,21 @@ class Dataset(object):
         predictors.extend([p for _ in indices])
         labels.extend([l for _ in indices])
         values.extend(l_values)
+    instances = np.array(instances, np.int32)
+    predictors = np.array(predictors, np.int32)
+    labels = np.array(labels, np.int32)
+    values = np.array(values, np.float32)
     if shuffle:
-      temp = list(zip(instances, predictors, labels, values))
-      random.shuffle(temp)
-      instances, predictors, labels, values = zip(*temp)
+      data = np.stack(
+        [instances, predictors, labels, values],
+        axis=-1)
+      np.random.shuffle(data)
+      instances, predictors, labels, values = [
+        data[..., i] for i in np.arange(data.shape[-1])]
+      instances = instances.astype(np.int32)
+      predictors = predictors.astype(np.int32)
+      labels = labels.astype(np.int32)
+      values = values.astype(np.float32)
     return TrainData(instances, predictors, labels, values)
 
   def compute_binary_qualities(self):

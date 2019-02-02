@@ -28,9 +28,10 @@ __author__ = 'eaplatanios'
 
 
 class BlueBirdsModel(Model):
-  def __init__(self, dataset, q_latent_size=None):
+  def __init__(self, dataset, q_latent_size=None, gamma=0.25):
     self.dataset = dataset
     self.q_latent_size = q_latent_size
+    self.gamma = gamma
 
   def build(self, instances, predictors, labels):
     if self.dataset.instance_features is None:
@@ -112,8 +113,7 @@ class BlueBirdsModel(Model):
 
       num_labels_per_worker = self.dataset.avg_labels_per_predictor()
       num_labels_per_item = self.dataset.avg_labels_per_item()
-      gamma = 0.25
-      alpha = gamma * (len(self.dataset.labels) ** 2)
+      alpha = self.gamma * (len(self.dataset.labels) ** 2)
       beta = alpha * num_labels_per_worker / num_labels_per_item
       regularization_terms = [
         beta * tf.reduce_sum(q_i * q_i) / 2,
@@ -130,34 +130,48 @@ def run_experiment():
   data_dir = os.path.join(working_dir, os.pardir, 'data')
   dataset = BlueBirdsLoader.load(data_dir, load_features=True)
 
+  def learner_fn(q_latent_size, gamma):
+    model = BlueBirdsModel(
+      dataset=dataset,
+      q_latent_size=q_latent_size,
+      gamma=gamma)
+    return EMLearner(
+      config=MultiLabelFullConfusionSimpleQEMConfig(
+        num_instances=len(dataset.instances),
+        num_predictors=len(dataset.predictors),
+        num_labels=len(dataset.labels),
+        model=model,
+        optimizer=tf.train.AdamOptimizer(1e-2),
+        use_soft_maj=True,
+        use_soft_y_hat=False),
+      predictions_output_fn=np.exp)
+
+  def em_callback(learner):
+    evaluator = Evaluator(learner, dataset)
+    Result.merge(evaluator.evaluate_per_label(batch_size=128)).log(prefix='EM           ')
+    Result.merge(evaluator.evaluate_maj_per_label()).log(prefix='Majority Vote')
+
+  cv_kw_args = [
+    {'q_latent_size': 1, 'gamma': 2 ** -3},
+    {'q_latent_size': 1, 'gamma': 2 ** -2},
+    {'q_latent_size': 1, 'gamma': 2 ** -1},
+    {'q_latent_size': 1, 'gamma': 2 ** 0},
+    {'q_latent_size': 1, 'gamma': 2 ** 1},
+    {'q_latent_size': 1, 'gamma': 2 ** 2},
+    {'q_latent_size': 1, 'gamma': 2 ** 3}]
+
+  learner = k_fold_cv(
+    kw_args=cv_kw_args, learner_fn=learner_fn,
+    dataset=dataset, num_folds=5, batch_size=128,
+    warm_start=True, max_m_steps=10000, max_em_steps=5,
+    log_m_steps=1000, em_step_callback=em_callback)
+
   train_data = dataset.to_train()
   train_dataset = tf.data.Dataset.from_tensor_slices({
     'instances': train_data.instances,
     'predictors': train_data.predictors,
     'labels': train_data.labels,
     'values': train_data.values})
-
-  model = BlueBirdsModel(
-    dataset=dataset,
-    q_latent_size=1)
-
-  learner = EMLearner(
-    config=MultiLabelFullConfusionSimpleQEMConfig(
-      num_instances=len(dataset.instances),
-      num_predictors=len(dataset.predictors),
-      num_labels=len(dataset.labels),
-      model=model,
-      optimizer=tf.train.AdamOptimizer(1e-2),
-      use_soft_maj=True,
-      use_soft_y_hat=False),
-    predictions_output_fn=np.exp)
-
-  evaluator = Evaluator(learner, dataset)
-
-  def em_callback(_):
-    Result.merge(evaluator.evaluate_per_label(batch_size=128)).log(prefix='EM           ')
-    Result.merge(evaluator.evaluate_maj_per_label()).log(prefix='Majority Vote')
-
   learner.train(
     dataset=train_dataset,
     batch_size=128,
@@ -166,6 +180,8 @@ def run_experiment():
     max_em_steps=100,
     log_m_steps=1000,
     em_step_callback=em_callback)
+
+  evaluator = Evaluator(learner, dataset)
 
   return {
     'em': Result.merge(evaluator.evaluate_per_label(batch_size=128)),

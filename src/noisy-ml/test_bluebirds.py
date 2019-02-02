@@ -131,9 +131,12 @@ def run_experiment():
   dataset = BlueBirdsLoader.load(data_dir, load_features=True)
 
   def learner_fn(q_latent_size, gamma):
-    model = BlueBirdsModel(
+    # model = BlueBirdsModel(
+    #   dataset=dataset,
+    #   q_latent_size=q_latent_size,
+    #   gamma=gamma)
+    model = MMCE_M(
       dataset=dataset,
-      q_latent_size=q_latent_size,
       gamma=gamma)
     return EMLearner(
       config=MultiLabelFullConfusionSimpleQEMConfig(

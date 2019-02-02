@@ -46,8 +46,9 @@ class MMCE_M(Model):
 
   Source: https://arxiv.org/pdf/1503.07240.pdf
   """
-  def __init__(self, dataset):
+  def __init__(self, dataset, gamma=0.25):
     self.dataset = dataset
+    self.gamma = gamma
 
   def build(self, instances, predictors, labels):
     predictions = Embedding(
@@ -75,8 +76,7 @@ class MMCE_M(Model):
 
     num_labels_per_worker = self.dataset.avg_labels_per_predictor()
     num_labels_per_item = self.dataset.avg_labels_per_item()
-    gamma = 0.25
-    alpha = gamma * (len(self.dataset.labels) ** 2)
+    alpha = self.gamma * (len(self.dataset.labels) ** 2)
     beta = alpha * num_labels_per_worker / num_labels_per_item
     regularization_terms = [
       beta * tf.reduce_sum(q_i * q_i) / 2,

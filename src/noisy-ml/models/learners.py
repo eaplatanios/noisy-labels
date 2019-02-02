@@ -678,7 +678,7 @@ class MultiLabelFullConfusionSimpleQEMConfig(EMConfig):
     p_indices = predictors
     l_indices = labels
 
-    predictions, q_params = self.model.build(
+    predictions, q_params, regularization_terms = self.model.build(
       x_indices, p_indices, l_indices)
 
     # y_hat_1 has shape: [BatchSize]
@@ -702,11 +702,12 @@ class MultiLabelFullConfusionSimpleQEMConfig(EMConfig):
 
     # q_params shape: [BatchSize, 2, 2]
     q_log = q_params
-    qualities_mean_log = tf.stack([q_log[:, 0, 0], q_log[:, 1, 1]], axis=-1)
+    qualities_mean_log = tf.stack([
+      h_1_log + q_log[:, 1, 1],
+      h_0_log + q_log[:, 0, 0]], axis=-1)
     qualities_mean_log = tf.reduce_logsumexp(qualities_mean_log, axis=-1)
-    qualities_mean_log -= np.log(2)
 
-    # E-step:
+    # E-Step:
 
     with tf.name_scope('e_step'):
       # Create the accumulator variables:
@@ -809,12 +810,11 @@ class MultiLabelFullConfusionSimpleQEMConfig(EMConfig):
         y_0_term = y_hat_0_soft * q_log[:, 0, 0] + y_hat_1_soft * q_log[:, 0, 1]
         ll_term1 = e_y_1 * y_1_term + e_y_0 * y_0_term
       else:
+        y_hat_1 = tf.expand_dims(y_hat_1, axis=-1)
         y_1_term = e_y_1 * tf.batch_gather(
-          q_log[:, 1, :],
-          tf.expand_dims(y_hat_1, axis=-1))
+          q_log[:, 1, :], y_hat_1)
         y_0_term = e_y_0 * tf.batch_gather(
-          q_log[:, 0, :],
-          tf.expand_dims(y_hat_1, axis=-1))
+          q_log[:, 0, :], y_hat_1)
         ll_term1 = y_1_term + y_0_term
 
       ll_term1 = tf.reduce_sum(ll_term1)
@@ -822,6 +822,8 @@ class MultiLabelFullConfusionSimpleQEMConfig(EMConfig):
       # We are omitting the last term because it is constant
       # with respect to the parameters of h and g.
       neg_log_likelihood = -ll_term0 - ll_term1
+      if len(regularization_terms) > 0:
+        neg_log_likelihood += tf.add_n(regularization_terms)
 
       m_step_init = tf.variables_initializer(
         tf.trainable_variables())

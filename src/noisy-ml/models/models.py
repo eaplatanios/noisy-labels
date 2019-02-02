@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 BuiltModel = namedtuple(
-  'BuiltModel', ['predictions', 'q_params'])
+  'BuiltModel',
+  ['predictions', 'q_params', 'regularization_terms'])
 
 
 class Model(with_metaclass(abc.ABCMeta, object)):

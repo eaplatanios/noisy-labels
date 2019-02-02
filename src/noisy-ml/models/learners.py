@@ -220,8 +220,10 @@ class EMLearner(object):
     predictions = []
     while True:
       try:
-        predictions.append(self._session.run(
-          self._ops['predictions']))
+        p = self._session.run(self._ops['predictions'])
+        if self.predictions_output_fn is not None:
+          p = self.predictions_output_fn(p)
+        predictions.append(p)
       except tf.errors.OutOfRangeError:
         break
     return np.concatenate(predictions, axis=0)

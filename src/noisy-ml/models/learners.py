@@ -107,13 +107,27 @@ class EMLearner(object):
       if em_step_callback is not None:
         em_step_callback(self)
 
-  def predict(self, instances):
+  def predict(self, instances, batch_size=128):
+    # TODO: Remove hack by having separate train and predict iterators.
+    dataset = tf.data.Dataset.from_tensor_slices({
+      'instances': instances,
+      'predictors': np.zeros([len(instances)], np.int32),
+      'labels': np.zeros([len(instances)], np.int32),
+      'values': np.zeros([len(instances)], np.float32)}
+    ).batch(batch_size)
+
     self._init_session()
-    predictions = self._session.run(
-      self._ops['predictions'],
-      feed_dict={self._ops['x_indices']: instances})
-    predictions = self.predictions_output_fn(predictions)
-    return predictions
+
+    iterator_init_op = self._ops['train_iterator'].make_initializer(dataset)
+    self._session.run(iterator_init_op)
+    predictions = []
+    while True:
+      try:
+        predictions.append(self._session.run(
+          self._ops['predictions']))
+      except tf.errors.OutOfRangeError:
+        break
+    return np.concatenate(predictions, axis=0)
 
   def qualities(self, instances, predictors, labels):
     def cartesian_transpose(arrays):

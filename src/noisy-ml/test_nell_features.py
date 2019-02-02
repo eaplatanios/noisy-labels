@@ -49,7 +49,7 @@ class NELLModel(Model):
       )(instances)
 
     predictions = MLP(
-      hidden_units=[128, 64, 32],
+      hidden_units=[256, 64, 16],
       activation=tf.nn.selu,
       output_layer=LogSigmoid(
         num_labels=len(self.dataset.labels)),
@@ -65,7 +65,7 @@ class NELLModel(Model):
     if self.q_latent_size is None:
       q_fn_args = predictors
       q_params = MLP(
-        hidden_units=[64, 32, 16],
+        hidden_units=[256, 64, 16],
         activation=tf.nn.selu,
         name='q_fn'
       ).and_then(Linear(
@@ -78,7 +78,7 @@ class NELLModel(Model):
       regularization_terms = []
     else:
       q_i = MLP(
-        hidden_units=[64, 32, 16],
+        hidden_units=[256, 64, 16],
         activation=tf.nn.selu,
         output_layer=Linear(
           num_outputs=4*self.q_latent_size,
@@ -155,26 +155,26 @@ def run_experiment(labels, ground_truth_threshold):
   evaluator = Evaluator(learner, dataset)
 
   def em_callback(_):
-    Result.merge(evaluator.evaluate_per_label()).log(prefix='EM           ')
+    Result.merge(evaluator.evaluate_per_label(batch_size=128)).log(prefix='EM           ')
     Result.merge(evaluator.evaluate_maj_per_label()).log(prefix='Majority Vote')
 
   learner.train(
     dataset=train_dataset,
-    batch_size=512,
+    batch_size=128,
     warm_start=True,
-    max_m_steps=2000,
+    max_m_steps=100,
     max_em_steps=100,
-    log_m_steps=500,
+    log_m_steps=1000,
     em_step_callback=em_callback)
 
   return {
-    'em': Result.merge(evaluator.evaluate_per_label()),
+    'em': Result.merge(evaluator.evaluate_per_label(batch_size=128)),
     'maj': Result.merge(evaluator.evaluate_maj_per_label())}
 
 
 if __name__ == '__main__':
   results = run_experiment(
-    labels=['city'],
+    labels=['country'],
     # labels=['bird', 'city', 'country', 'fish', 'lake', 'mammal', 'river'],
     ground_truth_threshold=0.1)
   results['em'].log(prefix='EM           ')

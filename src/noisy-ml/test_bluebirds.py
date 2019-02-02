@@ -155,20 +155,20 @@ def run_experiment():
   evaluator = Evaluator(learner, dataset)
 
   def em_callback(_):
-    Result.merge(evaluator.evaluate_per_label()).log(prefix='EM           ')
+    Result.merge(evaluator.evaluate_per_label(batch_size=128)).log(prefix='EM           ')
     Result.merge(evaluator.evaluate_maj_per_label()).log(prefix='Majority Vote')
 
   learner.train(
     dataset=train_dataset,
-    batch_size=4096,
+    batch_size=128,
     warm_start=True,
-    max_m_steps=2000,
+    max_m_steps=10000,
     max_em_steps=100,
-    log_m_steps=500,
+    log_m_steps=1000,
     em_step_callback=em_callback)
 
   return {
-    'em': Result.merge(evaluator.evaluate_per_label()),
+    'em': Result.merge(evaluator.evaluate_per_label(batch_size=128)),
     'maj': Result.merge(evaluator.evaluate_maj_per_label())}
 
 

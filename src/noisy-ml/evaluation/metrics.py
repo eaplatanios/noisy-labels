@@ -80,7 +80,7 @@ class Evaluator(object):
     self.learner = learner
     self.dataset = dataset
 
-  def evaluate_per_label(self):
+  def evaluate_per_label(self, batch_size=128):
     instances = self.dataset.instance_indices()
     predictors = self.dataset.predictor_indices()
     labels = self.dataset.label_indices()
@@ -88,7 +88,8 @@ class Evaluator(object):
     # predictions shape:         [NumLabels, BatchSize]
     # predicted_qualities shape: [NumLabels, NumPredictors]
     # true_qualities shape:      [NumLabels, NumPredictors]
-    predictions = self.learner.predict(instances).T
+    predictions = self.learner.predict(
+      instances, batch_size=batch_size).T
     predicted_qualities = np.mean(self.learner.qualities(
       instances, predictors, labels), axis=0)
     true_qualities = self.dataset.compute_binary_qualities()

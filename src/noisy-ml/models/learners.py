@@ -97,10 +97,14 @@ def k_fold_cv(
         scores.append(score)
 
         logger.info(
-          'K-Fold CV - Obtained score %10.4f for kw_args: %s'
-          % (score, learner_kw_args))
+          'K-Fold CV - Fold %d / %d score %10.4f for kw_args: %s'
+          % (f, num_folds, score, learner_kw_args))
 
-      learner_scores.append(float(np.mean(scores)))
+      score = float(np.mean(scores))
+      learner_scores.append(score)
+      logger.info(
+        'K-Fold CV - Mean score %10.4f for kw_args: %s'
+        % (score, learner_kw_args))
   best_l = int(np.argmax(learner_scores))
   best_kw_args = kw_args[best_l]
   logger.info(

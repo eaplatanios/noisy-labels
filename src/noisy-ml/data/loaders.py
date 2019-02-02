@@ -76,14 +76,14 @@ class Dataset(object):
 
   def avg_labels_per_predictor(self):
     num_labels = 0
-    for l in self.labels:
+    for l in range(len(self.labels)):
       for p, indices_values in six.iteritems(self.predicted_labels[l]):
         num_labels += len(indices_values[0])
     return float(num_labels) / len(self.predictors)
 
   def avg_labels_per_item(self):
     num_labels = 0
-    for l in self.labels:
+    for l in range(len(self.labels)):
       for p, indices_values in six.iteritems(self.predicted_labels[l]):
         num_labels += len(indices_values[0])
     return float(num_labels) / len(self.instances)

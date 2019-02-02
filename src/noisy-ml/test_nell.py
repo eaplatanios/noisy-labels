@@ -87,7 +87,6 @@ class NELLModel(Model):
 
     if self.q_latent_size is None:
       q_fn_args = predictors
-      # q_fn_args = Concatenation([0, 1])(instances, predictors)
       q_params = MLP(
         hidden_units=[],
         activation=tf.nn.selu,

@@ -49,7 +49,7 @@ class NELLModel(Model):
       )(instances)
 
     predictions = MLP(
-      hidden_units=[],
+      hidden_units=[128, 64, 32],
       activation=tf.nn.selu,
       output_layer=LogSigmoid(
         num_labels=len(self.dataset.labels)),
@@ -58,15 +58,14 @@ class NELLModel(Model):
 
     predictors = Embedding(
       num_inputs=len(self.dataset.predictors),
-      emb_size=1,
+      emb_size=16,
       name='predictor_embeddings'
     )(predictors)
 
     if self.q_latent_size is None:
       q_fn_args = predictors
-      # q_fn_args = Concatenation([0, 1])(instances, predictors)
       q_params = MLP(
-        hidden_units=[],
+        hidden_units=[64, 32, 16],
         activation=tf.nn.selu,
         name='q_fn'
       ).and_then(Linear(
@@ -79,7 +78,7 @@ class NELLModel(Model):
       regularization_terms = []
     else:
       q_i = MLP(
-        hidden_units=[],
+        hidden_units=[64, 32, 16],
         activation=tf.nn.selu,
         output_layer=Linear(
           num_outputs=4*self.q_latent_size,
@@ -124,7 +123,7 @@ def run_experiment(labels, ground_truth_threshold):
   dataset = NELLLoader.load(
     data_dir=data_dir,
     labels=labels,
-    load_features=False,
+    load_features=True,
     ground_truth_threshold=ground_truth_threshold)
   # dataset = NELLLoader.load_with_ground_truth(
   #   data_dir=data_dir,
@@ -137,10 +136,10 @@ def run_experiment(labels, ground_truth_threshold):
     'labels': train_data.labels,
     'values': train_data.values})
 
-  # model = NELLModel(dataset)
+  # model = MMCE_M(dataset)
   model = NELLModel(
     dataset=dataset,
-    q_latent_size=None)
+    q_latent_size=1)
 
   learner = EMLearner(
     config=MultiLabelFullConfusionSimpleQEMConfig(
@@ -161,11 +160,11 @@ def run_experiment(labels, ground_truth_threshold):
 
   learner.train(
     dataset=train_dataset,
-    batch_size=128,
+    batch_size=512,
     warm_start=True,
-    max_m_steps=20000,
+    max_m_steps=2000,
     max_em_steps=100,
-    log_m_steps=1000,
+    log_m_steps=500,
     em_step_callback=em_callback)
 
   return {

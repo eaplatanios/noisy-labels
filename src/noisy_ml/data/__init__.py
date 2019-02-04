@@ -16,7 +16,8 @@ from __future__ import absolute_import, division, print_function
 
 from . import crowdsourced
 from . import loaders
+from . import rte
 
 __author__ = 'eaplatanios'
 
-__all__ = ['crowdsourced', 'loaders']
+__all__ = ['crowdsourced', 'loaders', 'rte']

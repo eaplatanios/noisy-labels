@@ -196,7 +196,7 @@ def run_experiment():
     results = dict()
     for num_a in tqdm(num_annotators, desc='#Annotators'):
       data = dataset
-      if num_a is not None:
+      if num_a > -1:
         data = data.filter_predictors(
           dataset.predictors[:num_a])
       evaluator = Evaluator(data)

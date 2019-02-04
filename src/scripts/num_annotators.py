@@ -17,10 +17,10 @@ from __future__ import absolute_import, division, print_function
 import logging
 import os
 import numpy as np
+import pprint
 import six
 import tensorflow as tf
 
-from collections import OrderedDict
 from tqdm import tqdm
 
 from noisy_ml.data.crowdsourced import *
@@ -186,11 +186,14 @@ def run_experiment():
       predictors_emb_size=16,
       instances_hidden=[64, 32, 16],
       predictors_hidden=[64, 32, 16],
-      q_latent_size=1, gamma=0.25)}
+      q_latent_size=1, gamma=0.25)
+  }
 
-  model_accuracies = OrderedDict()
+  pp = pprint.PrettyPrinter(indent=2)
+
+  model_results = dict()
   for name, model in tqdm(six.iteritems(models), desc='Model'):
-    accuracies = []
+    results = dict()
     for num_a in tqdm(num_annotators, desc='#Annotators'):
       data = dataset
       if num_a is not None:
@@ -199,7 +202,7 @@ def run_experiment():
       evaluator = Evaluator(data)
 
       if model is 'MAJ':
-        results = evaluator.evaluate_maj_per_label()
+        result = evaluator.evaluate_maj_per_label()[0]
       else:
         with tf.Graph().as_default():
           train_data = data.to_train(shuffle=True)
@@ -218,17 +221,15 @@ def run_experiment():
             max_em_steps=10,
             log_m_steps=None,
             use_progress_bar=True)
-          results = evaluator.evaluate_per_label(
+          # TODO: Average results across all labels.
+          result = evaluator.evaluate_per_label(
             learner=learner,
-            batch_size=128)
-      accuracy = [r.accuracy for r in results]
-      accuracies.append(accuracy)
-    model_accuracies[name] = accuracies
-    logger.info('%s: %s' % (name, str(accuracies)))
+            batch_size=128)[0]
+      results[num_a] = result
+    model_results[name] = results
+    logger.info('%s:\n%s' % (name, pp.pformat(results)))
 
-  logger.info(model_accuracies)
-
-  return None
+  logger.info(pp.pformat(model_results))
 
 
 if __name__ == '__main__':

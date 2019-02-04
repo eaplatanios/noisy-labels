@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 def compute_mad_error_rank(predicted_qualities, true_qualities):
   p = np.argsort(predicted_qualities, axis=-1)
   t = np.argsort(true_qualities, axis=-1)
-  return np.abs(p - t)
+  return np.mean(np.abs(p - t))
 
 
 def compute_mad_error(predicted_qualities, true_qualities):
@@ -58,6 +58,13 @@ class Result(object):
     self.accuracy = accuracy
     self.auc = auc
 
+  def __str__(self):
+    return 'MAD Error Rank = %7.4f, MAD Error = %6.4f, Accuracy = %6.4f, AUC = %6.4f' % \
+           (self.mad_error_rank, self.mad_error, self.accuracy, self.auc)
+
+  def __repr__(self):
+    return str(self)
+
   @staticmethod
   def merge(results):
     return Result(
@@ -67,8 +74,7 @@ class Result(object):
       auc=np.mean([r.auc for r in results]))
 
   def log(self, prefix=None):
-    message = 'MAD Error Rank: %7.4f | MAD Error: %6.4f | Accuracy: %6.4f | AUC: %6.4f' % \
-              (self.mad_error_rank, self.mad_error, self.accuracy, self.auc)
+    message = str(self)
     if prefix is None:
       logger.info(message)
     else:

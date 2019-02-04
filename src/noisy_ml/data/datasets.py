@@ -240,24 +240,13 @@ class Dataset(object):
       if has_lf:
         label_features.append(self.label_features[l])
 
-      # Filter the true labels.
-      true_labels[l] = dict()
-      for i_old, true_label in six.iteritems(self.true_labels[label]):
-        i = i_indices.get(i_old)
-        if i is None:
-          i = len(instances)
-          instances.append(self.instances[i_old])
-          i_indices[i_old] = i
-          if has_if:
-            instance_features.append(self.instance_features[i_old])
-        true_labels[l][i] = true_label
-
       # Filter the predicted labels.
       predicted_labels[l] = dict()
       for p_old, indices_values in six.iteritems(self.predicted_labels[l]):
-        if p_old not in predictors:
+        predictor = self.predictors[p_old]
+        if predictor not in predictors:
           continue
-        p = predictors.index(self.predictors[p_old])
+        p = predictors.index(predictor)
         if has_pf:
           predictor_features.append(self.predictor_features[p_old])
         predicted_labels[l][p] = ([], [])
@@ -271,6 +260,14 @@ class Dataset(object):
               instance_features.append(self.instance_features[i_old])
           predicted_labels[l][p][0].append(i)
           predicted_labels[l][p][1].append(v)
+
+      # Filter the true labels.
+      true_labels[l] = dict()
+      for i_old, true_label in six.iteritems(self.true_labels[label]):
+        i = i_indices.get(i_old)
+        if i is None:
+          continue
+        true_labels[l][i] = true_label
 
     return Dataset(
       instances, predictors, self.labels,

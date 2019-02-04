@@ -21,6 +21,7 @@ import tensorflow as tf
 
 from six import with_metaclass
 from sklearn.model_selection import KFold
+from tqdm import tqdm
 
 from .utilities import log1mexp
 
@@ -153,7 +154,7 @@ class EMLearner(object):
 
   def _m_step(
       self, iterator_init_op, warm_start,
-      max_m_steps, log_m_steps):
+      max_m_steps, log_m_steps=None):
     self._session.run(iterator_init_op)
     if not warm_start:
       self._session.run(self._ops['m_step_init'])
@@ -165,7 +166,9 @@ class EMLearner(object):
         self._ops['m_step']])
       accumulator_ll += ll
       accumulator_steps += 1
-      if m_step % log_m_steps == 0 or m_step == max_m_steps - 1:
+      if log_m_steps is not None and \
+          (m_step % log_m_steps == 0 or
+           m_step == max_m_steps - 1):
         ll = accumulator_ll / accumulator_steps
         logger.info(
           'Step: %5d | Negative Log-Likelihood: %.8f'
@@ -177,7 +180,7 @@ class EMLearner(object):
       self, dataset, batch_size=128,
       warm_start=False, max_m_steps=1000,
       max_em_steps=100, log_m_steps=100,
-      em_step_callback=None):
+      em_step_callback=None, use_progress_bar=False):
     e_step_dataset = dataset.batch(batch_size)
     m_step_dataset = dataset.repeat().shuffle(10000).batch(batch_size)
 
@@ -185,10 +188,16 @@ class EMLearner(object):
     e_step_iterator_init_op = self._ops['train_iterator'].make_initializer(e_step_dataset)
     m_step_iterator_init_op = self._ops['train_iterator'].make_initializer(m_step_dataset)
 
-    for em_step in range(max_em_steps):
-      logger.info('Iteration %d - Running E-Step' % em_step)
+    em_steps_range = range(max_em_steps)
+    if use_progress_bar:
+      em_steps_range = tqdm(em_steps_range, 'EM Step')
+
+    for em_step in em_steps_range:
+      if not use_progress_bar:
+        logger.info('Iteration %d - Running E-Step' % em_step)
       self._e_step(e_step_iterator_init_op, use_maj=em_step == 0)
-      logger.info('Iteration %d - Running M-Step' % em_step)
+      if not use_progress_bar:
+        logger.info('Iteration %d - Running M-Step' % em_step)
       self._m_step(
         m_step_iterator_init_op, warm_start,
         max_m_steps, log_m_steps)

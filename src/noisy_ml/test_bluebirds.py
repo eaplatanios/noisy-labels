@@ -140,17 +140,18 @@ def run_experiment():
         num_predictors=len(dataset.predictors),
         num_labels=len(dataset.labels),
         model=model,
-        optimizer=AMSGrad(1e-2), # tf.train.AdamOptimizer(),
+        optimizer=AMSGrad(1e-3), # tf.train.AdamOptimizer(),
         use_soft_maj=True,
         use_soft_y_hat=False),
       predictions_output_fn=np.exp)
 
+  evaluator = Evaluator(dataset)
+
   def em_callback(learner):
-    evaluator = Evaluator(learner, dataset)
-    Result.merge(evaluator.evaluate_per_label(batch_size=128)).log(prefix='EM           ')
+    Result.merge(evaluator.evaluate_per_label(learner, batch_size=128)).log(prefix='EM           ')
     Result.merge(evaluator.evaluate_maj_per_label()).log(prefix='Majority Vote')
 
-  cv_kw_args = [
+  learner_cv_kwargs = [
     {'q_latent_size': 1, 'gamma': 0.0},
     {'q_latent_size': 1, 'gamma': 2 ** -3},
     {'q_latent_size': 1, 'gamma': 2 ** -2},
@@ -166,7 +167,7 @@ def run_experiment():
   #   warm_start=True, max_m_steps=10000, max_em_steps=5,
   #   log_m_steps=1000, em_step_callback=em_callback,
   #   seed=seed)
-  learner = learner_fn(**cv_kw_args[0])
+  learner = learner_fn(**learner_cv_kwargs[0])
 
   train_data = dataset.to_train(shuffle=True)
   train_dataset = tf.data.Dataset.from_tensor_slices({
@@ -183,10 +184,8 @@ def run_experiment():
     log_m_steps=100,
     em_step_callback=em_callback)
 
-  evaluator = Evaluator(learner, dataset)
-
   return {
-    'em': Result.merge(evaluator.evaluate_per_label(batch_size=128)),
+    'em': Result.merge(evaluator.evaluate_per_label(learner, batch_size=128)),
     'maj': Result.merge(evaluator.evaluate_maj_per_label())}
 
 

@@ -44,18 +44,6 @@ class BlueBirdsLoader(object):
     data_dir = os.path.join(
       data_dir, 'crowdsourced', 'bluebirds')
 
-    if load_features:
-      f_dir = os.path.join(data_dir, 'resized_images')
-      features = dict()
-      for f_file in os.listdir(f_dir):
-        if f_file.endswith('.jpg'):
-          instance_id = int(os.path.splitext(f_file)[0])
-          f_file = os.path.join(f_dir, f_file)
-          with open(f_file, 'rb') as f:
-            features[instance_id] = f.read()
-    else:
-      features = None
-
     def convert_labels_to_ints(dictionary):
       return dict(map(
         lambda kv: (kv[0], int(kv[1])),
@@ -86,7 +74,20 @@ class BlueBirdsLoader(object):
     predictors = list(six.iterkeys(predicted_labels))
     labels = [0]
 
-    if features is not None:
+    if load_features:
+      f_file = os.path.join(data_dir, 'vgg16_features.npz')
+      f_contents = np.load(f_file)
+      ids = f_contents['arr_0']
+      features = f_contents['arr_1']
+      features = dict(zip(ids, features))
+      # f_dir = os.path.join(data_dir, 'resized_images')
+      # features = dict()
+      # for f_file in os.listdir(f_dir):
+      #   if f_file.endswith('.jpg'):
+      #     instance_id = int(os.path.splitext(f_file)[0])
+      #     f_file = os.path.join(f_dir, f_file)
+      #     with open(f_file, 'rb') as f:
+      #       features[instance_id] = f.read()
       instance_features = [features[i] for i in instances]
     else:
       instance_features = None

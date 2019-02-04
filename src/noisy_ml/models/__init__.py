@@ -14,6 +14,7 @@
 
 from __future__ import absolute_import, division, print_function
 
+from . import amsgrad
 from . import layers
 from . import learners
 from . import models
@@ -21,4 +22,5 @@ from . import utilities
 
 __author__ = 'eaplatanios'
 
-__all__ = ['layers', 'learners', 'models', 'utilities']
+__all__ = [
+  'amsgrad', 'layers', 'learners', 'models', 'utilities']

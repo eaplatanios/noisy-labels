@@ -67,7 +67,7 @@ class Result(object):
       auc=np.mean([r.auc for r in results]))
 
   def log(self, prefix=None):
-    message = 'MAD Error Rank: %.4f | MAD Error: %.4f | Accuracy: %.4f | AUC: %.4f' % \
+    message = 'MAD Error Rank: %7.4f | MAD Error: %6.4f | Accuracy: %6.4f | AUC: %6.4f' % \
               (self.mad_error_rank, self.mad_error, self.accuracy, self.auc)
     if prefix is None:
       logger.info(message)

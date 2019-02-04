@@ -76,7 +76,7 @@ class MMCE_M(Model):
 
     num_labels_per_worker = self.dataset.avg_labels_per_predictor()
     num_labels_per_item = self.dataset.avg_labels_per_item()
-    alpha = self.gamma * (len(self.dataset.labels) ** 2)
+    alpha = self.gamma * ((len(self.dataset.labels) * 2) ** 2)
     beta = alpha * num_labels_per_worker / num_labels_per_item
     regularization_terms = [
       beta * tf.reduce_sum(q_i * q_i) / 2,

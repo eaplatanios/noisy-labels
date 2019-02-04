@@ -23,8 +23,14 @@ from .evaluation.metrics import *
 from .models.layers import *
 from .models.learners import *
 from .models.models import *
+from .models.amsgrad import *
 
 __author__ = 'eaplatanios'
+
+
+seed = 1234567890
+np.random.seed(seed)
+tf.random.set_random_seed(seed)
 
 
 class BlueBirdsModel(Model):
@@ -44,22 +50,11 @@ class BlueBirdsModel(Model):
       instances = FeatureMap(
         features=np.array(self.dataset.instance_features),
         adjust_magnitude=False,
-        name='instance_features/feature_map') \
-        .and_then(DecodeJpeg(
-        width=256,
-        height=256,
-        name='instance_features/decode_jpeg')) \
-        .and_then(Conv2D(
-        c_num_filters=[4, 8],
-        c_kernel_sizes=[15, 5],
-        p_num_strides=[8, 2],
-        p_kernel_sizes=[15, 3],
-        activation=tf.nn.selu,
-        name='instance_features/conv2d')
+        name='instance_features/feature_map'
       )(instances)
 
     predictions = MLP(
-      hidden_units=[],
+      hidden_units=[64, 32, 16],
       activation=tf.nn.selu,
       output_layer=LogSigmoid(
         num_labels=len(self.dataset.labels),
@@ -89,7 +84,7 @@ class BlueBirdsModel(Model):
       regularization_terms = []
     else:
       q_i = MLP(
-        hidden_units=[],
+        hidden_units=[64, 32, 16],
         activation=tf.nn.selu,
         output_layer=Linear(
           num_outputs=4*self.q_latent_size,
@@ -108,12 +103,13 @@ class BlueBirdsModel(Model):
       )(predictors)
       q_p = tf.reshape(q_p, [-1, 2, 2, self.q_latent_size])
 
-      q_params = tf.reduce_logsumexp(q_i + q_p, axis=-1)
+      q_params = q_i + q_p
+      q_params = tf.reduce_logsumexp(q_params, axis=-1)
       q_params = tf.nn.log_softmax(q_params, axis=-1)
 
       num_labels_per_worker = self.dataset.avg_labels_per_predictor()
       num_labels_per_item = self.dataset.avg_labels_per_item()
-      alpha = self.gamma * (len(self.dataset.labels) ** 2)
+      alpha = self.gamma * ((len(self.dataset.labels) * 2) ** 2)
       beta = alpha * num_labels_per_worker / num_labels_per_item
       regularization_terms = [
         beta * tf.reduce_sum(q_i * q_i) / 2,
@@ -131,20 +127,20 @@ def run_experiment():
   dataset = BlueBirdsLoader.load(data_dir, load_features=True)
 
   def learner_fn(q_latent_size, gamma):
-    # model = BlueBirdsModel(
-    #   dataset=dataset,
-    #   q_latent_size=q_latent_size,
-    #   gamma=gamma)
-    model = MMCE_M(
+    model = BlueBirdsModel(
       dataset=dataset,
+      q_latent_size=q_latent_size,
       gamma=gamma)
+    # model = MMCE_M(
+    #   dataset=dataset,
+    #   gamma=gamma)
     return EMLearner(
-      config=MultiLabelFullConfusionSimpleQEMConfig(
+      config=MultiLabelEMConfig(
         num_instances=len(dataset.instances),
         num_predictors=len(dataset.predictors),
         num_labels=len(dataset.labels),
         model=model,
-        optimizer=tf.train.AdamOptimizer(1e-2),
+        optimizer=AMSGrad(1e-2), # tf.train.AdamOptimizer(),
         use_soft_maj=True,
         use_soft_y_hat=False),
       predictions_output_fn=np.exp)
@@ -155,6 +151,7 @@ def run_experiment():
     Result.merge(evaluator.evaluate_maj_per_label()).log(prefix='Majority Vote')
 
   cv_kw_args = [
+    {'q_latent_size': 1, 'gamma': 0.0},
     {'q_latent_size': 1, 'gamma': 2 ** -3},
     {'q_latent_size': 1, 'gamma': 2 ** -2},
     {'q_latent_size': 1, 'gamma': 2 ** -1},
@@ -163,13 +160,15 @@ def run_experiment():
     {'q_latent_size': 1, 'gamma': 2 ** 2},
     {'q_latent_size': 1, 'gamma': 2 ** 3}]
 
-  learner = k_fold_cv(
-    kw_args=cv_kw_args, learner_fn=learner_fn,
-    dataset=dataset, num_folds=5, batch_size=128,
-    warm_start=True, max_m_steps=10000, max_em_steps=5,
-    log_m_steps=1000, em_step_callback=em_callback)
+  # learner = k_fold_cv(
+  #   kw_args=cv_kw_args, learner_fn=learner_fn,
+  #   dataset=dataset, num_folds=5, batch_size=128,
+  #   warm_start=True, max_m_steps=10000, max_em_steps=5,
+  #   log_m_steps=1000, em_step_callback=em_callback,
+  #   seed=seed)
+  learner = learner_fn(**cv_kw_args[0])
 
-  train_data = dataset.to_train()
+  train_data = dataset.to_train(shuffle=True)
   train_dataset = tf.data.Dataset.from_tensor_slices({
     'instances': train_data.instances,
     'predictors': train_data.predictors,
@@ -177,11 +176,11 @@ def run_experiment():
     'values': train_data.values})
   learner.train(
     dataset=train_dataset,
-    batch_size=128,
+    batch_size=1024,
     warm_start=True,
-    max_m_steps=10000,
-    max_em_steps=100,
-    log_m_steps=1000,
+    max_m_steps=1000,
+    max_em_steps=20,
+    log_m_steps=100,
     em_step_callback=em_callback)
 
   evaluator = Evaluator(learner, dataset)

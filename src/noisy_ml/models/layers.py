@@ -102,7 +102,7 @@ class Embedding(Layer):
       emb_matrix = tf.get_variable(
         name='emb_matrix',
         shape=[self.num_inputs, self.emb_size],
-        initializer=tf.random_normal_initializer(
+        initializer=tf.glorot_uniform_initializer(
           dtype=self.dtype))
       inputs = args[0]
       if inputs.shape[-1] == 1:

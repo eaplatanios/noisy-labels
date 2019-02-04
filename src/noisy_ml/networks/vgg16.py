@@ -2,7 +2,7 @@
 
 import tensorflow as tf
 
-from tensorflow.keras import applications
+from tensorflow.keras import applications, models
 
 
 def VGG16(
@@ -12,15 +12,18 @@ def VGG16(
   """VGG16 base network."""
   def network(inputs):
     # Build the base
-    network = applications.vgg16.VGG16(
-      include_top=False,
+    vgg16 = applications.vgg16.VGG16(
+      include_top=True,
       input_tensor=inputs,
       pooling=pooling,
       weights=weights)
+    features = models.Model(
+      inputs=vgg16.input,
+      outputs=vgg16.get_layer('fc2').output)
 
     if freeze:
-      return tf.stop_gradient(network.output)
+      return tf.stop_gradient(features.output)
     else:
-      return network.output
+      return features.output
 
   return network

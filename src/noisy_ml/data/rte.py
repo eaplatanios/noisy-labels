@@ -20,7 +20,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from .loaders import Dataset
+from .datasets import Dataset
 
 __author__ = 'eaplatanios'
 

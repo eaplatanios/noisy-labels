@@ -22,7 +22,7 @@ import pandas as pd
 import six
 import yaml
 
-from .loaders import Dataset
+from .datasets import Dataset
 
 __author__ = ['alshedivat', 'eaplatanios']
 

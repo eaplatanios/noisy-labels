@@ -19,6 +19,7 @@ import numpy as np
 import tensorflow as tf
 
 from .data.crowdsourced import *
+from .data.rte import *
 from .evaluation.metrics import *
 from .models.layers import *
 from .models.learners import *
@@ -124,7 +125,8 @@ class BlueBirdsModel(Model):
 def run_experiment():
   working_dir = os.getcwd()
   data_dir = os.path.join(working_dir, os.pardir, 'data')
-  dataset = BlueBirdsLoader.load(data_dir, load_features=True)
+  # dataset = BlueBirdsLoader.load(data_dir, load_features=True)
+  dataset = RTELoader.load(data_dir, load_features=True)
 
   def learner_fn(q_latent_size, gamma):
     model = BlueBirdsModel(
@@ -152,7 +154,7 @@ def run_experiment():
     Result.merge(evaluator.evaluate_maj_per_label()).log(prefix='Majority Vote')
 
   learner_cv_kwargs = [
-    {'q_latent_size': 1, 'gamma': 0.0},
+    {'q_latent_size': 1, 'gamma': 0.25},
     {'q_latent_size': 1, 'gamma': 2 ** -3},
     {'q_latent_size': 1, 'gamma': 2 ** -2},
     {'q_latent_size': 1, 'gamma': 2 ** -1},

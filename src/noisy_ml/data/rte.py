@@ -14,13 +14,12 @@
 
 from __future__ import absolute_import, division, print_function
 
-import json
 import logging
 import numpy as np
 import os
 import pandas as pd
-import subprocess
 
+from bert_serving.client import BertClient
 from nltk.corpus.reader.rte import RTECorpusReader
 
 from .datasets import Dataset
@@ -32,35 +31,17 @@ __all__ = ['convert_xml_features', 'RTELoader']
 logger = logging.getLogger(__name__)
 
 
-def convert_xml_features(dataset, data_dir):
+def convert_xml_features(data_dir):
   data_dir = os.path.join(data_dir, 'rte')
-  sentences_path = os.path.join(data_dir, 'sentences.txt')
-  features_path = os.path.join(data_dir, 'features.json')
-  bert_dir = os.path.join(data_dir, 'bert')
-  bert_ckpt_dir = os.path.join(
-    bert_dir, 'checkpoints', 'cased_L-24_H-1024_A-16')
-
+  features_path = os.path.join(data_dir, 'features.txt')
   reader = RTECorpusReader(data_dir, ['rte1_test.xml'])
-  pairs = {p.id: '%s ||| %s' % (p.text, p.hyp)
-           for p in reader.pairs('rte1_test.xml')}
-  pairs = [pairs[i] for i in dataset.instances]
+  bc = BertClient(ip='128.2.204.114')
 
-  with open(sentences_path, 'w') as f:
-    for pair in pairs:
-      f.write(pair + '\n')
-
-  bert_env = os.environ.copy()
-  bert_env['BERT_BASE_DIR'] = bert_ckpt_dir
-  subprocess.run(
-    'python3 extract_pooled_features.py '
-    '--input_file=%s --output_file=%s '
-    '--vocab_file=$BERT_BASE_DIR/vocab.txt '
-    '--bert_config_file=$BERT_BASE_DIR/bert_config.json '
-    '--init_checkpoint=$BERT_BASE_DIR/bert_model.ckpt '
-    '--max_seq_length=512 '
-    '--batch_size=1'
-    % (sentences_path, features_path),
-    shell=True, cwd=bert_dir, env=bert_env)
+  with open(features_path, 'w') as f:
+    for p in reader.pairs('rte1_test.xml'):
+      features = bc.encode(['%s ||| %s' % (p.text, p.hyp)])[0]
+      features = ' '.join(map(str, features.tolist()))
+      f.write('%s\t%s\n' % (p.id, features))
 
 
 class RTELoader(object):
@@ -103,13 +84,16 @@ class RTELoader(object):
       predicted_labels[0][w_id] = (i_ids.tolist(), w_ans.tolist())
 
     if load_features:
-      f_file = os.path.join(data_dir, 'features.json')
-      features = list()
+      f_file = os.path.join(data_dir, 'features.txt')
+      features = dict()
       with open(f_file, 'r') as f:
         for line in f:
-          line = json.loads(line)
-          features.append(np.array(line['features'], np.float32))
-      instance_features = features
+          line_parts = line.split('\t')
+          line_id = int(line_parts[0])
+          line_features = list(map(float, line_parts[1].split(' ')))
+          line_features = np.array(line_features, np.float32)
+          features[line_id] = line_features
+      instance_features = [features[i] for i in instances]
     else:
       instance_features = None
 

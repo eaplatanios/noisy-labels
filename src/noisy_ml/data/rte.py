@@ -26,12 +26,12 @@ from .datasets import Dataset
 
 __author__ = 'eaplatanios'
 
-__all__ = ['convert_xml_features', 'RTELoader']
+__all__ = ['extract_features', 'RTELoader']
 
 logger = logging.getLogger(__name__)
 
 
-def convert_xml_features(data_dir):
+def extract_features(data_dir):
   data_dir = os.path.join(data_dir, 'rte')
   features_path = os.path.join(data_dir, 'features.txt')
   reader = RTECorpusReader(data_dir, ['rte1_test.xml'])

@@ -224,11 +224,11 @@ def run_experiment():
   for m, (name, model) in enumerate(six.iteritems(models)):
     logger.info(
       'Running experiment for model "%s" (%d / %d).'
-      % (name, m, len(models)))
+      % (name, m + 1, len(models)))
     for num_p in num_predictors:
       logger.info(
         'Running experiment for %d / %d predictors.'
-        % (num_p, len(num_predictors)))
+        % (num_p + 1, len(num_predictors)))
       num_p_results = []
       sampled_predictors = list(sample_predictors(
         dataset.predictors,
@@ -237,7 +237,7 @@ def run_experiment():
       for r, predictors in enumerate(sampled_predictors):
         logger.info(
           'Running repetition %d / %d.'
-          % (r, len(sampled_predictors)))
+          % (r + 1, len(sampled_predictors)))
         data = dataset.filter_predictors(predictors)
         evaluator = Evaluator(data)
 

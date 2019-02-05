@@ -225,10 +225,10 @@ def run_experiment():
     logger.info(
       'Running experiment for model "%s" (%d / %d).'
       % (name, m + 1, len(models)))
-    for num_p in num_predictors:
+    for n, num_p in enumerate(num_predictors):
       logger.info(
         'Running experiment for %d / %d predictors.'
-        % (num_p + 1, len(num_predictors)))
+        % (n + 1, len(num_predictors)))
       num_p_results = []
       sampled_predictors = list(sample_predictors(
         dataset.predictors,

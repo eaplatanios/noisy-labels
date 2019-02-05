@@ -143,8 +143,8 @@ def run_experiment():
   working_dir = os.getcwd()
   data_dir = os.path.join(working_dir, os.pardir, 'data')
 
-  dataset = BlueBirdsLoader.load(data_dir, load_features=True)
-  # dataset = RTELoader.load(data_dir)
+  # dataset = BlueBirdsLoader.load(data_dir, load_features=True)
+  dataset = RTELoader.load(data_dir, load_features=True)
 
   def learner_fn(model):
     return EMLearner(
@@ -160,28 +160,28 @@ def run_experiment():
 
   num_annotators = [1, 10, 20, 50, 100, -1]
   models = {
-    'MAJ': 'MAJ',
-    'MMCE-M (γ=0.00)': MMCE_M(dataset, gamma=0.00),
-    'MMCE-M (γ=0.25)': MMCE_M(dataset, gamma=0.25),
-    'LNL[4] (γ=0.00)': LNL(
-      dataset=dataset, instances_emb_size=4,
-      predictors_emb_size=4, q_latent_size=1, gamma=0.00),
-    'LNL[4] (γ=0.25)': LNL(
-      dataset=dataset, instances_emb_size=4,
-      predictors_emb_size=4, q_latent_size=1, gamma=0.25),
-    'LNL[16] (γ=0.00)': LNL(
-      dataset=dataset, instances_emb_size=16,
-      predictors_emb_size=16, q_latent_size=1, gamma=0.00),
-    'LNL[16] (γ=0.25)': LNL(
-      dataset=dataset, instances_emb_size=16,
-      predictors_emb_size=16, q_latent_size=1, gamma=0.25),
-    'LNL[VGG,16,64-32-16] (γ=0.00)': LNL(
+    # 'MAJ': 'MAJ',
+    # 'MMCE-M (γ=0.00)': MMCE_M(dataset, gamma=0.00),
+    # 'MMCE-M (γ=0.25)': MMCE_M(dataset, gamma=0.25),
+    # 'LNL[4] (γ=0.00)': LNL(
+    #   dataset=dataset, instances_emb_size=4,
+    #   predictors_emb_size=4, q_latent_size=1, gamma=0.00),
+    # 'LNL[4] (γ=0.25)': LNL(
+    #   dataset=dataset, instances_emb_size=4,
+    #   predictors_emb_size=4, q_latent_size=1, gamma=0.25),
+    # 'LNL[16] (γ=0.00)': LNL(
+    #   dataset=dataset, instances_emb_size=16,
+    #   predictors_emb_size=16, q_latent_size=1, gamma=0.00),
+    # 'LNL[16] (γ=0.25)': LNL(
+    #   dataset=dataset, instances_emb_size=16,
+    #   predictors_emb_size=16, q_latent_size=1, gamma=0.25),
+    'LNL[BERT,16,64-32-16] (γ=0.00)': LNL(
       dataset=dataset, instances_emb_size=None,
       predictors_emb_size=16,
       instances_hidden=[64, 32, 16],
       predictors_hidden=[64, 32, 16],
       q_latent_size=1, gamma=0.00),
-    'LNL[VGG,16,64-32-16] (γ=0.25)': LNL(
+    'LNL[BERT,16,64-32-16] (γ=0.25)': LNL(
       dataset=dataset, instances_emb_size=None,
       predictors_emb_size=16,
       instances_hidden=[64, 32, 16],

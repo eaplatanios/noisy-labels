@@ -225,7 +225,9 @@ class Dataset(object):
 
   def filter_predictors(self, predictors):
     i_indices = dict()
+    p_indices = dict()
     instances = list()
+    new_predictors = list()
     true_labels = dict()
     predicted_labels = dict()
 
@@ -246,9 +248,13 @@ class Dataset(object):
         predictor = self.predictors[p_old]
         if predictor not in predictors:
           continue
-        p = predictors.index(predictor)
-        if has_pf:
-          predictor_features.append(self.predictor_features[p_old])
+        p = p_indices.get(p_old)
+        if p is None:
+          p = len(new_predictors)
+          new_predictors.append(self.predictors[p_old])
+          p_indices[p_old] = p
+          if has_pf:
+            predictor_features.append(self.predictor_features[p_old])
         predicted_labels[l][p] = ([], [])
         for i_old, v in zip(*indices_values):
           i = i_indices.get(i_old)
@@ -270,7 +276,7 @@ class Dataset(object):
         true_labels[l][i] = true_label
 
     return Dataset(
-      instances, predictors, self.labels,
+      instances, new_predictors, self.labels,
       true_labels, predicted_labels,
       instance_features, predictor_features,
       label_features)

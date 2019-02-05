@@ -16,12 +16,12 @@ from __future__ import absolute_import, division, print_function
 
 import logging
 import os
+import matplotlib.pyplot as plt
 import numpy as np
-import pprint
+import pandas as pd
+import random
 import six
 import tensorflow as tf
-
-from tqdm import tqdm
 
 from noisy_ml.data.crowdsourced import *
 from noisy_ml.data.rte import *
@@ -47,7 +47,7 @@ class LNL(Model):
       self, dataset, instances_emb_size=None,
       predictors_emb_size=None, labels_emb_size=None,
       instances_hidden=None, predictors_hidden=None,
-      q_latent_size=None, gamma=0.2):
+      q_latent_size=None, gamma=0.25):
     self.dataset = dataset
     self.instances_emb_size = instances_emb_size
     self.predictors_emb_size = predictors_emb_size
@@ -141,13 +141,38 @@ class LNL(Model):
       include_y_prior=True)
 
 
+def sample_predictors(predictors, num_to_sample, num_sets=5):
+  if len(predictors) <= num_to_sample:
+    yield predictors
+  else:
+    for _ in range(num_sets):
+      yield random.sample(predictors, num_to_sample)
+
+
 def run_experiment():
+  num_repetitions = 10
+  dataset = 'wordsim'
   working_dir = os.getcwd()
   data_dir = os.path.join(working_dir, os.pardir, 'data')
+  results_dir = os.path.join(working_dir, os.pardir, 'results')
 
-  # dataset = BlueBirdsLoader.load(data_dir, load_features=True)
-  dataset = RTELoader.load(data_dir, load_features=True)
-  # dataset = WordSimLoader.load(data_dir, load_features=True)
+  if not os.path.exists(results_dir):
+    os.makedirs(results_dir)
+
+  if dataset is 'bluebirds':
+    dataset = BlueBirdsLoader.load(data_dir, load_features=True)
+    num_predictors = [1, 10, 20, 39]
+    results_path = os.path.join(results_dir, 'bluebirds.csv')
+  elif dataset is 'rte':
+    dataset = RTELoader.load(data_dir, load_features=True)
+    num_predictors = [1, 10, 20, 50, 100, 164]
+    results_path = os.path.join(results_dir, 'rte.csv')
+  elif dataset is 'wordsim':
+    dataset = WordSimLoader.load(data_dir, load_features=True)
+    num_predictors = [1, 2, 5, 10]
+    results_path = os.path.join(results_dir, 'wordsim.csv')
+  else:
+    raise NotImplementedError
 
   def learner_fn(model):
     return EMLearner(
@@ -161,11 +186,10 @@ def run_experiment():
         use_soft_y_hat=False),
       predictions_output_fn=np.exp)
 
-  num_annotators = [1, 10, 20, 50, 100, -1]
   models = {
-    # 'MAJ': 'MAJ',
-    # 'MMCE-M (γ=0.00)': MMCE_M(dataset, gamma=0.00),
-    # 'MMCE-M (γ=0.25)': MMCE_M(dataset, gamma=0.25),
+    'MAJ': 'MAJ',
+    'MMCE-M (γ=0.00)': MMCE_M(dataset, gamma=0.00),
+    'MMCE-M (γ=0.25)': MMCE_M(dataset, gamma=0.25),
     # 'LNL[4] (γ=0.00)': LNL(
     #   dataset=dataset, instances_emb_size=4,
     #   predictors_emb_size=4, q_latent_size=1, gamma=0.00),
@@ -178,61 +202,123 @@ def run_experiment():
     # 'LNL[16] (γ=0.25)': LNL(
     #   dataset=dataset, instances_emb_size=16,
     #   predictors_emb_size=16, q_latent_size=1, gamma=0.25),
-    'LNL[BERT,16,16] (γ=0.00)': LNL(
-      dataset=dataset, instances_emb_size=None,
-      predictors_emb_size=16,
-      instances_hidden=[16],
-      predictors_hidden=[16],
-      q_latent_size=1, gamma=0.00),
-    'LNL[BERT,16,16] (γ=0.25)': LNL(
-      dataset=dataset, instances_emb_size=None,
-      predictors_emb_size=16,
-      instances_hidden=[16],
-      predictors_hidden=[16],
-      q_latent_size=1, gamma=0.25)
+    # 'LNL[BERT,16,16] (γ=0.00)': LNL(
+    #   dataset=dataset, instances_emb_size=None,
+    #   predictors_emb_size=16,
+    #   instances_hidden=[16],
+    #   predictors_hidden=[16],
+    #   q_latent_size=1, gamma=0.00),
+    # 'LNL[BERT,16,16] (γ=0.25)': LNL(
+    #   dataset=dataset, instances_emb_size=None,
+    #   predictors_emb_size=16,
+    #   instances_hidden=[16],
+    #   predictors_hidden=[16],
+    #   q_latent_size=1, gamma=0.25)
   }
 
-  pp = pprint.PrettyPrinter(indent=2)
+  results = pd.DataFrame(
+    columns=[
+      'model', 'num_predictors', 'metric',
+      'value_mean', 'value_std'])
 
-  model_results = dict()
-  for name, model in tqdm(six.iteritems(models), desc='Model'):
-    results = dict()
-    for num_a in tqdm(num_annotators, desc='#Annotators'):
-      data = dataset
-      if num_a > -1:
-        data = data.filter_predictors(
-          dataset.predictors[:num_a])
-      evaluator = Evaluator(data)
+  for m, (name, model) in enumerate(six.iteritems(models)):
+    logger.info(
+      'Running experiment for model "%s" (%d / %d).'
+      % (name, m, len(models)))
+    for num_p in num_predictors:
+      logger.info(
+        'Running experiment for %d / %d predictors.'
+        % (num_p, len(num_predictors)))
+      num_p_results = []
+      sampled_predictors = list(sample_predictors(
+        dataset.predictors,
+        num_p,
+        num_sets=num_repetitions))
+      for r, predictors in enumerate(sampled_predictors):
+        logger.info(
+          'Running repetition %d / %d.'
+          % (r, len(sampled_predictors)))
+        data = dataset.filter_predictors(predictors)
+        evaluator = Evaluator(data)
 
-      if model is 'MAJ':
-        result = evaluator.evaluate_maj_per_label()[0]
-      else:
-        with tf.Graph().as_default():
-          train_data = data.to_train(shuffle=True)
-          train_dataset = tf.data.Dataset.from_tensor_slices({
-            'instances': train_data.instances,
-            'predictors': train_data.predictors,
-            'labels': train_data.labels,
-            'values': train_data.values})
+        if model is 'MAJ':
+          result = evaluator.evaluate_maj_per_label()[0]
+        else:
+          with tf.Graph().as_default():
+            train_data = data.to_train(shuffle=True)
+            train_dataset = tf.data.Dataset.from_tensor_slices({
+              'instances': train_data.instances,
+              'predictors': train_data.predictors,
+              'labels': train_data.labels,
+              'values': train_data.values})
 
-          learner = learner_fn(model)
-          learner.train(
-            dataset=train_dataset,
-            batch_size=1024,
-            warm_start=True,
-            max_m_steps=1000,
-            max_em_steps=10,
-            log_m_steps=None,
-            use_progress_bar=True)
-          # TODO: Average results across all labels.
-          result = evaluator.evaluate_per_label(
-            learner=learner,
-            batch_size=128)[0]
-      results[num_a] = result
-    model_results[name] = results
-    logger.info('%s:\n%s' % (name, pp.pformat(results)))
+            learner = learner_fn(model)
+            learner.train(
+              dataset=train_dataset,
+              batch_size=1024,
+              warm_start=True,
+              max_m_steps=1000,
+              max_em_steps=10,
+              log_m_steps=None,
+              use_progress_bar=True)
+            # TODO: Average results across all labels.
+            result = evaluator.evaluate_per_label(
+              learner=learner,
+              batch_size=128)[0]
+        num_p_results.append(result)
+      accuracies = [r.accuracy for r in num_p_results]
+      results = results.append({
+        'model': name,
+        'num_predictors': num_p,
+        'metric': 'accuracy',
+        'value_mean': np.mean(accuracies),
+        'value_std': np.std(accuracies)}, ignore_index=True)
+      aucs = [r.auc for r in num_p_results]
+      results = results.append({
+        'model': name,
+        'num_predictors': num_p,
+        'metric': 'auc',
+        'value_mean': np.mean(aucs),
+        'value_std': np.std(aucs)}, ignore_index=True)
+    logger.info('Results so far:\n%s' % str(results))
 
-  logger.info(pp.pformat(model_results))
+  logger.info('Results:\n%s' % str(results))
+
+  results.to_csv(results_path)
+
+  results = pd.read_csv(results_path)
+
+  # Accuracy Plot.
+  fig, ax = plt.subplots()
+  results_auc = results[results.metric == 'accuracy']
+  for label, auc in results_auc.groupby('model'):
+    ax.plot(
+      auc.num_predictors.astype(np.int32),
+      auc.value_mean,
+      label=label)
+    ax.fill_between(
+      auc.num_predictors.astype(np.int32),
+      auc.value_mean - auc.value_std,
+      auc.value_mean + auc.value_std,
+      alpha=0.35)
+  plt.legend()
+  plt.show()
+
+  # AUC Plot.
+  fig, ax = plt.subplots()
+  results_auc = results[results.metric == 'auc']
+  for label, auc in results_auc.groupby('model'):
+    ax.plot(
+      auc.num_predictors.astype(np.int32),
+      auc.value_mean,
+      label=label)
+    ax.fill_between(
+      auc.num_predictors.astype(np.int32),
+      auc.value_mean - auc.value_std,
+      auc.value_mean + auc.value_std,
+      alpha=0.35)
+  plt.legend()
+  plt.show()
 
 
 if __name__ == '__main__':

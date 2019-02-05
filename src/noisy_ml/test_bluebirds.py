@@ -185,8 +185,9 @@ def run_experiment():
     batch_size=1024,
     warm_start=True,
     max_m_steps=1000,
-    max_em_steps=100,
+    max_em_steps=5,
     log_m_steps=100,
+    max_marginal_steps=1000,
     em_step_callback=em_callback)
 
   return {

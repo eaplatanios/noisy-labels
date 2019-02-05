@@ -180,7 +180,8 @@ class EMLearner(object):
       self, dataset, batch_size=128,
       warm_start=False, max_m_steps=1000,
       max_em_steps=100, log_m_steps=100,
-      em_step_callback=None, use_progress_bar=False):
+      max_marginal_steps=0, em_step_callback=None,
+      use_progress_bar=False):
     e_step_dataset = dataset.batch(batch_size)
     m_step_dataset = dataset.repeat().shuffle(10000).batch(batch_size)
 
@@ -203,6 +204,14 @@ class EMLearner(object):
         max_m_steps, log_m_steps)
       if em_step_callback is not None:
         em_step_callback(self)
+
+    if max_marginal_steps > 0:
+      self._session.run(self._ops['set_opt_marginal'])
+      logger.info('Optimizing marginal log-likelihood.')
+      self._m_step(
+        m_step_iterator_init_op, warm_start,
+        max_marginal_steps, log_m_steps)
+      self._session.run(self._ops['unset_opt_marginal'])
 
   def neg_log_likelihood(self, dataset, batch_size=128):
     dataset = dataset.batch(batch_size)
@@ -421,14 +430,31 @@ class MultiLabelEMConfig(EMConfig):
 
     # M-Step:
 
-    # Compute E[I(y=1)] and E[I(y=0)] that is used
-    # in the log-likelihood function.
-
     with tf.name_scope('m_step'):
-      ll_term0 = tf.reduce_sum(e_y * h_log)
-      ll_term1 = tf.reduce_sum(
+      # Boolean flag about whether or not to optimize the
+      # marginal log-likelihood.
+      opt_marginal = tf.get_variable(
+        name='opt_marginal',
+        shape=[],
+        dtype=tf.bool,
+        initializer=tf.zeros_initializer(),
+        trainable=False)
+      set_opt_marginal = opt_marginal.assign(True)
+      unset_opt_marginal = opt_marginal.assign(False)
+
+      em_ll_term0 = tf.reduce_sum(e_y * h_log)
+      em_ll_term1 = tf.reduce_sum(
         tf.einsum('ij,ij->i', q_log_y_hat, e_y))
-      neg_log_likelihood = -ll_term0 - ll_term1
+      em_nll = -em_ll_term0 - em_ll_term1
+
+      marginal_ll = q_log_y_hat + h_log
+      marginal_ll = tf.reduce_sum(marginal_ll, axis=-1)
+      marginal_ll = -tf.reduce_logsumexp(marginal_ll)
+
+      neg_log_likelihood = tf.cond(
+        opt_marginal,
+        lambda: marginal_ll,
+        lambda : em_nll)
       if len(regularization_terms) > 0:
         neg_log_likelihood += tf.add_n(regularization_terms)
 
@@ -450,6 +476,8 @@ class MultiLabelEMConfig(EMConfig):
       'qualities_mean_log': qualities_mean_log,
       'set_use_maj': set_use_maj,
       'unset_use_maj': unset_use_maj,
+      'set_opt_marginal': set_opt_marginal,
+      'unset_opt_marginal': unset_opt_marginal,
       'e_step_init': e_step_init,
       'm_step_init': m_step_init,
       'e_step': e_step,

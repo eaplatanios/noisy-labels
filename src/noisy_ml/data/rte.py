@@ -14,19 +14,53 @@
 
 from __future__ import absolute_import, division, print_function
 
+import json
 import logging
-import os
-
 import numpy as np
+import os
 import pandas as pd
+import subprocess
+
+from nltk.corpus.reader.rte import RTECorpusReader
 
 from .datasets import Dataset
 
 __author__ = 'eaplatanios'
 
-__all__ = ['RTELoader']
+__all__ = ['convert_xml_features', 'RTELoader']
 
 logger = logging.getLogger(__name__)
+
+
+def convert_xml_features(dataset, data_dir):
+  data_dir = os.path.join(data_dir, 'rte')
+  sentences_path = os.path.join(data_dir, 'sentences.txt')
+  features_path = os.path.join(data_dir, 'features.json')
+  bert_dir = os.path.join(data_dir, 'bert')
+  bert_ckpt_dir = os.path.join(
+    bert_dir, 'checkpoints', 'cased_L-24_H-1024_A-16')
+
+  reader = RTECorpusReader(data_dir, ['rte1_test.xml'])
+  pairs = {p.id: '%s ||| %s' % (p.text, p.hyp)
+           for p in reader.pairs('rte1_test.xml')}
+  pairs = [pairs[i] for i in dataset.instances]
+
+  with open(sentences_path, 'w') as f:
+    for pair in pairs:
+      f.write(pair + '\n')
+
+  bert_env = os.environ.copy()
+  bert_env['BERT_BASE_DIR'] = bert_ckpt_dir
+  subprocess.run(
+    'python3 extract_pooled_features.py '
+    '--input_file=%s --output_file=%s '
+    '--vocab_file=$BERT_BASE_DIR/vocab.txt '
+    '--bert_config_file=$BERT_BASE_DIR/bert_config.json '
+    '--init_checkpoint=$BERT_BASE_DIR/bert_model.ckpt '
+    '--max_seq_length=512 '
+    '--batch_size=1'
+    % (sentences_path, features_path),
+    shell=True, cwd=bert_dir, env=bert_env)
 
 
 class RTELoader(object):
@@ -38,13 +72,13 @@ class RTELoader(object):
   """
 
   @staticmethod
-  def load(data_dir):
+  def load(data_dir, load_features=True):
     # Load data.
-    data_dir = os.path.join(data_dir, 'rte', 'original.tsv')
-    df = pd.read_table(data_dir)
+    data_dir = os.path.join(data_dir, 'rte')
+    df = pd.read_table(os.path.join(data_dir, 'original.tsv'))
 
     # Extract instances and predictors.
-    instances = df['orig_id'].unique().astype(str).tolist()
+    instances = df['orig_id'].unique().astype(int).tolist()
     predictors = df['!amt_worker_ids'].unique().astype(str).tolist()
 
     # Extract ground truth.
@@ -68,6 +102,18 @@ class RTELoader(object):
       w_ans = annotations[i_ids, w_id]
       predicted_labels[0][w_id] = (i_ids.tolist(), w_ans.tolist())
 
+    if load_features:
+      f_file = os.path.join(data_dir, 'features.json')
+      features = list()
+      with open(f_file, 'r') as f:
+        for line in f:
+          line = json.loads(line)
+          features.append(np.array(line['features'], np.float32))
+      instance_features = features
+    else:
+      instance_features = None
+
     return Dataset(
       instances, predictors, labels,
-      true_labels, predicted_labels)
+      true_labels, predicted_labels,
+      instance_features=instance_features)

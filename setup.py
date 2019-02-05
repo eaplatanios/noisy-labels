@@ -14,5 +14,5 @@ setup(
     description='Learning from Noisy Labels',
     url='https://github.com/eaplatanios/noisy-labels',
     install_requires=[
-        'numpy>=1.5', 'scikit-learn>=0.20.1', 'six',
+        'nltk', 'numpy>=1.5', 'scikit-learn>=0.20.1', 'six',
         'tensorflow>=1.11'])

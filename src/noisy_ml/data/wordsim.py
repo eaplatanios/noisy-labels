@@ -66,7 +66,6 @@ class WordSimLoader(object):
     true_labels = df[['orig_id', 'gold']].drop_duplicates()
     true_labels = true_labels.drop_duplicates().set_index('orig_id')
     true_labels = true_labels.sort_index().values.flatten()
-    true_labels /= 4.0
     true_labels = (true_labels >= 2.0).astype(np.int32)
     true_labels = true_labels.tolist()
     true_labels = {0: dict(zip(range(len(true_labels)), true_labels))}
@@ -82,7 +81,7 @@ class WordSimLoader(object):
     predicted_labels = {0: dict()}
     for w_id in range(annotations.shape[1]):
       i_ids = np.nonzero(annotations[:, w_id] >= 0)[0]
-      w_ans = annotations[i_ids, w_id] / 5.0
+      w_ans = annotations[i_ids, w_id] / 10.0
       predicted_labels[0][w_id] = (i_ids.tolist(), w_ans.tolist())
 
     if load_features:
@@ -91,7 +90,7 @@ class WordSimLoader(object):
       with open(f_file, 'r') as f:
         for line in f:
           line_parts = line.split('\t')
-          line_id = int(line_parts[0])
+          line_id = line_parts[0]
           line_features = list(map(float, line_parts[1].split(' ')))
           line_features = np.array(line_features, np.float32)
           features[line_id] = line_features

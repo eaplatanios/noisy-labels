@@ -20,6 +20,7 @@ import tensorflow as tf
 
 from .data.crowdsourced import *
 from .data.rte import *
+from .data.wordsim import *
 from .evaluation.metrics import *
 from .models.layers import *
 from .models.learners import *
@@ -55,7 +56,7 @@ class BlueBirdsModel(Model):
       )(instances)
 
     predictions = MLP(
-      hidden_units=[64, 32, 16],
+      hidden_units=[],
       activation=tf.nn.selu,
       output_layer=LogSigmoid(
         num_labels=len(self.dataset.labels),
@@ -85,7 +86,7 @@ class BlueBirdsModel(Model):
       regularization_terms = []
     else:
       q_i = MLP(
-        hidden_units=[64, 32, 16],
+        hidden_units=[],
         activation=tf.nn.selu,
         output_layer=Linear(
           num_outputs=4*self.q_latent_size,
@@ -119,14 +120,16 @@ class BlueBirdsModel(Model):
     return BuiltModel(
       predictions=predictions,
       q_params=q_params,
-      regularization_terms=regularization_terms)
+      regularization_terms=regularization_terms,
+      include_y_prior=True)
 
 
 def run_experiment():
   working_dir = os.getcwd()
   data_dir = os.path.join(working_dir, os.pardir, 'data')
   # dataset = BlueBirdsLoader.load(data_dir, load_features=True)
-  dataset = RTELoader.load(data_dir, load_features=True)
+  # dataset = RTELoader.load(data_dir, load_features=True)
+  dataset = WordSimLoader.load(data_dir, load_features=True)
 
   def learner_fn(q_latent_size, gamma):
     model = BlueBirdsModel(
@@ -182,7 +185,7 @@ def run_experiment():
     batch_size=1024,
     warm_start=True,
     max_m_steps=1000,
-    max_em_steps=20,
+    max_em_steps=100,
     log_m_steps=100,
     em_step_callback=em_callback)
 

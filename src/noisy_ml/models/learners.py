@@ -340,7 +340,7 @@ class MultiLabelEMConfig(EMConfig):
     p_indices = predictors
     l_indices = labels
 
-    predictions, q_params, regularization_terms = self.model.build(
+    predictions, q_params, regularization_terms, include_y_prior = self.model.build(
       x_indices, p_indices, l_indices)
 
     # y_hat has shape: [BatchSize, 2]
@@ -405,7 +405,11 @@ class MultiLabelEMConfig(EMConfig):
         updates=e_y_acc_update)
 
       e_y_a = tf.gather_nd(e_y_acc, xl_indices)
-      e_y_a_h_log = e_y_a + h_log
+      e_y_a_h_log = e_y_a
+      if include_y_prior:
+        e_y_a_h_log += h_log
+      else:
+        e_y_a_h_log += np.log(0.5)
       e_y_log = tf.stop_gradient(tf.cond(
         use_maj,
         lambda: tf.log(e_y_a) - tf.log(tf.reduce_sum(e_y_a, axis=-1, keepdims=True)),

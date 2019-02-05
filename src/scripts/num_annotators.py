@@ -25,6 +25,7 @@ from tqdm import tqdm
 
 from noisy_ml.data.crowdsourced import *
 from noisy_ml.data.rte import *
+from noisy_ml.data.wordsim import *
 from noisy_ml.evaluation.metrics import *
 from noisy_ml.models.layers import *
 from noisy_ml.models.learners import *
@@ -136,7 +137,8 @@ class LNL(Model):
     return BuiltModel(
       predictions=predictions,
       q_params=q_params,
-      regularization_terms=regularization_terms)
+      regularization_terms=regularization_terms,
+      include_y_prior=True)
 
 
 def run_experiment():
@@ -145,6 +147,7 @@ def run_experiment():
 
   # dataset = BlueBirdsLoader.load(data_dir, load_features=True)
   dataset = RTELoader.load(data_dir, load_features=True)
+  # dataset = WordSimLoader.load(data_dir, load_features=True)
 
   def learner_fn(model):
     return EMLearner(
@@ -175,17 +178,17 @@ def run_experiment():
     # 'LNL[16] (γ=0.25)': LNL(
     #   dataset=dataset, instances_emb_size=16,
     #   predictors_emb_size=16, q_latent_size=1, gamma=0.25),
-    'LNL[BERT,16,64-32-16] (γ=0.00)': LNL(
+    'LNL[BERT,16,16] (γ=0.00)': LNL(
       dataset=dataset, instances_emb_size=None,
       predictors_emb_size=16,
-      instances_hidden=[64, 32, 16],
-      predictors_hidden=[64, 32, 16],
+      instances_hidden=[16],
+      predictors_hidden=[16],
       q_latent_size=1, gamma=0.00),
-    'LNL[BERT,16,64-32-16] (γ=0.25)': LNL(
+    'LNL[BERT,16,16] (γ=0.25)': LNL(
       dataset=dataset, instances_emb_size=None,
       predictors_emb_size=16,
-      instances_hidden=[64, 32, 16],
-      predictors_hidden=[64, 32, 16],
+      instances_hidden=[16],
+      predictors_hidden=[16],
       q_latent_size=1, gamma=0.25)
   }
 

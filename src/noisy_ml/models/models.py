@@ -32,7 +32,8 @@ logger = logging.getLogger(__name__)
 
 BuiltModel = namedtuple(
   'BuiltModel',
-  ['predictions', 'q_params', 'regularization_terms'])
+  ['predictions', 'q_params',
+   'regularization_terms', 'include_y_prior'])
 
 
 class Model(with_metaclass(abc.ABCMeta, object)):
@@ -82,4 +83,6 @@ class MMCE_M(Model):
       beta * tf.reduce_sum(q_i * q_i) / 2,
       alpha * tf.reduce_sum(q_p * q_p) / 2]
 
-    return BuiltModel(predictions, q_params, regularization_terms)
+    return BuiltModel(
+      predictions, q_params, regularization_terms,
+      include_y_prior=False)

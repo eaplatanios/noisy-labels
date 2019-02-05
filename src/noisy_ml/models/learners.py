@@ -448,8 +448,8 @@ class MultiLabelEMConfig(EMConfig):
       em_nll = -em_ll_term0 - em_ll_term1
 
       marginal_ll = q_log_y_hat + h_log
-      marginal_ll = tf.reduce_sum(marginal_ll, axis=-1)
-      marginal_ll = -tf.reduce_logsumexp(marginal_ll)
+      marginal_ll = tf.reduce_logsumexp(marginal_ll, axis=-1)
+      marginal_ll = -tf.reduce_sum(marginal_ll)
 
       neg_log_likelihood = tf.cond(
         opt_marginal,

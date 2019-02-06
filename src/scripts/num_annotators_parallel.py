@@ -179,11 +179,14 @@ def train_eval_predictors(args, dataset):
     logger.info(
       'Running repetition %d/%d for %s for %d predictors.'
       % (r + 1, len(sampled_predictors), model_name, num_p))
-    data = dataset.filter_predictors(predictors)
+    data = dataset.filter_predictors(
+      predictors, keep_instances=True)
     evaluator = Evaluator(data)
 
     if model == 'MAJ':
-      result = evaluator.evaluate_maj_per_label()[0]
+      result = evaluator.evaluate_maj_per_label(soft=False)[0]
+    elif model == 'MAJ-S':
+      result = evaluator.evaluate_maj_per_label(soft=True)[0]
     else:
       with tf.Graph().as_default():
         train_data = data.to_train(shuffle=True)

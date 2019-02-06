@@ -129,6 +129,9 @@ class Evaluator(object):
           if not soft:
             v = int(v >= 0.5)
           all_predictions[i].append(v)
+      for i in range(len(self.dataset.instances)):
+        if i not in all_predictions:
+          all_predictions[i] = [0.5]
       all_predictions_mean = dict()
       true_labels = []
       predictions = []

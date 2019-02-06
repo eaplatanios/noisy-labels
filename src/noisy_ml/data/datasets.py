@@ -223,10 +223,10 @@ class Dataset(object):
       instance_features, predictor_features,
       label_features)
 
-  def filter_predictors(self, predictors):
+  def filter_predictors(self, predictors, keep_instances=True):
     i_indices = dict()
     p_indices = dict()
-    instances = list()
+    new_instances = list()
     new_predictors = list()
     true_labels = dict()
     predicted_labels = dict()
@@ -237,6 +237,10 @@ class Dataset(object):
     instance_features = list() if has_if else None
     predictor_features = list() if has_pf else None
     label_features = list() if has_lf else None
+
+    if keep_instances:
+      new_instances = self.instances
+      instance_features = self.instance_features
 
     for l, label in enumerate(self.labels):
       if has_lf:
@@ -257,26 +261,32 @@ class Dataset(object):
             predictor_features.append(self.predictor_features[p_old])
         predicted_labels[l][p] = ([], [])
         for i_old, v in zip(*indices_values):
-          i = i_indices.get(i_old)
-          if i is None:
-            i = len(instances)
-            instances.append(self.instances[i_old])
-            i_indices[i_old] = i
-            if has_if:
-              instance_features.append(self.instance_features[i_old])
+          if keep_instances:
+            i = i_old
+          else:
+            i = i_indices.get(i_old)
+            if i is None:
+              i = len(new_instances)
+              new_instances.append(self.instances[i_old])
+              i_indices[i_old] = i
+              if has_if:
+                instance_features.append(self.instance_features[i_old])
           predicted_labels[l][p][0].append(i)
           predicted_labels[l][p][1].append(v)
 
       # Filter the true labels.
       true_labels[l] = dict()
       for i_old, true_label in six.iteritems(self.true_labels[label]):
-        i = i_indices.get(i_old)
-        if i is None:
-          continue
+        if keep_instances:
+          i = i_old
+        else:
+          i = i_indices.get(i_old)
+          if i is None:
+            continue
         true_labels[l][i] = true_label
 
     return Dataset(
-      instances, new_predictors, self.labels,
+      new_instances, new_predictors, self.labels,
       true_labels, predicted_labels,
       instance_features, predictor_features,
       label_features)

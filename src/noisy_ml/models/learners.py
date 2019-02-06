@@ -16,6 +16,8 @@ from __future__ import absolute_import, division, print_function
 
 import abc
 import logging
+import os
+
 import numpy as np
 import tensorflow as tf
 
@@ -136,7 +138,9 @@ class EMLearner(object):
 
   def _init_session(self):
     if self._session is None:
-      self._session = tf.Session()
+      config = tf.ConfigProto()
+      config.gpu_options.allow_growth = True
+      self._session = tf.Session(config=config)
       self._session.run(self._init_op)
 
   def _e_step(self, iterator_init_op, use_maj):
@@ -191,7 +195,7 @@ class EMLearner(object):
 
     em_steps_range = range(max_em_steps)
     if use_progress_bar:
-      em_steps_range = tqdm(em_steps_range, 'EM Step')
+      em_steps_range = tqdm(em_steps_range, 'EM Step (%s)' % os.getpid())
 
     for em_step in em_steps_range:
       if not use_progress_bar:

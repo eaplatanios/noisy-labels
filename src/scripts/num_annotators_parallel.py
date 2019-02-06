@@ -179,7 +179,7 @@ def train_eval_predictors(args, dataset):
     data = dataset.filter_predictors(predictors)
     evaluator = Evaluator(data)
 
-    if model is 'MAJ':
+    if model == 'MAJ':
       result = evaluator.evaluate_maj_per_label()[0]
     else:
       with tf.Graph().as_default():
@@ -256,24 +256,24 @@ def run_experiment(num_proc=1):
     'MAJ': 'MAJ',
     'MMCE-M (γ=0.00)': MMCE_M(dataset, gamma=0.00),
     'MMCE-M (γ=0.25)': MMCE_M(dataset, gamma=0.25),
-    'LNL[4] (γ=0.00)': LNL(
-      dataset=dataset, instances_emb_size=4,
-      predictors_emb_size=4, q_latent_size=1, gamma=0.00),
+    # 'LNL[4] (γ=0.00)': LNL(
+    #   dataset=dataset, instances_emb_size=4,
+    #   predictors_emb_size=4, q_latent_size=1, gamma=0.00),
     'LNL[4] (γ=0.25)': LNL(
       dataset=dataset, instances_emb_size=4,
       predictors_emb_size=4, q_latent_size=1, gamma=0.25),
-    'LNL[16] (γ=0.00)': LNL(
-      dataset=dataset, instances_emb_size=16,
-      predictors_emb_size=16, q_latent_size=1, gamma=0.00),
+    # 'LNL[16] (γ=0.00)': LNL(
+    #   dataset=dataset, instances_emb_size=16,
+    #   predictors_emb_size=16, q_latent_size=1, gamma=0.00),
     'LNL[16] (γ=0.25)': LNL(
       dataset=dataset, instances_emb_size=16,
       predictors_emb_size=16, q_latent_size=1, gamma=0.25),
-    'LNL[BERT,16,16] (γ=0.00)': LNL(
-      dataset=dataset, instances_emb_size=None,
-      predictors_emb_size=16,
-      instances_hidden=[16],
-      predictors_hidden=[16],
-      q_latent_size=1, gamma=0.00),
+    # 'LNL[BERT,16,16] (γ=0.00)': LNL(
+    #   dataset=dataset, instances_emb_size=None,
+    #   predictors_emb_size=16,
+    #   instances_hidden=[16],
+    #   predictors_hidden=[16],
+    #   q_latent_size=1, gamma=0.00),
     'LNL[BERT,16,16] (γ=0.25)': LNL(
       dataset=dataset, instances_emb_size=None,
       predictors_emb_size=16,

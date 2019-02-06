@@ -288,10 +288,7 @@ def run_experiment(num_proc=1):
       'value_mean', 'value_std'])
 
   with futures.ProcessPoolExecutor(num_proc) as executor:
-    func = partial(
-      train_eval_predictors,
-      dataset=dataset,
-      num_repetitions=num_repetitions)
+    func = partial(train_eval_predictors, dataset=dataset)
     inputs = [
       (model, name, num_p)
       for (name, model), (num_p, num_r) in product(

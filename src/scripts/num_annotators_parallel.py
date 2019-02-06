@@ -290,7 +290,7 @@ def run_experiment(num_proc=1):
   with futures.ProcessPoolExecutor(num_proc) as executor:
     func = partial(train_eval_predictors, dataset=dataset)
     inputs = [
-      (model, name, num_p)
+      (model, name, num_p, num_r)
       for (name, model), (num_p, num_r) in product(
         models.items(), zip(num_predictors, num_repetitions))]
     model_results = executor.map(func, inputs)

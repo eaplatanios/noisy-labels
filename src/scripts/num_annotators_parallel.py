@@ -40,9 +40,10 @@ __author__ = 'eaplatanios'
 logger = logging.getLogger(__name__)
 
 
-seed = 1234567890
-np.random.seed(seed)
-tf.set_random_seed(seed)
+def reset_seed():
+  seed = 1234567890
+  np.random.seed(seed)
+  tf.set_random_seed(seed)
 
 
 class LNL(Model):
@@ -166,6 +167,8 @@ def learner_fn(model, dataset):
 
 
 def train_eval_predictors(args, dataset):
+  reset_seed()
+
   model, model_name, num_p, num_repetitions = args
   num_p_results = []
   sampled_predictors = list(sample_predictors(
@@ -226,6 +229,8 @@ def train_eval_predictors(args, dataset):
 
 
 def run_experiment(num_proc=1):
+  reset_seed()
+
   dataset = 'wordsim'
   working_dir = os.getcwd()
   data_dir = os.path.join(working_dir, os.pardir, 'data')
@@ -254,26 +259,13 @@ def run_experiment(num_proc=1):
 
   models = {
     'MAJ': 'MAJ',
-    'MMCE-M (γ=0.00)': MMCE_M(dataset, gamma=0.00),
     'MMCE-M (γ=0.25)': MMCE_M(dataset, gamma=0.25),
-    # 'LNL[4] (γ=0.00)': LNL(
-    #   dataset=dataset, instances_emb_size=4,
-    #   predictors_emb_size=4, q_latent_size=1, gamma=0.00),
     'LNL[4] (γ=0.25)': LNL(
       dataset=dataset, instances_emb_size=4,
       predictors_emb_size=4, q_latent_size=1, gamma=0.25),
-    # 'LNL[16] (γ=0.00)': LNL(
-    #   dataset=dataset, instances_emb_size=16,
-    #   predictors_emb_size=16, q_latent_size=1, gamma=0.00),
     'LNL[16] (γ=0.25)': LNL(
       dataset=dataset, instances_emb_size=16,
       predictors_emb_size=16, q_latent_size=1, gamma=0.25),
-    # 'LNL[BERT,16,16] (γ=0.00)': LNL(
-    #   dataset=dataset, instances_emb_size=None,
-    #   predictors_emb_size=16,
-    #   instances_hidden=[16],
-    #   predictors_hidden=[16],
-    #   q_latent_size=1, gamma=0.00),
     'LNL[BERT,16,16] (γ=0.25)': LNL(
       dataset=dataset, instances_emb_size=None,
       predictors_emb_size=16,

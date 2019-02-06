@@ -20,7 +20,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import random
-import six
 import tensorflow as tf
 
 from concurrent import futures
@@ -166,8 +165,8 @@ def learner_fn(model, dataset):
     predictions_output_fn=np.exp)
 
 
-def train_eval_predictors(args, dataset, num_repetitions=10):
-  model, model_name, num_p = args
+def train_eval_predictors(args, dataset):
+  model, model_name, num_p, num_repetitions = args
   num_p_results = []
   sampled_predictors = list(sample_predictors(
     dataset.predictors,
@@ -198,6 +197,7 @@ def train_eval_predictors(args, dataset, num_repetitions=10):
           warm_start=True,
           max_m_steps=1000,
           max_em_steps=10,
+          max_marginal_steps=2000,
           log_m_steps=None,
           use_progress_bar=True)
         # TODO: Average results across all labels.
@@ -226,8 +226,7 @@ def train_eval_predictors(args, dataset, num_repetitions=10):
 
 
 def run_experiment(num_proc=1):
-  num_repetitions = 10
-  dataset = 'rte'
+  dataset = 'wordsim'
   working_dir = os.getcwd()
   data_dir = os.path.join(working_dir, os.pardir, 'data')
   results_dir = os.path.join(working_dir, os.pardir, 'results')
@@ -238,14 +237,17 @@ def run_experiment(num_proc=1):
   if dataset is 'bluebirds':
     dataset = BlueBirdsLoader.load(data_dir, load_features=True)
     num_predictors = [1, 10, 20, 39]
+    num_repetitions = [20, 10, 5, 1]
     results_path = os.path.join(results_dir, 'bluebirds.csv')
   elif dataset is 'rte':
     dataset = RTELoader.load(data_dir, load_features=True)
     num_predictors = [1, 10, 20, 50, 100, 164]
+    num_repetitions = [20, 10, 10, 5, 3, 1]
     results_path = os.path.join(results_dir, 'rte.csv')
   elif dataset is 'wordsim':
     dataset = WordSimLoader.load(data_dir, load_features=True)
     num_predictors = [1, 2, 5, 10]
+    num_repetitions = [20, 10, 5, 1]
     results_path = os.path.join(results_dir, 'wordsim.csv')
   else:
     raise NotImplementedError
@@ -292,7 +294,8 @@ def run_experiment(num_proc=1):
       num_repetitions=num_repetitions)
     inputs = [
       (model, name, num_p)
-      for (name, model), num_p in product(models.items(), num_predictors)]
+      for (name, model), (num_p, num_r) in product(
+        models.items(), zip(num_predictors, num_repetitions))]
     model_results = executor.map(func, inputs)
     for n, res in enumerate(model_results, start=1):
       logger.info(

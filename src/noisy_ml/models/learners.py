@@ -307,14 +307,15 @@ class EMConfig(with_metaclass(abc.ABCMeta, object)):
 class MultiLabelEMConfig(EMConfig):
   def __init__(
       self, num_instances, num_predictors, num_labels,
-      model, optimizer, use_soft_maj=True,
-      use_soft_y_hat=False):
+      model, optimizer, lambda_entropy=0.0,
+      use_soft_maj=True, use_soft_y_hat=False):
     super(MultiLabelEMConfig, self).__init__()
     self.num_instances = num_instances
     self.num_predictors = num_predictors
     self.num_labels = num_labels
     self.model = model
     self.optimizer = optimizer
+    self.lambda_entropy = lambda_entropy
     self.use_soft_maj = use_soft_maj
     self.use_soft_y_hat = use_soft_y_hat
 
@@ -419,15 +420,15 @@ class MultiLabelEMConfig(EMConfig):
 
       e_y_a = tf.gather_nd(e_y_acc, xl_indices)
       e_y_a_h_log = e_y_a
-      if include_y_prior:
-        e_y_a_h_log += h_log
-      else:
-        e_y_a_h_log += np.log(0.5)
+      # if include_y_prior:
+      #   e_y_a_h_log += h_log
+      # else:
+      #   e_y_a_h_log += np.log(0.5)
       e_y_log = tf.stop_gradient(tf.cond(
         use_maj,
         lambda: tf.log(e_y_a) - tf.log(tf.reduce_sum(e_y_a, axis=-1, keepdims=True)),
         lambda: e_y_a_h_log - tf.reduce_logsumexp(e_y_a_h_log, axis=-1, keepdims=True)))
-      e_y = tf.exp(e_y_log)
+      e_y = tf.cast(tf.greater_equal(tf.exp(e_y_log), 0.5), e_y_log.dtype)
 
       e_step_init = e_y_acc.initializer
       e_step = e_y_acc_update
@@ -461,6 +462,10 @@ class MultiLabelEMConfig(EMConfig):
         lambda : em_nll)
       if len(regularization_terms) > 0:
         neg_log_likelihood += tf.add_n(regularization_terms)
+
+      # Entropy regularization.
+      h_entropy = tf.reduce_sum(tf.exp(h_log) * h_log)
+      neg_log_likelihood += self.lambda_entropy * h_entropy
 
       m_step_init = tf.variables_initializer(
         tf.trainable_variables())

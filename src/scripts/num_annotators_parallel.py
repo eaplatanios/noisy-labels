@@ -161,6 +161,7 @@ def learner_fn(model, dataset):
       num_labels=len(dataset.labels),
       model=model,
       optimizer=AMSGrad(1e-3),
+      lambda_entropy=1.0,
       use_soft_maj=True,
       use_soft_y_hat=False),
     predictions_output_fn=np.exp)
@@ -199,11 +200,11 @@ def train_eval_predictors(args, dataset):
         learner = learner_fn(model, dataset)
         learner.train(
           dataset=train_dataset,
-          batch_size=1024,
+          batch_size=128,
           warm_start=True,
           max_m_steps=1000,
-          max_em_steps=10,
-          max_marginal_steps=2000,
+          max_em_steps=5,
+          max_marginal_steps=0,
           log_m_steps=None,
           use_progress_bar=True)
         # TODO: Average results across all labels.
@@ -263,18 +264,18 @@ def run_experiment(num_proc=1):
   models = {
     'MAJ': 'MAJ',
     'MMCE-M (γ=0.25)': MMCE_M(dataset, gamma=0.25),
-    'LNL[4] (γ=0.25)': LNL(
+    'LNL[4]': LNL(
       dataset=dataset, instances_emb_size=4,
-      predictors_emb_size=4, q_latent_size=1, gamma=0.25),
-    'LNL[16] (γ=0.25)': LNL(
+      predictors_emb_size=4, q_latent_size=1, gamma=0.00),
+    'LNL[16]': LNL(
       dataset=dataset, instances_emb_size=16,
-      predictors_emb_size=16, q_latent_size=1, gamma=0.25),
-    'LNL[BERT,16,16] (γ=0.25)': LNL(
+      predictors_emb_size=16, q_latent_size=1, gamma=0.00),
+    'LNL-F[16]': LNL(
       dataset=dataset, instances_emb_size=None,
       predictors_emb_size=16,
-      instances_hidden=[16],
-      predictors_hidden=[16],
-      q_latent_size=1, gamma=0.25)
+      instances_hidden=[16, 16, 16, 16],
+      predictors_hidden=[],
+      q_latent_size=1, gamma=0.00)
   }
 
   results = pd.DataFrame(

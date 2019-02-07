@@ -110,7 +110,7 @@ class WordSimLoader(object):
       predicted_labels[0][w_id] = (i_ids.tolist(), w_ans.tolist())
 
     if load_features:
-      f_file = os.path.join(data_dir, 'bert_features.txt')
+      f_file = os.path.join(data_dir, 'glove_features.txt')
       features = dict()
       with open(f_file, 'r') as f:
         for line in f:

@@ -203,7 +203,7 @@ def train_eval_predictors(args, dataset, time_stamp):
           batch_size=128,
           warm_start=True,
           max_m_steps=1000,
-          max_em_steps=5,
+          max_em_steps=10,
           max_marginal_steps=0,
           log_m_steps=None,
           use_progress_bar=True)

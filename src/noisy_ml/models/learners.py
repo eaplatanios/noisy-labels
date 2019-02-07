@@ -25,6 +25,7 @@ from six import with_metaclass
 from sklearn.model_selection import KFold
 from tqdm import tqdm
 
+from .models import MMCE_M
 from .utilities import log1mexp
 
 __author__ = 'eaplatanios'
@@ -428,7 +429,10 @@ class MultiLabelEMConfig(EMConfig):
         use_maj,
         lambda: tf.log(e_y_a) - tf.log(tf.reduce_sum(e_y_a, axis=-1, keepdims=True)),
         lambda: e_y_a_h_log - tf.reduce_logsumexp(e_y_a_h_log, axis=-1, keepdims=True)))
-      e_y = tf.cast(tf.greater_equal(tf.exp(e_y_log), 0.5), e_y_log.dtype)
+      if isinstance(self.model, MMCE_M):
+        e_y = tf.exp(e_y_log)
+      else:
+        e_y = tf.cast(tf.greater_equal(tf.exp(e_y_log), 0.5), e_y_log.dtype)
 
       e_step_init = e_y_acc.initializer
       e_step = e_y_acc_update

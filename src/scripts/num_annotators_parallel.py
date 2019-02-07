@@ -167,7 +167,7 @@ def learner_fn(model, dataset):
     predictions_output_fn=np.exp)
 
 
-def train_eval_predictors(args, dataset):
+def train_eval_predictors(args, dataset, time_stamp):
   reset_seed()
 
   model, model_name, num_p, num_repetitions = args
@@ -216,6 +216,7 @@ def train_eval_predictors(args, dataset):
   # Collect results.
   accuracies = [r.accuracy for r in num_p_results]
   acc_result = {
+    'time': time_stamp,
     'model': model_name,
     'num_predictors': num_p,
     'metric': 'accuracy',
@@ -223,6 +224,7 @@ def train_eval_predictors(args, dataset):
     'value_std': np.std(accuracies)}
   aucs = [r.auc for r in num_p_results]
   auc_result = {
+    'time': time_stamp,
     'model': model_name,
     'num_predictors': num_p,
     'metric': 'auc',
@@ -282,9 +284,10 @@ def run_experiment(num_proc=1):
     columns=[
       'model', 'num_predictors', 'metric',
       'value_mean', 'value_std'])
+  time_stamp = pd.Timestamp.now()
 
   with futures.ProcessPoolExecutor(num_proc) as executor:
-    func = partial(train_eval_predictors, dataset=dataset)
+    func = partial(train_eval_predictors, dataset=dataset, time_stamp=time_stamp)
     inputs = [
       (model, name, num_p, num_r)
       for (name, model), (num_p, num_r) in product(
@@ -296,6 +299,12 @@ def run_experiment(num_proc=1):
         % (n, len(num_predictors)))
       for r in res:
         results = results.append(r, ignore_index=True)
+        # Create or append results to the existing CSV.
+        if os.path.isfile(results_path):
+          with open(results_path, 'a') as fp:
+            results.to_csv(fp, header=False)
+        else:
+          results.to_csv(results_path)
       logger.info('Results so far:\n%s' % str(results))
 
   logger.info('Results:\n%s' % str(results))

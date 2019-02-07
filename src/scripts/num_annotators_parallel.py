@@ -299,12 +299,7 @@ def run_experiment(num_proc=1):
         % (n, len(num_predictors)))
       for r in res:
         results = results.append(r, ignore_index=True)
-        # Create or append results to the existing CSV.
-        if os.path.isfile(results_path):
-          with open(results_path, 'a') as fp:
-            results.to_csv(fp, header=False)
-        else:
-          results.to_csv(results_path)
+        results.to_csv(results_path)
       logger.info('Results so far:\n%s' % str(results))
 
   logger.info('Results:\n%s' % str(results))

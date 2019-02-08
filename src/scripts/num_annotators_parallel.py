@@ -271,6 +271,7 @@ def run_experiment(num_proc=1):
       predictors_emb_size=4, q_latent_size=1, gamma=0.00),
     'LNL[16]': LNL(
       dataset=dataset, instances_emb_size=16,
+      instances_hidden=[16, 16, 16, 16],
       predictors_emb_size=16, q_latent_size=1, gamma=0.00),
     'LNL-F[16]': LNL(
       dataset=dataset, instances_emb_size=None,

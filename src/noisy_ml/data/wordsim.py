@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 def extract_bert_features(data_dir):
   dataset = WordSimLoader.load(data_dir, load_features=False)
   data_dir = os.path.join(data_dir, 'wordsim')
-  features_path = os.path.join(data_dir, 'bert_features.txt')
+  features_path = os.path.join(data_dir, 'glove_features.txt')
   bc = BertClient(ip='128.2.204.114')
 
   with open(features_path, 'w') as f:

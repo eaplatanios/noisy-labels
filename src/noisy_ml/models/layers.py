@@ -157,6 +157,10 @@ class Linear(Layer):
 
 
 class MLP(Layer):
+  """MLP.
+  TODO: Move to networks module?
+  TODO: I would strongly prefer using default TF layers as much as possible.
+  """
   def __init__(
       self,
       hidden_units,

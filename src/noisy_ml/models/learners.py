@@ -32,7 +32,7 @@ __author__ = 'eaplatanios'
 
 __all__ = [
   'k_fold_cv', 'EMLearner', 'EMConfig',
-  'MultiLabelEMConfig']
+  'MultiLabelEMConfig', 'MultiLabelMultiClassEMConfig']
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,15 @@ def k_fold_cv(
   return learner_fn(**best_kw_args)
 
 
-class EMLearner(object):
+class Learner(with_metaclass(abc.ABCMeta, object)):
+  """Defines the interface for Learners."""
+
+  @abc.abstractmethod
+  def train(self, dataset, **kwargs):
+    raise NotImplementedError("Abstract method")
+
+
+class EMLearner(Learner):
   def __init__(
       self, config, predictions_output_fn=lambda x: x):
     self.config = config
@@ -163,29 +171,33 @@ class EMLearner(object):
     self._session.run(iterator_init_op)
     if not warm_start:
       self._session.run(self._ops['m_step_init'])
-    accumulator_ll = 0.0
+    accumulator_nll = 0.0
     accumulator_steps = 0
     for m_step in range(max_m_steps):
-      ll, _ = self._session.run([
+      nll, _ = self._session.run([
         self._ops['neg_log_likelihood'],
         self._ops['m_step']])
-      accumulator_ll += ll
+      accumulator_nll += nll
       accumulator_steps += 1
       if log_m_steps is not None and \
           (m_step % log_m_steps == 0 or
            m_step == max_m_steps - 1):
-        ll = accumulator_ll / accumulator_steps
+        nll = accumulator_nll / accumulator_steps
         logger.info(
           'Step: %5d | Negative Log-Likelihood: %.8f'
-          % (m_step, ll))
-        accumulator_ll = 0.0
+          % (m_step, nll))
+        accumulator_nll = 0.0
         accumulator_steps = 0
 
   def train(
-      self, dataset, batch_size=128,
-      warm_start=False, max_m_steps=1000,
-      max_em_steps=100, log_m_steps=100,
-      max_marginal_steps=0, em_step_callback=None,
+      self, dataset,
+      batch_size=128,
+      warm_start=False,
+      max_m_steps=1000,
+      max_em_steps=100,
+      log_m_steps=100,
+      max_marginal_steps=0,
+      em_step_callback=None,
       use_progress_bar=False):
     e_step_dataset = dataset.batch(batch_size)
     m_step_dataset = dataset.repeat().shuffle(10000).batch(batch_size)
@@ -201,7 +213,7 @@ class EMLearner(object):
     for em_step in em_steps_range:
       if not use_progress_bar:
         logger.info('Iteration %d - Running E-Step' % em_step)
-      self._e_step(e_step_iterator_init_op, use_maj=em_step == 0)
+      self._e_step(e_step_iterator_init_op, use_maj=(em_step == 0))
       if not use_progress_bar:
         logger.info('Iteration %d - Running M-Step' % em_step)
       self._m_step(
@@ -452,6 +464,7 @@ class MultiLabelEMConfig(EMConfig):
       unset_opt_marginal = opt_marginal.assign(False)
 
       em_ll_term0 = tf.reduce_sum(e_y * h_log)
+      # TODO: isn't the below just a plain reduce_sum?
       em_ll_term1 = tf.reduce_sum(
         tf.einsum('ij,ij->i', q_log_y_hat, e_y))
       em_nll = -em_ll_term0 - em_ll_term1
@@ -473,6 +486,251 @@ class MultiLabelEMConfig(EMConfig):
 
       m_step_init = tf.variables_initializer(
         tf.trainable_variables())
+      global_step = tf.train.get_or_create_global_step()
+      gvs = self.optimizer.compute_gradients(neg_log_likelihood, tf.trainable_variables())
+      gradients, variables = zip(*gvs)
+      # gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
+      m_step = self.optimizer.apply_gradients(
+        zip(gradients, variables), global_step=global_step)
+
+    return {
+      'train_iterator': train_iterator,
+      'x_indices': x_indices,
+      'p_indices': p_indices,
+      'l_indices': l_indices,
+      'predictions': predictions,
+      'qualities_mean_log': qualities_mean_log,
+      'set_use_maj': set_use_maj,
+      'unset_use_maj': unset_use_maj,
+      'set_opt_marginal': set_opt_marginal,
+      'unset_opt_marginal': unset_opt_marginal,
+      'e_step_init': e_step_init,
+      'm_step_init': m_step_init,
+      'e_step': e_step,
+      'm_step': m_step,
+      'neg_log_likelihood': neg_log_likelihood}
+
+
+class MultiLabelMultiClassEMConfig(EMConfig):
+  """EMConfig for multi-label, multi-class problems."""
+
+  def __init__(
+      self,
+      num_instances,
+      num_predictors,
+      num_labels,
+      num_classes,
+      model,
+      optimizer,
+      lambda_entropy=0.0,
+      use_soft_maj=True,
+      use_soft_y_hat=False):
+    super(MultiLabelMultiClassEMConfig, self).__init__()
+    self.num_instances = num_instances
+    self.num_predictors = num_predictors
+    self.num_labels = num_labels
+    self.num_classes = num_classes
+    self.model = model
+    self.optimizer = optimizer
+    self.lambda_entropy = lambda_entropy
+    self.use_soft_maj = use_soft_maj
+    self.use_soft_y_hat = use_soft_y_hat
+
+  def build_ops(self):
+    # TODO: refactor to eliminate code duplication.
+    train_iterator = tf.data.Iterator.from_structure(
+      output_types={
+        'instances': tf.int32,
+        'predictors': tf.int32,
+        'labels': tf.int32,
+        'values': tf.float32},
+      output_shapes={
+        'instances': [None],
+        'predictors': [None],
+        'labels': [None],
+        'values': [None]},
+      shared_name='train_iterator')
+    iter_next = train_iterator.get_next()
+    instances = tf.placeholder_with_default(
+      iter_next['instances'],
+      shape=[None],
+      name='instances')
+    predictors = tf.placeholder_with_default(
+      iter_next['predictors'],
+      shape=[None],
+      name='predictors')
+    labels = tf.placeholder_with_default(
+      iter_next['labels'],
+      shape=[None],
+      name='labels')
+    values = tf.placeholder_with_default(
+      iter_next['values'],
+      shape=[None],
+      name='values')
+
+    x_indices = instances
+    p_indices = predictors
+    l_indices = labels
+
+    # Build model ops.
+    # predictions: list of <float32> [batch_size, num_classes_l] for each label l.
+    # q_params: list of <float32> [batch_size, num_classes_l, num_classes_l] for each label l.
+    predictions, q_params, regularization_terms, include_y_prior = self.model.build(
+        x_indices, p_indices, l_indices)
+
+    # Convert label indices into one-hot masks.
+    # l_indices_onehot: list of <int32> [batch_size] for each label.
+    l_indices_onehot = tf.unstack(tf.one_hot(l_indices, self.num_labels), axis=-1)
+
+    # Slice instance indices for each label.
+    # xl_indices: list of <int32> [batch_size_l] for each label l.
+    xl_indices = []
+    for l in l_indices_onehot:
+      xl_indices.append(tf.boolean_mask(x_indices, l))
+
+    # Slice predictions and confusions for each label.
+    for j, (p, c, l) in enumerate(zip(predictions, q_params, l_indices_onehot)):
+      predictions[j] = tf.boolean_mask(p, l)
+      q_params[j] = tf.boolean_mask(c, l)
+
+    # Convert values in y_hats.
+    # y_hats: list of  <float32> [batch_size, num_classes] for each label.
+    # y_hats[l][i, k] is the probability/indicator that instance i has value k for label l.
+    y_hats = []
+    for l_mask, nc in zip(l_indices_onehot, self.num_classes):
+      y_hat = tf.one_hot(tf.boolean_mask(tf.to_int32(values), l_mask), nc)
+      y_hats.append(y_hat)
+
+    # Compute mean qualities.
+    # qualities_mean_logs: list of <float32> [batch_size_l, num_classes_l] for each label l.
+    qualities_mean_log = []
+    for h_log, q_log in zip(predictions, q_params):
+      h_log_q_log = q_log + tf.expand_dims(h_log, axis=-1)
+      qualities_mean_log.append(tf.reduce_logsumexp(
+          tf.matrix_diag_part(h_log_q_log), axis=-1))
+
+    # Compute confusion values for each y_hat.
+    # q_log_y_hats: list of <float32> [batch_size_l, num_classes_l] for each label l.
+    q_log_y_hats = []
+    for y_hat, q_log in zip(y_hats, q_params):
+      q_log_y_hats.append(tf.einsum('ijk,ik->ij', q_log, tf.to_float(y_hat)))
+
+    # E-Step:
+
+    with tf.name_scope('e_step'):
+      # Create the accumulator variables.
+      # e_y_accs: list of <float32> [num_instances, num_classes_l] for each label l.
+      e_y_accs = [
+        tf.get_variable(
+          name=('e_y_acc_%d' % l),
+          shape=[self.num_instances, nc],
+          initializer=tf.zeros_initializer(h_log.dtype),
+          trainable=False)
+        for l, (nc, h_log) in enumerate(zip(self.num_classes, predictions))]
+
+      # Boolean flag for whether or not to use majority vote
+      # estimates for the E-step expectations.
+      use_maj = tf.get_variable(
+        name='use_maj',
+        shape=[],
+        dtype=tf.bool,
+        initializer=tf.zeros_initializer(),
+        trainable=False)
+      set_use_maj = use_maj.assign(True)
+      unset_use_maj = use_maj.assign(False)
+
+      # Create the accumulator variable update ops.
+      # list of <float32> [batch_size_l, num_classes_l] for each label l.
+      e_y_acc_updates = [
+        tf.cond(
+            use_maj,
+            lambda: tf.to_float(y_hat),
+            lambda: q_log_y_hat)
+        for y_hat, q_log_y_hat in zip(y_hats, q_log_y_hats)]
+      # list of <float32> [num_instances, num_classes_l] for each label l.
+      e_y_accs_updated = [
+        tf.scatter_add(
+            ref=e_y_acc,
+            indices=xli,
+            updates=e_y_acc_update)
+        for xli, e_y_acc, e_y_acc_update
+        in zip(xl_indices, e_y_accs, e_y_acc_updates)]
+
+      # TODO: what the hell is this mess? :P (I mean variable names.)
+      # list of <float32> [batch_size_l, num_classes_l] for each label l.
+      e_y_as = [
+          tf.gather(e_y_acc, xli)
+          for xli, e_y_acc in zip(xl_indices, e_y_accs)]
+      # list of <float32> [batch_size_l, num_classes_l] for each label l.
+      e_y_a_h_logs = e_y_as
+      # if include_y_prior:
+      #   e_y_a_h_logs = [e_y_a + h_log for e_y_a, h_log in zip(e_y_as, predictions)]
+      # else:
+      #   e_y_a_h_log = [e_y_a + np.log(0.5) for e_y_a in e_y_as]
+      # list of <float32> [batch_size_l, num_classes_l] for each label l.
+      e_y_logs = [
+          tf.stop_gradient(tf.cond(
+              use_maj,
+              lambda: tf.log(e_y_a) - tf.log(tf.reduce_sum(e_y_a, axis=-1, keepdims=True)),
+              lambda: e_y_a_h_log - tf.reduce_logsumexp(e_y_a_h_log, axis=-1, keepdims=True)))
+          for e_y_a, e_y_a_h_log in zip(e_y_as, e_y_a_h_logs)]
+      # e_ys: list of <float32> [batch_size_l, num_classes_l] for each label l.
+      if isinstance(self.model, MMCE_M):
+        e_ys = [tf.exp(e_y_log) for e_y_log in e_y_logs]
+      else:
+        e_ys = [
+            tf.cast(tf.greater_equal(tf.exp(e_y_log), 0.5), e_y_log.dtype)
+            for e_y_log in e_y_logs]
+
+      # Build E-step.
+      e_step_init = [e_y_acc.initializer for e_y_acc in e_y_accs]
+      e_step = e_y_accs_updated
+
+    # M-Step:
+
+    with tf.name_scope('m_step'):
+      # Boolean flag about whether or not to optimize the
+      # marginal log-likelihood.
+      opt_marginal = tf.get_variable(
+        name='opt_marginal',
+        shape=[],
+        dtype=tf.bool,
+        initializer=tf.zeros_initializer(),
+        trainable=False)
+      set_opt_marginal = opt_marginal.assign(True)
+      unset_opt_marginal = opt_marginal.assign(False)
+
+      # Compute EM NLL: <float32> [].
+      em_ll_term0 = sum(
+          tf.reduce_sum(e_y * h_log)
+          for e_y, h_log in zip(e_ys, predictions))
+      em_ll_term1 = sum(
+          tf.reduce_sum(q_log_y_hat * e_y)
+          for q_log_y_hat, e_y in zip(q_log_y_hats, e_ys))
+      em_nll = -(em_ll_term0 + em_ll_term1)
+
+      # Compute marginal NLL: <float32> [].
+      marginal_ll_list = [
+        q_log_y_hat + h_log
+        for q_log_y_hat, h_log in zip(q_log_y_hats, predictions)]
+      marginal_nll = -sum([
+        tf.reduce_sum(tf.reduce_logsumexp(mll, axis=-1))
+        for mll in marginal_ll_list])
+
+      # Compute the final NLL objective: <float32> [].
+      neg_log_likelihood = tf.cond(
+        opt_marginal,
+        lambda: marginal_nll,
+        lambda : em_nll)
+      if len(regularization_terms) > 0:
+        neg_log_likelihood += tf.add_n(regularization_terms)
+
+      # Entropy regularization.
+      h_entropy = sum([tf.reduce_sum(tf.exp(h_log) * h_log) for h_log in predictions])
+      neg_log_likelihood += self.lambda_entropy * h_entropy
+
+      # Build M-step.
+      m_step_init = tf.variables_initializer(tf.trainable_variables())
       global_step = tf.train.get_or_create_global_step()
       gvs = self.optimizer.compute_gradients(neg_log_likelihood, tf.trainable_variables())
       gradients, variables = zip(*gvs)

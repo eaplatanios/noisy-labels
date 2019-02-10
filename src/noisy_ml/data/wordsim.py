@@ -123,7 +123,12 @@ class WordSimLoader(object):
     else:
       instance_features = None
 
+
+    # Single label with 2 classes.
+    num_classes = [2]
+
     return Dataset(
       instances, predictors, labels,
       true_labels, predicted_labels,
+      num_classes=num_classes,
       instance_features=instance_features)

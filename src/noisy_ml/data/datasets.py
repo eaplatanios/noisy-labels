@@ -34,9 +34,15 @@ TrainData = namedtuple(
 
 class Dataset(object):
   def __init__(
-      self, instances, predictors, labels,
-      true_labels, predicted_labels,
-      instance_features=None, predictor_features=None,
+      self,
+      instances,
+      predictors,
+      labels,
+      true_labels,
+      predicted_labels,
+      num_classes,
+      instance_features=None,
+      predictor_features=None,
       label_features=None):
     """Creates a new dataset.
 
@@ -47,6 +53,7 @@ class Dataset(object):
       true_labels: Nested dictionary data structure that
         contains the true label value per label and
         per instance.
+      num_classes: List of the number of possible classes per label.
       predicted_labels: Nested dictionary data structure
         that contains a tuple of two lists (instance
         indices and predicted values) per label and
@@ -56,6 +63,7 @@ class Dataset(object):
     self.instances = instances
     self.predictors = predictors
     self.labels = labels
+    self.num_classes = num_classes
     self.true_labels = true_labels
     self.predicted_labels = predicted_labels
     self.instance_features = instance_features
@@ -95,6 +103,7 @@ class Dataset(object):
     labels = list()
     true_labels = dict()
     predicted_labels = dict()
+    num_classes = list()
 
     has_if = True
     has_pf = True
@@ -157,9 +166,12 @@ class Dataset(object):
             predicted_labels[l][p][0].append(i)
             predicted_labels[l][p][1].append(v)
 
+        # Process num_classes.
+        num_classes += dataset.num_classes
+
     return Dataset(
       instances, predictors, labels,
-      true_labels, predicted_labels,
+      true_labels, predicted_labels, num_classes,
       instance_features, predictor_features,
       label_features)
 

@@ -183,9 +183,13 @@ class NELLLoader(object):
             if features is not None:
               instance_features.append(features[instance])
 
+      # Single label with 2 classes.
+      num_classes = [2]
+
       return Dataset(
         instances, predictors, labels,
         true_labels, predicted_labels,
+        num_classes=num_classes,
         instance_features=instance_features)
 
     return Dataset.join([load_for_label(l) for l in labels])

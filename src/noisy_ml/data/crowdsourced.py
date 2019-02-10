@@ -112,9 +112,13 @@ class BlueBirdsLoader(object):
       predictor_ids[p]: values_to_tuple(values)
       for p, values in six.iteritems(predicted_labels)}}
 
+    # Single label with 2 classes.
+    num_classes = [2]
+
     return Dataset(
       instances, predictors, labels,
       true_labels, predicted_labels,
+      num_classes=num_classes,
       instance_features=instance_features)
 
 
@@ -156,9 +160,13 @@ class SentimentPopularityLoader(object):
         w_ans = annotations[i_ids, w_id]
         predicted_labels[0][w_id] = (i_ids.tolist(), w_ans.tolist())
 
+    # Single label with 2 classes.
+    num_classes = [2]
+
     return Dataset(
         instances, predictors, labels,
-        true_labels, predicted_labels)
+        true_labels, predicted_labels,
+        num_classes=num_classes)
 
 
 class WeatherSentimentLoader(object):
@@ -209,6 +217,10 @@ class WeatherSentimentLoader(object):
         values = (w_ans == l).astype(np.float32).tolist()
         predicted_labels[l][w_id] = (i_ids, values)
 
+    # Single label with 2 classes.
+    num_classes = [2]
+
     return Dataset(
       instances, predictors, labels,
-      true_labels, predicted_labels)
+      true_labels, predicted_labels,
+      num_classes=num_classes)

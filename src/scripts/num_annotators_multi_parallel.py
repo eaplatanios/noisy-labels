@@ -55,10 +55,11 @@ def sample_predictors(predictors, num_to_sample, num_sets=5):
 
 def learner_fn(model, dataset):
   return EMLearner(
-    config=MultiLabelEMConfig(
+    config=MultiLabelMultiClassEMConfig(
       num_instances=len(dataset.instances),
       num_predictors=len(dataset.predictors),
       num_labels=len(dataset.labels),
+      num_classes=dataset.num_classes,
       model=model,
       optimizer=AMSGrad(1e-3),
       lambda_entropy=1.0,
@@ -164,20 +165,20 @@ def run_experiment(num_proc=1):
     raise NotImplementedError
 
   models = {
-    'MAJ': 'MAJ',
-    'MMCE-M (γ=0.25)': MMCE_M(dataset, gamma=0.25),
-    'LNL[4]': LNL(
+    # 'MAJ': 'MAJ',
+    # 'MMCE-M (γ=0.25)': MMCE_M(dataset, gamma=0.25),
+    'LNL[4]': MultiClassLNL(
       dataset=dataset, instances_emb_size=4,
       predictors_emb_size=4, q_latent_size=1, gamma=0.00),
-    'LNL[16]': LNL(
-      dataset=dataset, instances_emb_size=16,
-      predictors_emb_size=16, q_latent_size=1, gamma=0.00),
-    'LNL-F[16]': LNL(
-      dataset=dataset, instances_emb_size=None,
-      predictors_emb_size=16,
-      instances_hidden=[16, 16, 16, 16],
-      predictors_hidden=[],
-      q_latent_size=1, gamma=0.00)
+    # 'LNL[16]': LNL(
+    #   dataset=dataset, instances_emb_size=16,
+    #   predictors_emb_size=16, q_latent_size=1, gamma=0.00),
+    # 'LNL-F[16]': LNL(
+    #   dataset=dataset, instances_emb_size=None,
+    #   predictors_emb_size=16,
+    #   instances_hidden=[16, 16, 16, 16],
+    #   predictors_hidden=[],
+    #   q_latent_size=1, gamma=0.00)
   }
 
   results = pd.DataFrame(
@@ -242,4 +243,4 @@ def run_experiment(num_proc=1):
 
 
 if __name__ == '__main__':
-  run_experiment(num_proc=8)
+  run_experiment(num_proc=1)

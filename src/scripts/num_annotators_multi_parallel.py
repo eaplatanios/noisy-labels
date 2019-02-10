@@ -165,20 +165,20 @@ def run_experiment(num_proc=1):
     raise NotImplementedError
 
   models = {
-    # 'MAJ': 'MAJ',
-    # 'MMCE-M (γ=0.25)': MMCE_M(dataset, gamma=0.25),
+    'MAJ': 'MAJ',
+    'MMCE-M (γ=0.25)': MMCE_M(dataset, gamma=0.25),
     'LNL[4]': MultiClassLNL(
       dataset=dataset, instances_emb_size=4,
       predictors_emb_size=4, q_latent_size=1, gamma=0.00),
-    # 'LNL[16]': LNL(
-    #   dataset=dataset, instances_emb_size=16,
-    #   predictors_emb_size=16, q_latent_size=1, gamma=0.00),
-    # 'LNL-F[16]': LNL(
-    #   dataset=dataset, instances_emb_size=None,
-    #   predictors_emb_size=16,
-    #   instances_hidden=[16, 16, 16, 16],
-    #   predictors_hidden=[],
-    #   q_latent_size=1, gamma=0.00)
+    'LNL[16]': MultiClassLNL(
+      dataset=dataset, instances_emb_size=16,
+      predictors_emb_size=16, q_latent_size=1, gamma=0.00),
+    'LNL-F[16]': MultiClassLNL(
+      dataset=dataset, instances_emb_size=None,
+      predictors_emb_size=16,
+      instances_hidden=[16, 16, 16, 16],
+      predictors_hidden=[],
+      q_latent_size=1, gamma=0.00)
   }
 
   results = pd.DataFrame(
@@ -243,4 +243,4 @@ def run_experiment(num_proc=1):
 
 
 if __name__ == '__main__':
-  run_experiment(num_proc=1)
+  run_experiment(num_proc=16)

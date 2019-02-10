@@ -41,11 +41,18 @@ def compute_mad_error(predicted_qualities, true_qualities):
 
 
 def compute_accuracy(predictions, true_labels):
-  p = (predictions >= 0.5).astype(np.int32)
+  if len(predictions.shape) > 1:
+    p = predictions.argmax(-1).astype(np.int32)
+  else:
+    p = (predictions >= 0.5).astype(np.int32)
   return np.mean(p == true_labels)
 
 
 def compute_auc(predictions, true_labels):
+  if len(predictions.shape) > 1:
+    true_labels_one_hot = np.zeros(predictions.shape)
+    true_labels_one_hot[np.arange(len(true_labels)), true_labels] = 1
+    true_labels = true_labels_one_hot
   return metrics.average_precision_score(true_labels, predictions)
 
 
@@ -90,21 +97,23 @@ class Evaluator(object):
     predictors = self.dataset.predictor_indices()
     labels = self.dataset.label_indices()
 
-    # predictions shape:         [NumLabels, BatchSize]
+    # List of <float32> [batch_size, num_classes_l] for each label l.
+    predictions = learner.predict(instances, batch_size=batch_size)
+
     # predicted_qualities shape: [NumLabels, NumPredictors]
     # true_qualities shape:      [NumLabels, NumPredictors]
-    predictions = learner.predict(
-      instances, batch_size=batch_size).T
-    predicted_qualities = np.mean(learner.qualities(
-      instances, predictors, labels,
-      batch_size=batch_size), axis=0)
+    predicted_qualities = np.mean(
+      learner.qualities(
+          instances, predictors, labels,
+          batch_size=batch_size),
+      axis=0)
     true_qualities = self.dataset.compute_binary_qualities()
 
     results = []
-    for l in range(predictions.shape[0]):
+    for l in range(len(predictions)):
       l_instances = list(six.iterkeys(self.dataset.true_labels[l]))
       tl = [self.dataset.true_labels[l][i] for i in l_instances]
-      p = predictions[l, l_instances]
+      p = predictions[l][l_instances]
       pq = predicted_qualities[l]
       tq = true_qualities[l]
       results.append(Result(

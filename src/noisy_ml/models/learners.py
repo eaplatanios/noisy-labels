@@ -266,9 +266,14 @@ class EMLearner(Learner):
         predictions.append(p)
       except tf.errors.OutOfRangeError:
         break
-    return np.concatenate(predictions, axis=0)
+    if isinstance(predictions[0], list):
+      predictions = [np.concatenate(p, axis=0) for p in zip(*predictions)]
+    else:
+      predictions = np.concatenate(predictions, axis=0)
+    return predictions
 
   def qualities(self, instances, predictors, labels, batch_size=128):
+    # TODO: Move this function to utils and document.
     def cartesian_transpose(arrays):
       la = len(arrays)
       dtype = np.result_type(*arrays)

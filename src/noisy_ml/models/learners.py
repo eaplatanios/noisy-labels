@@ -590,7 +590,7 @@ class MultiLabelMultiClassEMConfig(EMConfig):
         x_indices, p_indices, l_indices)
 
     # Convert label indices into one-hot masks.
-    # l_indices_onehot: list of <int32> [batch_size] for each label.
+    # l_indices_onehot: list of <int32> [batch_size_l] for each label.
     l_indices_onehot = tf.unstack(tf.one_hot(l_indices, self.num_labels), axis=-1)
 
     # Slice instance indices for each label.
@@ -609,7 +609,11 @@ class MultiLabelMultiClassEMConfig(EMConfig):
     # y_hats[l][i, k] is the probability/indicator that instance i has value k for label l.
     y_hats = []
     for l_mask, nc in zip(l_indices_onehot, self.num_classes):
-      y_hat = tf.one_hot(tf.boolean_mask(tf.to_int32(values), l_mask), nc)
+      values_l = tf.boolean_mask(values, l_mask)
+      if self.use_soft_y_hat:
+        y_hat = tf.stack([1.0 - values_l, values_l], axis=-1)
+      else:
+        y_hat = tf.one_hot(tf.to_int32(values_l), nc)
       y_hats.append(y_hat)
 
     # Compute mean qualities.

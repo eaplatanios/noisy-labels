@@ -62,9 +62,9 @@ def learner_fn(model, dataset):
       num_classes=dataset.num_classes,
       model=model,
       optimizer=AMSGrad(1e-3),
-      lambda_entropy=1.0,
+      lambda_entropy=0.0,
       use_soft_maj=True,
-      use_soft_y_hat=False),
+      use_soft_y_hat=True),
     predictions_output_fn=np.exp)
 
 

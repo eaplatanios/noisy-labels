@@ -287,7 +287,7 @@ class MultiClassLNL(Model):
         # <float32> [batch_size, num_classes, num_classes].
         confusions = []
         for pqc in pre_q_confusions:
-          c = tf.nn.log_softmax(tf.squeeze(pqc), axis=-1)
+          c = tf.nn.log_softmax(tf.squeeze(pqc, axis=-1), axis=-1)
           confusions.append(c)
         regularization_terms = []
     # If we also want to take into account per-instance difficulties.
@@ -314,7 +314,8 @@ class MultiClassLNL(Model):
         confusions = []
         for pqc, pdc in zip(pre_q_confusions, pre_d_confusions):
           # Compute confusion matrices.
-          c = tf.nn.log_softmax(tf.reduce_logsumexp(pqc + pdc, axis=-1), axis=-1)
+          c = tf.nn.log_softmax(pqc + pdc, axis=-2)
+          c = tf.reduce_logsumexp(c, axis=-1)
           confusions.append(c)
 
       with tf.variable_scope('reg_terms'):

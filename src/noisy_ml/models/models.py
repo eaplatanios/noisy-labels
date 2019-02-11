@@ -246,7 +246,7 @@ class MultiClassLNL(Model):
       for h_units in self.instances_hidden:
         hiddens = tf.layers.Dense(
             units=h_units,
-            activation=tf.nn.selu)
+            activation=tf.nn.selu)(hiddens)
       # Predictions is a list of num_labels tensors:
       # <float32> [batch_size, num_classes].
       with tf.variable_scope('log_softmax'):
@@ -269,10 +269,10 @@ class MultiClassLNL(Model):
       # Shared hiddens for q_fn between all labels.
       # hiddens: <float32> [batch_size, hidden_size].
       hiddens = predictors
-      for h_units in self.instances_hidden:
+      for h_units in self.predictors_hidden:
         hiddens = tf.layers.Dense(
             units=h_units,
-            activation=tf.nn.selu)
+            activation=tf.nn.selu)(hiddens)
       # Pre-confusions is a list of num_labels tensors:
       # <float32> [batch_size, num_classes, num_classes, latent_size].
       pre_q_confusions = []
@@ -296,10 +296,10 @@ class MultiClassLNL(Model):
         # Shared hiddens for d_fn between all labels.
         # hiddens: <float32> [batch_size, hidden_size].
         hiddens = instances
-        for h_units in self.instances_hidden:
+        for h_units in self.predictors_hidden:
           hiddens = tf.layers.Dense(
               units=h_units,
-              activation=tf.nn.selu)
+              activation=tf.nn.selu)(hiddens)
         # Pre-confusions is a list of num_labels tensors:
         # <float32> [batch_size, num_classes, num_classes, latent_size].
         pre_d_confusions = []

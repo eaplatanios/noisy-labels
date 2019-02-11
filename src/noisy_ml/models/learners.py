@@ -307,12 +307,18 @@ class EMLearner(Learner):
       except tf.errors.OutOfRangeError:
         break
 
-    qualities_mean_log = np.concatenate(
-      qualities_mean_log, axis=0)
-    qualities = np.exp(qualities_mean_log)
-    qualities = np.reshape(
-      qualities,
-      [len(instances), len(labels), len(predictors)])
+    if isinstance(qualities_mean_log[0], list):
+      # Manually scatter computed qualities...
+      qualities = np.zeros([len(instances), len(labels), len(predictors)])
+      for l, q in zip(range(self.config.num_labels), zip(*qualities_mean_log)):
+        indices_l = np.where(temp[1].astype(np.int32) == l)[0]
+        qualities_l = np.exp(np.concatenate(q, axis=0))
+        for j, i in enumerate(indices_l):
+          qualities[temp[0][i], l, temp[2][i]] = qualities_l[j]
+    else:
+      qualities = np.reshape(
+          np.exp(np.concatenate(qualities_mean_log, axis=0)),
+          [len(instances), len(labels), len(predictors)])
     return qualities
 
 
@@ -607,12 +613,16 @@ class MultiLabelMultiClassEMConfig(EMConfig):
       y_hats.append(y_hat)
 
     # Compute mean qualities.
-    # qualities_mean_logs: list of <float32> [batch_size_l, num_classes_l] for each label l.
+    # qualities_mean_logs: list of <float32> [batch_size_l] for each label l.
     qualities_mean_log = []
     for h_log, q_log in zip(predictions, q_params):
       h_log_q_log = q_log + tf.expand_dims(h_log, axis=-1)
-      qualities_mean_log.append(tf.reduce_logsumexp(
-          tf.matrix_diag_part(h_log_q_log), axis=-1))
+      qualities_mean_log.append(
+          # <float32> [batch_size_l].
+          tf.reduce_logsumexp(
+              # <float32> [batch_size_l, num_classes_l].
+              tf.matrix_diag_part(h_log_q_log),
+              axis=-1))
 
     # Compute confusion values for each y_hat.
     # q_log_y_hats: list of <float32> [batch_size_l, num_classes_l] for each label l.

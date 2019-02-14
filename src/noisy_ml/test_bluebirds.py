@@ -22,10 +22,10 @@ from .data.crowdsourced import *
 from .data.rte import *
 from .data.wordsim import *
 from .evaluation.metrics import *
-from .models.layers import *
-from .models.learners import *
-from .models.models import *
-from .models.amsgrad import *
+from .training.layers import *
+from .training.learners import *
+from .training.models import *
+from .training.amsgrad import *
 
 __author__ = 'eaplatanios'
 

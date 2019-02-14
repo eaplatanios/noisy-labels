@@ -30,9 +30,9 @@ from noisy_ml.data.crowdsourced import *
 from noisy_ml.data.rte import *
 from noisy_ml.data.wordsim import *
 from noisy_ml.evaluation.metrics import *
-from noisy_ml.models.learners import *
-from noisy_ml.models.models import *
-from noisy_ml.models.amsgrad import *
+from noisy_ml.training.learners import *
+from noisy_ml.training.models import *
+from noisy_ml.training.amsgrad import *
 
 __author__ = 'eaplatanios'
 

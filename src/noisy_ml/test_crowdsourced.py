@@ -20,9 +20,9 @@ import tensorflow as tf
 
 from .data.crowdsourced import *
 from .evaluation.metrics import *
-from .models.layers import *
-from .models.learners import *
-from .models.models import *
+from .training.layers import *
+from .training.learners import *
+from .training.models import *
 
 __author__ = ['alshedivat', 'eaplatanios']
 

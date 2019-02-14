@@ -20,13 +20,13 @@ import yaml
 
 from . import data
 from . import evaluation
-from . import models
+from . import training
 
 __author__ = 'eaplatanios'
 
 __all__ = ['data', 'evaluation', 'models']
 
-__LOGGING_CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'logging.yaml')
+__LOGGING_CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'assets', 'logging.yaml')
 if os.path.exists(__LOGGING_CONFIG_PATH):
     with open(__LOGGING_CONFIG_PATH, 'rt') as f:
         __CONFIG = yaml.safe_load(f.read())

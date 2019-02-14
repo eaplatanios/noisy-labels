@@ -3,5 +3,4 @@ from . import learners
 from . import models
 from . import utilities
 
-__all__ = [
-  'amsgrad', 'learners', 'models', 'utilities']
+__all__ = ["amsgrad", "learners", "models", "utilities"]

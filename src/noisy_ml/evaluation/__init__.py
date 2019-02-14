@@ -1,3 +1,3 @@
 from . import metrics
 
-__all__ = ['metrics', 'utilities']
+__all__ = ["metrics", "utilities"]

@@ -24,174 +24,185 @@ from .training.layers import *
 from .training.learners import *
 from .training.models import *
 
-__author__ = 'eaplatanios'
+__author__ = "eaplatanios"
 
 __all__ = []
 
 
 class NELLModel(Model):
-  def __init__(
-      self, dataset, q_latent_size=None, gamma=0.25):
-    self.dataset = dataset
-    self.q_latent_size = q_latent_size
-    self.gamma = gamma
+    def __init__(self, dataset, q_latent_size=None, gamma=0.25):
+        self.dataset = dataset
+        self.q_latent_size = q_latent_size
+        self.gamma = gamma
 
-  def build(self, instances, predictors, labels):
-    if self.dataset.instance_features is None:
-      instances = Embedding(
-        num_inputs=len(self.dataset.instances),
-        emb_size=1,
-        name='instance_embeddings'
-      )(instances)
-    else:
-      instances = FeatureMap(
-        features=np.array(self.dataset.instance_features),
-        adjust_magnitude=False,
-        name='instance_features'
-      )(instances)
+    def build(self, instances, predictors, labels):
+        if self.dataset.instance_features is None:
+            instances = Embedding(
+                num_inputs=len(self.dataset.instances),
+                emb_size=1,
+                name="instance_embeddings",
+            )(instances)
+        else:
+            instances = FeatureMap(
+                features=np.array(self.dataset.instance_features),
+                adjust_magnitude=False,
+                name="instance_features",
+            )(instances)
 
-    predictions = MLP(
-      hidden_units=[256, 64, 16],
-      activation=tf.nn.selu,
-      output_layer=LogSigmoid(
-        num_labels=len(self.dataset.labels)),
-      name='m_fn'
-    )(instances)
+        predictions = MLP(
+            hidden_units=[256, 64, 16],
+            activation=tf.nn.selu,
+            output_layer=LogSigmoid(num_labels=len(self.dataset.labels)),
+            name="m_fn",
+        )(instances)
 
-    predictors = Embedding(
-      num_inputs=len(self.dataset.predictors),
-      emb_size=16,
-      name='predictor_embeddings'
-    )(predictors)
+        predictors = Embedding(
+            num_inputs=len(self.dataset.predictors),
+            emb_size=16,
+            name="predictor_embeddings",
+        )(predictors)
 
-    if self.q_latent_size is None:
-      q_fn_args = predictors
-      q_params = MLP(
-        hidden_units=[256, 64, 16],
-        activation=tf.nn.selu,
-        name='q_fn'
-      ).and_then(Linear(
-        num_outputs=4,
-        name='q_fn/linear')
-      )(q_fn_args)
-      q_params = tf.reshape(q_params, [-1, 2, 2])
-      q_params = tf.nn.log_softmax(q_params, axis=-1)
+        if self.q_latent_size is None:
+            q_fn_args = predictors
+            q_params = MLP(
+                hidden_units=[256, 64, 16], activation=tf.nn.selu, name="q_fn"
+            ).and_then(Linear(num_outputs=4, name="q_fn/linear"))(q_fn_args)
+            q_params = tf.reshape(q_params, [-1, 2, 2])
+            q_params = tf.nn.log_softmax(q_params, axis=-1)
 
-      regularization_terms = []
-    else:
-      q_i = MLP(
-        hidden_units=[256, 64, 16],
-        activation=tf.nn.selu,
-        output_layer=Linear(
-          num_outputs=4*self.q_latent_size,
-          name='q_i_fn/linear'),
-        name='q_i_fn'
-      )(instances)
-      q_i = tf.reshape(q_i, [-1, 2, 2, self.q_latent_size])
+            regularization_terms = []
+        else:
+            q_i = MLP(
+                hidden_units=[256, 64, 16],
+                activation=tf.nn.selu,
+                output_layer=Linear(
+                    num_outputs=4 * self.q_latent_size, name="q_i_fn/linear"
+                ),
+                name="q_i_fn",
+            )(instances)
+            q_i = tf.reshape(q_i, [-1, 2, 2, self.q_latent_size])
 
-      q_p = MLP(
-        hidden_units=[],
-        activation=tf.nn.selu,
-        output_layer=Linear(
-          num_outputs=4*self.q_latent_size,
-          name='q_p_fn/linear'),
-        name='q_p_fn'
-      )(predictors)
-      q_p = tf.reshape(q_p, [-1, 2, 2, self.q_latent_size])
+            q_p = MLP(
+                hidden_units=[],
+                activation=tf.nn.selu,
+                output_layer=Linear(
+                    num_outputs=4 * self.q_latent_size, name="q_p_fn/linear"
+                ),
+                name="q_p_fn",
+            )(predictors)
+            q_p = tf.reshape(q_p, [-1, 2, 2, self.q_latent_size])
 
-      q_params = tf.reduce_logsumexp(q_i + q_p, axis=-1)
-      q_params = tf.nn.log_softmax(q_params, axis=-1)
+            q_params = tf.reduce_logsumexp(q_i + q_p, axis=-1)
+            q_params = tf.nn.log_softmax(q_params, axis=-1)
 
-      num_labels_per_worker = self.dataset.avg_labels_per_predictor()
-      num_labels_per_item = self.dataset.avg_labels_per_item()
-      alpha = self.gamma * (len(self.dataset.labels) ** 2)
-      beta = alpha * num_labels_per_worker / num_labels_per_item
-      regularization_terms = [
-        beta * tf.reduce_sum(q_i * q_i) / 2,
-        alpha * tf.reduce_sum(q_p * q_p) / 2]
+            num_labels_per_worker = self.dataset.avg_labels_per_predictor()
+            num_labels_per_item = self.dataset.avg_labels_per_item()
+            alpha = self.gamma * (len(self.dataset.labels) ** 2)
+            beta = alpha * num_labels_per_worker / num_labels_per_item
+            regularization_terms = [
+                beta * tf.reduce_sum(q_i * q_i) / 2,
+                alpha * tf.reduce_sum(q_p * q_p) / 2,
+            ]
 
-    return BuiltModel(
-      predictions=predictions,
-      q_params=q_params,
-      regularization_terms=regularization_terms)
+        return BuiltModel(
+            predictions=predictions,
+            q_params=q_params,
+            regularization_terms=regularization_terms,
+        )
 
 
 def run_experiment(labels, ground_truth_threshold):
-  working_dir = os.getcwd()
-  data_dir = os.path.join(working_dir, os.pardir, 'data')
+    working_dir = os.getcwd()
+    data_dir = os.path.join(working_dir, os.pardir, "data")
 
-  data_dir = '/Volumes/Macintosh HD/Users/eaplatanios/Development/Data/NELL/Aggregated Predictions'
-  dataset = NELLLoader.load(
-    data_dir=data_dir,
-    labels=labels,
-    load_features=True,
-    ground_truth_threshold=ground_truth_threshold)
-  # dataset = NELLLoader.load_with_ground_truth(
-  #   data_dir=data_dir,
-  #   labels=labels)
+    data_dir = "/Volumes/Macintosh HD/Users/eaplatanios/Development/Data/NELL/Aggregated Predictions"
+    dataset = NELLLoader.load(
+        data_dir=data_dir,
+        labels=labels,
+        load_features=True,
+        ground_truth_threshold=ground_truth_threshold,
+    )
+    # dataset = NELLLoader.load_with_ground_truth(
+    #   data_dir=data_dir,
+    #   labels=labels)
 
-  def learner_fn(q_latent_size, gamma):
-    model = NELLModel(
-      dataset=dataset,
-      q_latent_size=q_latent_size,
-      gamma=gamma)
-    return EMLearner(
-      config=MultiLabelFullConfusionSimpleQEMConfig(
-        num_instances=len(dataset.instances),
-        num_predictors=len(dataset.predictors),
-        num_labels=len(dataset.labels),
-        model=model,
-        optimizer=tf.train.AdamOptimizer(1e-2),
-        use_soft_maj=True,
-        use_soft_y_hat=False),
-      predictions_output_fn=np.exp)
+    def learner_fn(q_latent_size, gamma):
+        model = NELLModel(dataset=dataset, q_latent_size=q_latent_size, gamma=gamma)
+        return EMLearner(
+            config=MultiLabelFullConfusionSimpleQEMConfig(
+                num_instances=len(dataset.instances),
+                num_predictors=len(dataset.predictors),
+                num_labels=len(dataset.labels),
+                model=model,
+                optimizer=tf.train.AdamOptimizer(1e-2),
+                use_soft_maj=True,
+                use_soft_y_hat=False,
+            ),
+            predictions_output_fn=np.exp,
+        )
 
-  def em_callback(learner):
+    def em_callback(learner):
+        evaluator = Evaluator(learner, dataset)
+        Result.merge(evaluator.evaluate_per_label(batch_size=128)).log(
+            prefix="EM           "
+        )
+        Result.merge(evaluator.evaluate_maj_per_label()).log(prefix="Majority Vote")
+
+    cv_kw_args = [
+        {"q_latent_size": 1, "gamma": 2 ** -3},
+        {"q_latent_size": 1, "gamma": 2 ** -2},
+        {"q_latent_size": 1, "gamma": 2 ** -1},
+        {"q_latent_size": 1, "gamma": 2 ** 0},
+        {"q_latent_size": 1, "gamma": 2 ** 1},
+        {"q_latent_size": 1, "gamma": 2 ** 2},
+        {"q_latent_size": 1, "gamma": 2 ** 3},
+    ]
+
+    learner = k_fold_cv(
+        kw_args=cv_kw_args,
+        learner_fn=learner_fn,
+        dataset=dataset,
+        num_folds=5,
+        batch_size=128,
+        warm_start=True,
+        max_m_steps=10000,
+        max_em_steps=5,
+        log_m_steps=1000,
+        em_step_callback=em_callback,
+    )
+
+    train_data = dataset.to_train()
+    train_dataset = tf.data.Dataset.from_tensor_slices(
+        {
+            "instances": train_data.instances,
+            "predictors": train_data.predictors,
+            "labels": train_data.labels,
+            "values": train_data.values,
+        }
+    )
+    learner.train(
+        dataset=train_dataset,
+        batch_size=128,
+        warm_start=True,
+        max_m_steps=10000,
+        max_em_steps=100,
+        log_m_steps=1000,
+        em_step_callback=em_callback,
+    )
+
     evaluator = Evaluator(learner, dataset)
-    Result.merge(evaluator.evaluate_per_label(batch_size=128)).log(prefix='EM           ')
-    Result.merge(evaluator.evaluate_maj_per_label()).log(prefix='Majority Vote')
 
-  cv_kw_args = [
-    {'q_latent_size': 1, 'gamma': 2 ** -3},
-    {'q_latent_size': 1, 'gamma': 2 ** -2},
-    {'q_latent_size': 1, 'gamma': 2 ** -1},
-    {'q_latent_size': 1, 'gamma': 2 ** 0},
-    {'q_latent_size': 1, 'gamma': 2 ** 1},
-    {'q_latent_size': 1, 'gamma': 2 ** 2},
-    {'q_latent_size': 1, 'gamma': 2 ** 3}]
-
-  learner = k_fold_cv(
-    kw_args=cv_kw_args, learner_fn=learner_fn,
-    dataset=dataset, num_folds=5, batch_size=128,
-    warm_start=True, max_m_steps=10000, max_em_steps=5,
-    log_m_steps=1000, em_step_callback=em_callback)
-
-  train_data = dataset.to_train()
-  train_dataset = tf.data.Dataset.from_tensor_slices({
-    'instances': train_data.instances,
-    'predictors': train_data.predictors,
-    'labels': train_data.labels,
-    'values': train_data.values})
-  learner.train(
-    dataset=train_dataset,
-    batch_size=128,
-    warm_start=True,
-    max_m_steps=10000,
-    max_em_steps=100,
-    log_m_steps=1000,
-    em_step_callback=em_callback)
-
-  evaluator = Evaluator(learner, dataset)
-
-  return {
-    'em': Result.merge(evaluator.evaluate_per_label(batch_size=128)),
-    'maj': Result.merge(evaluator.evaluate_maj_per_label())}
+    return {
+        "em": Result.merge(evaluator.evaluate_per_label(batch_size=128)),
+        "maj": Result.merge(evaluator.evaluate_maj_per_label()),
+    }
 
 
-if __name__ == '__main__':
-  results = run_experiment(
-    labels=['country'],
-    # labels=['bird', 'city', 'country', 'fish', 'lake', 'mammal', 'river'],
-    ground_truth_threshold=0.1)
-  results['em'].log(prefix='EM           ')
-  results['maj'].log(prefix='Majority Vote')
+if __name__ == "__main__":
+    results = run_experiment(
+        labels=["country"],
+        # labels=['bird', 'city', 'country', 'fish', 'lake', 'mammal', 'river'],
+        ground_truth_threshold=0.1,
+    )
+    results["em"].log(prefix="EM           ")
+    results["maj"].log(prefix="Majority Vote")

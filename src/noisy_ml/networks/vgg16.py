@@ -4,6 +4,8 @@ import tensorflow as tf
 
 from tensorflow.keras import applications, models
 
+__all__ ["VGG16"]
+
 
 def VGG16(
     freeze=True,

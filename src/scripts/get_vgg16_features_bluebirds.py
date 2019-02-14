@@ -1,4 +1,4 @@
-'''Precomputes VGG16 features for the images.'''
+"""Precomputes VGG16 features for the images."""
 
 import os
 import numpy as np

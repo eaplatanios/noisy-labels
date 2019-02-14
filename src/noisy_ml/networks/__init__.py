@@ -1,1 +1,4 @@
-from .vgg16 import VGG16
+from . import layers
+from . import vgg16
+
+__all__ = ["layers", "vgg16"]

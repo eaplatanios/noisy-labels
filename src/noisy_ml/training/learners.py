@@ -1045,13 +1045,10 @@ class MultiLabelMultiClassGEMConfig(EMConfig):
             for q_log_y_hat, h_log in zip(q_log_y_hats, predictions):
                 # Compute log P({l}, y | x, {r}).
                 # TODO: explain what's happening here...
-                log_p = tf.einsum("ilk,ij->ijlk", q_log_y_hat, unique_instances_onehot)
-                log_p = tf.einsum("ijlk->jlk", log_p)
-                log_p = tf.einsum("jlk,ij->ijlk", log_p, unique_instances_onehot)
-                log_p = tf.einsum("ijlk->ilk", log_p)
-                log_p = log_p + tf.expand_dims(log_p, axis=1)
+                log_p = tf.einsum("ilk,ij,mj->mlk", q_log_y_hat, unique_instances_onehot, unique_instances_onehot)
+                log_p = log_p + tf.expand_dims(h_log, axis=1)
                 # Compute P(y | x, {l}, {r}).
-                p = tf.exp(log_p - tf.reduce_logsumexp(log_p, axis=-1, keepdims=True))
+                p = tf.nn.softmax(log_p, axis=-1)
                 p_y_given_x_l_r.append(p)
 
         # M-Step:

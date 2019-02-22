@@ -545,7 +545,7 @@ class VariationalNoisyModel(Model):
         )
         regularization_terms = []
         for p_approx_posterior in approx_posteriors:
-            p_kl = tfd.kl_divergence(p_approx_posterior, prior)
+            p_kl = tf.reduce_mean(tfd.kl_divergence(p_approx_posterior, prior))
             regularization_terms.append(self.gamma * p_kl)
 
         return BuiltVariationalModel(

@@ -238,8 +238,9 @@ class GeneralizedStochasticEMLearner(Learner):
     M-steps based on a single (stochastic) gradient update.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, predictions_output_fn=lambda x: x):
         self.config = config
+        self.predictions_output_fn = predictions_output_fn
         self._build_ops()
         self._session = None
 
@@ -255,8 +256,13 @@ class GeneralizedStochasticEMLearner(Learner):
             self._session.run(self._init_op)
 
     def _update(self):
-        nll, _ = self._session.run([self._ops["neg_log_likelihood"], self._ops["m_step"]])
-        return nll
+        nll, em_nll_term0, em_nll_term1, kl_reg, _ = self._session.run([
+            self._ops["neg_log_likelihood"],
+            self._ops["em_nll_term0"],
+            self._ops["em_nll_term1"],
+            self._ops["kl_reg"],
+            self._ops["m_step"]])
+        return nll, em_nll_term0, em_nll_term1, kl_reg
 
     def reset(self):
         self._session = None
@@ -266,6 +272,7 @@ class GeneralizedStochasticEMLearner(Learner):
         dataset,
         batch_size=128,
         max_em_steps=1000,
+        log_em_steps=10,
         em_step_callback=None,
         use_progress_bar=False,
     ):
@@ -279,19 +286,130 @@ class GeneralizedStochasticEMLearner(Learner):
 
         logger.info("Running GEM for %d steps..." % max_em_steps)
 
-        gem_steps_range = range(max_em_steps)
-        if use_progress_bar:
-            gem_steps_range = tqdm(gem_steps_range, "EM Step (%s)" % os.getpid())
-
         # Run GEM steps.
-        for step in gem_steps_range:
-            if not use_progress_bar:
-                logger.info("Iteration %d - Running M-Step" % step)
-            self._update()
+        accumulator_nll = 0.0
+        accumulator_em_nll_term0 = 0.0
+        accumulator_em_nll_term1 = 0.0
+        accumulator_kl_reg = [0.0 for _ in range(10)]
+        accumulator_steps = 0
+        for step in range(max_em_steps):
+            nll, em_nll_term0, em_nll_term1, kl_reg = self._update()
+            accumulator_nll += nll
+            accumulator_em_nll_term0 += em_nll_term0
+            accumulator_em_nll_term1 += em_nll_term1
+            accumulator_kl_reg = [v + u for v, u in zip(accumulator_kl_reg, kl_reg)]
+            accumulator_steps += 1
+            if (step % log_em_steps == 0) or (step == max_em_steps - 1):
+                nll = accumulator_nll / accumulator_steps
+                em_nll_term0 = accumulator_em_nll_term0 / accumulator_steps
+                em_nll_term1 = accumulator_em_nll_term1 / accumulator_steps
+                kl_reg = [v / accumulator_steps for v in accumulator_kl_reg]
+                logger.info("Step: %5d | Negative Log-Likelihood: %.8f" % (step, nll))
+                # logger.info("Step: %5d | EM NLL term0: %.8f" % (step, em_nll_term0))
+                # logger.info("Step: %5d | EM NLL term1: %.8f" % (step, em_nll_term1))
+                # logger.info("Step: %5d | KL terms: %s" % (step, kl_reg))
+                accumulator_nll = 0.0
+                accumulator_steps = 0
+
             if em_step_callback is not None:
                 em_step_callback(self)
 
         logger.info("Done.")
+
+    def neg_log_likelihood(self, dataset, batch_size=128):
+        dataset = dataset.batch(batch_size)
+        iterator_init_op = self._ops["train_iterator"].make_initializer(dataset)
+
+        self._init_session()
+        self._session.run(iterator_init_op)
+        neg_log_likelihood = 0.0
+        while True:
+            try:
+                neg_log_likelihood += self._session.run(self._ops["neg_log_likelihood"])
+            except tf.errors.OutOfRangeError:
+                break
+        return neg_log_likelihood
+
+    def predict(self, instances, batch_size=128):
+        # TODO: Remove hack by having separate train and predict iterators.
+        dataset = tf.data.Dataset.from_tensor_slices(
+            {
+                "instances": instances,
+                "predictors": np.zeros([len(instances)], np.int32),
+                "labels": np.zeros([len(instances)], np.int32),
+                "values": np.zeros([len(instances)], np.float32),
+            }
+        ).batch(batch_size)
+        iterator_init_op = self._ops["train_iterator"].make_initializer(dataset)
+
+        self._init_session()
+        self._session.run(iterator_init_op)
+        predictions = []
+        while True:
+            try:
+                p = self._session.run(self._ops["predictions"])
+                if self.predictions_output_fn is not None:
+                    p = self.predictions_output_fn(p)
+                predictions.append(p)
+            except tf.errors.OutOfRangeError:
+                break
+        if isinstance(predictions[0], list):
+            predictions = [np.concatenate(p, axis=0) for p in zip(*predictions)]
+        else:
+            predictions = np.concatenate(predictions, axis=0)
+        return predictions
+
+    def qualities(self, instances, predictors, labels, batch_size=128):
+        # TODO: Move this function to utils and document.
+        def cartesian_transpose(arrays):
+            la = len(arrays)
+            dtype = np.result_type(*arrays)
+            arr = np.empty([la] + [len(a) for a in arrays], dtype=dtype)
+            for i, a in enumerate(np.ix_(*arrays)):
+                arr[i, ...] = a
+            return arr.reshape(la, -1)
+
+        temp = cartesian_transpose(
+            [np.array(instances), np.array(labels), np.array(predictors)]
+        )
+
+        # TODO: Remove hack by having separate train and predict iterators.
+        dataset = tf.data.Dataset.from_tensor_slices(
+            {
+                "instances": temp[0].astype(np.int32),
+                "predictors": temp[2].astype(np.int32),
+                "labels": temp[1].astype(np.int32),
+                "values": np.zeros([len(temp[0])], np.float32),
+            }
+        ).batch(batch_size)
+        iterator_init_op = self._ops["train_iterator"].make_initializer(dataset)
+
+        self._init_session()
+
+        self._session.run(iterator_init_op)
+        qualities_mean_log = []
+        while True:
+            try:
+                qualities_mean_log.append(
+                    self._session.run(self._ops["qualities_mean_log"])
+                )
+            except tf.errors.OutOfRangeError:
+                break
+
+        if isinstance(qualities_mean_log[0], list):
+            # Manually scatter computed qualities...
+            qualities = np.zeros([len(instances), len(labels), len(predictors)])
+            for l, q in zip(range(self.config.num_labels), zip(*qualities_mean_log)):
+                indices_l = np.where(temp[1].astype(np.int32) == l)[0]
+                qualities_l = np.exp(np.concatenate(q, axis=0))
+                for j, i in enumerate(indices_l):
+                    qualities[temp[0][i], l, temp[2][i]] = qualities_l[j]
+        else:
+            qualities = np.reshape(
+                np.exp(np.concatenate(qualities_mean_log, axis=0)),
+                [len(instances), len(labels), len(predictors)],
+            )
+        return qualities
 
 
 class EMConfig(abc.ABC):
@@ -880,17 +998,20 @@ class MultiLabelMultiClassGEMConfig(EMConfig):
             y_hats.append(y_hat)
 
         # Compute mean qualities.
-        # qualities_mean_logs: list of <float32> [batch_size_l, num_predictor_samples] for each label l.
+        # qualities_mean_logs: list of <float32> [batch_size_l] for each label l.
         qualities_mean_log = []
         for h_log, q_log in zip(predictions, confusions):
             h_log_expanded = tf.expand_dims(tf.expand_dims(h_log, axis=-1), axis=1)
             h_log_q_log = q_log + h_log_expanded
             qualities_mean_log.append(
-                # <float32> [batch_size_l, num_predictor_samples].
-                tf.reduce_logsumexp(
-                    # <float32> [batch_size_l, num_predictor_samples, num_classes_l].
-                    tf.matrix_diag_part(h_log_q_log),
-                    axis=-1,
+                # <float32> [batch_size_l].
+                tf.reduce_mean(
+                    tf.reduce_logsumexp(
+                        # <float32> [batch_size_l, num_predictor_samples, num_classes_l].
+                        tf.matrix_diag_part(h_log_q_log),
+                        axis=-1,
+                    ),
+                    axis=1,
                 )
             )
 
@@ -930,7 +1051,7 @@ class MultiLabelMultiClassGEMConfig(EMConfig):
                 log_p = tf.einsum("ijlk->ilk", log_p)
                 log_p = log_p + tf.expand_dims(log_p, axis=1)
                 # Compute P(y | x, {l}, {r}).
-                p = tf.exp(log_p - tf.reduce_sum(log_p, axis=-1, keepdims=True))
+                p = tf.exp(log_p - tf.reduce_logsumexp(log_p, axis=-1, keepdims=True))
                 p_y_given_x_l_r.append(p)
 
         # M-Step:
@@ -938,11 +1059,11 @@ class MultiLabelMultiClassGEMConfig(EMConfig):
         with tf.name_scope("m_step"):
             # Compute EM NLL: <float32> [].
             em_ll_term0 = sum(
-                tf.reduce_mean(p_y_post * tf.expand_dims(h_log, axis=1))
+                tf.reduce_mean(tf.reduce_sum(p_y_post * tf.expand_dims(h_log, axis=1), axis=-1))
                 for p_y_post, h_log in zip(p_y_given_x_l_r, predictions)
             )
             em_ll_term1 = sum(
-                tf.reduce_mean(p_y_post * q_log_y_hat)
+                tf.reduce_mean(tf.reduce_sum(p_y_post * q_log_y_hat, axis=-1))
                 for p_y_post, q_log_y_hat in zip(p_y_given_x_l_r, q_log_y_hats)
             )
             em_nll = -(em_ll_term0 + em_ll_term1)
@@ -953,10 +1074,11 @@ class MultiLabelMultiClassGEMConfig(EMConfig):
                 neg_log_likelihood += tf.add_n(regularization_terms)
 
             # Entropy regularization.
-            h_entropy = sum(
-                [tf.reduce_sum(tf.exp(h_log) * h_log) for h_log in predictions]
-            )
-            neg_log_likelihood += self.lambda_entropy * h_entropy
+            if self.lambda_entropy > 0:
+                h_entropy = sum(
+                    [tf.reduce_sum(tf.exp(h_log) * h_log) for h_log in predictions]
+                )
+                neg_log_likelihood += self.lambda_entropy * h_entropy
 
             # Build M-step.
             m_step_init = tf.variables_initializer(tf.trainable_variables())
@@ -980,4 +1102,7 @@ class MultiLabelMultiClassGEMConfig(EMConfig):
             "m_step_init": m_step_init,
             "m_step": m_step,
             "neg_log_likelihood": neg_log_likelihood,
+            "em_nll_term0": -em_ll_term0,
+            "em_nll_term1": -em_ll_term1,
+            "kl_reg": regularization_terms,
         }

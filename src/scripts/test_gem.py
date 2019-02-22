@@ -84,16 +84,16 @@ def train_eval_predictors(args, dataset, time_stamp):
                 )
 
                 learner = learner_fn(model, dataset)
+
                 learner.train(
                     dataset=train_dataset,
                     batch_size=128,
-                    max_em_steps=1000,
-                    use_progress_bar=True,
+                    max_em_steps=2000,
+                    log_em_steps=100,
+                    use_progress_bar=False,
                 )
                 # TODO: Average results across all labels.
-                result = evaluator.evaluate_per_label(learner=learner, batch_size=128)[
-                    0
-                ]
+                result = evaluator.evaluate_per_label(learner=learner, batch_size=128)[0]
         num_p_results.append(result)
 
     # Collect results.
@@ -154,8 +154,7 @@ def run_experiment(num_proc=1):
             num_labels=len(dataset.labels),
             num_classes=dataset.num_classes,
             num_predictors=len(dataset.predictors),
-            num_predictor_samples=1,
-            instances_emb_size=4,
+            num_predictor_samples=10,
             predictors_emb_size=4,
             instances_hidden=[4],
             predictors_hidden=[4],

@@ -467,6 +467,14 @@ class VariationalNoisyModel(Model):
         # <float32> [num_predictors, num_predictor_samples, predictor_emb_size].
         predictor_embeddings = tf.stack(predictor_embeddings)
 
+        # Add an all-zeros embedding for each predictor for warm up.
+        predictor_embeddings = tf.pad(
+            predictor_embeddings,
+            paddings=[[0, 0], [1, 0], [0, 0]],
+            model="CONSTANT",
+            constant_values=0,
+        )
+
         return predictor_embeddings, predictor_approx_posteriors
 
     def build(self, instances, predictors, labels, values):
@@ -508,6 +516,7 @@ class VariationalNoisyModel(Model):
         predictor_embeddings, approx_posteriors = self._build_predictor_embeddings(
             instances, labels, values, predictors
         )
+
         # <float32> [batch_size, num_predictor_samples, predictor_emb_size].
         predictors = tf.gather(predictor_embeddings, predictors)
 

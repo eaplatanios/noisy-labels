@@ -476,6 +476,7 @@ class VariationalNoisyModel(Model):
             print(predictor_embeddings)
 
             # Add an all-zeros embedding for each predictor for warm up.
+            # <float32> [num_predictors, num_predictor_samples + 1, predictor_emb_size].
             predictor_embeddings = tf.pad(
                 predictor_embeddings,
                 paddings=[[0, 0], [1, 0], [0, 0]],
@@ -520,24 +521,24 @@ class VariationalNoisyModel(Model):
                     )
 
         # Predictor embeddings.
-        # predictors: <float32> [num_predictors, num_predictor_samples, predictor_emb_size].
+        # predictors: <float32> [num_predictors, num_predictor_samples + 1, predictor_emb_size].
         predictor_embeddings, approx_posteriors = self._build_predictor_embeddings(
             instances, labels, values, predictors
         )
 
-        # <float32> [batch_size, num_predictor_samples, predictor_emb_size].
+        # <float32> [batch_size, num_predictor_samples + 1, predictor_emb_size].
         predictors = tf.gather(predictor_embeddings, predictors)
 
         # Compute annotator quality confusion matrices (per-label).
         confusion_latent_size = self.q_latent_size or 1
         with tf.variable_scope("q_fn"):
             # Shared hiddens for q_fn between all labels.
-            # hiddens: <float32> [batch_size * num_predictor_samples, hidden_size].
+            # hiddens: <float32> [batch_size * (num_predictor_samples + 1), hidden_size].
             hiddens = tf.reshape(predictors, [-1, self.predictors_emb_size])
             for h_units in self.predictors_hidden:
                 hiddens = tf.layers.Dense(units=h_units, activation=tf.nn.selu)(hiddens)
             # Pre-confusions is a list of num_labels tensors:
-            # <float32> [batch_size * num_predictor_samples, num_classes, num_classes, latent_size].
+            # <float32> [batch_size * (num_predictor_samples + 1), num_classes, num_classes, latent_size].
             pre_q_confusions = []
             for nc in self.dataset.num_classes:
                 pre_q_confusion = tf.layers.Dense(
@@ -548,11 +549,11 @@ class VariationalNoisyModel(Model):
                 )
 
             # Confusions is a list of num_labels tensors log-normalized along the last axis:
-            # <float32> [batch_size, num_predictor_samples, num_classes, num_classes].
+            # <float32> [batch_size, num_predictor_samples + 1, num_classes, num_classes].
             confusions = []
             for pqc, nc in zip(pre_q_confusions, self.num_classes):
                 c = tf.nn.log_softmax(tf.squeeze(pqc, axis=-1), axis=-1)
-                c = tf.reshape(c, [-1, self.num_predictor_samples, nc, nc])
+                c = tf.reshape(c, [-1, self.num_predictor_samples + 1, nc, nc])
                 confusions.append(c)
 
         # Compute KL between priors and posteriors (regularization terms).

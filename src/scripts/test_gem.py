@@ -45,7 +45,7 @@ def learner_fn(model, dataset):
             num_labels=len(dataset.labels),
             num_classes=dataset.num_classes,
             model=model,
-            optimizer=AMSGrad(1e-3),
+            optimizer=tf.train.GradientDescentOptimizer(1e-3),
             lambda_entropy=0.0,
         )
     )
@@ -90,6 +90,7 @@ def train_eval_predictors(args, dataset, time_stamp):
                     batch_size=128,
                     max_em_steps=2000,
                     log_em_steps=100,
+                    warm_up_em_steps=1,
                     use_progress_bar=False,
                 )
                 # TODO: Average results across all labels.
@@ -154,11 +155,12 @@ def run_experiment(num_proc=1):
             num_labels=len(dataset.labels),
             num_classes=dataset.num_classes,
             num_predictors=len(dataset.predictors),
-            num_predictor_samples=10,
+            num_predictor_samples=5,
             predictors_emb_size=4,
             instances_hidden=[4],
             predictors_hidden=[4],
             q_latent_size=None,
+            prior_scale=1.0,
             gamma=1.0,
         ),
     }

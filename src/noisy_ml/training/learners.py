@@ -377,7 +377,7 @@ class GeneralizedStochasticEMLearner(Learner):
         accumulator_nll = 0.0
         accumulator_steps = 0
         for step in range(max_em_steps):
-            nll, em_nll_term0, em_nll_term1, kl_reg = self._update()
+            nll = self._update()
             accumulator_nll += nll
             accumulator_steps += 1
             if (step % log_em_steps == 0) or (step == max_em_steps - 1):
@@ -1235,8 +1235,13 @@ class MultiLabelMultiClassGEMConfig(EMConfig):
             p_y_given_x_l_r = []
             for q_log_y_hat, h_log in zip(q_log_y_hats, predictions):
                 # Compute log P({l}, y | x, {r}).
-                # TODO: explain what's happening here...
-                log_p = tf.einsum("ilk,ij,mj->mlk", q_log_y_hat, unique_instances_onehot, unique_instances_onehot)
+                log_p = tf.einsum(
+                    "ilk,ij,mj->mlk",
+                    # Drop the spurious all-zeros predictor embedding.
+                    q_log_y_hat[:, 1:, :],
+                    unique_instances_onehot,
+                    unique_instances_onehot
+                )
                 log_p = log_p + tf.expand_dims(h_log, axis=1)
                 # Compute P(y | x, {l}, {r}).
                 p = tf.nn.softmax(log_p, axis=-1)
@@ -1251,7 +1256,8 @@ class MultiLabelMultiClassGEMConfig(EMConfig):
                 for p_y_post, h_log in zip(p_y_given_x_l_r, predictions)
             )
             em_ll_term1 = sum(
-                tf.reduce_mean(tf.reduce_sum(p_y_post * q_log_y_hat, axis=-1))
+                # Drop the spurious all-zeros predictor embedding.
+                tf.reduce_mean(tf.reduce_sum(p_y_post * q_log_y_hat[:, 1:, :], axis=-1))
                 for p_y_post, q_log_y_hat in zip(p_y_given_x_l_r, q_log_y_hats)
             )
             em_nll = -(em_ll_term0 + em_ll_term1)

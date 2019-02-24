@@ -376,6 +376,7 @@ class VariationalNoisyModel(Model):
         instances_hidden=None,
         predictors_hidden=None,
         q_latent_size=None,
+        prior_scale=1.0,
         gamma=1.0,
     ):
         self.dataset = dataset
@@ -388,14 +389,12 @@ class VariationalNoisyModel(Model):
         self.instances_hidden = instances_hidden or list()
         self.predictors_hidden = predictors_hidden or list()
         self.q_latent_size = q_latent_size
+        self.prior_scale = prior_scale
         self.gamma = gamma
 
     def _build_predictor_embeddings(self, instances, labels, values, predictors):
         """Builds predictor embeddings as re-parametrized samples
         from the variational distribution."""
-        predictor_approx_posteriors = []
-        predictor_embeddings = []
-
         # Convert predictor indices into one-hot masks.
         # predictors_onehot: list of <int32> [batch_size] for each predictor.
         predictors_onehot = tf.unstack(
@@ -404,6 +403,8 @@ class VariationalNoisyModel(Model):
         )
 
         # For each predictor, select the corresponding, instances, labels, and values.
+        predictor_embedding_locs = []
+        predictor_embedding_scales = []
         for p_onehot in predictors_onehot:
             # <int32> [batch_size_p].
             p_range = tf.range(tf.reduce_sum(p_onehot))
@@ -440,40 +441,47 @@ class VariationalNoisyModel(Model):
                         units=h_units,
                         activation=tf.nn.selu
                     )(hiddens)
+                # <float32> [1, hidden_size].
                 hiddens = tf.reduce_mean(hiddens, axis=0, keepdims=True)
 
                 # Build an approximate posterior distribution.
+                # <float32> [1, 2 * predictor_emb_size].
                 p_embedding_loc_scale = tf.layers.Dense(
                     units=(2 * self.predictors_emb_size)
                 )(hiddens)
-                p_embedding_loc = p_embedding_loc_scale[:, self.predictors_emb_size]
+                # <float32> [1, predictor_emb_size].
+                p_embedding_loc = p_embedding_loc_scale[:, :self.predictors_emb_size]
                 p_embedding_scale = tf.nn.softplus(
                     p_embedding_loc_scale[:, self.predictors_emb_size:] +
                     tf.math.log(tf.math.expm1(1.0))
                 )
-                p_approx_posterior = tfd.MultivariateNormalDiag(
-                    loc=p_embedding_loc,
-                    scale_diag=p_embedding_scale,
-                    name="p_emb_dist"
-                )
-                predictor_approx_posteriors.append(p_approx_posterior)
+                predictor_embedding_locs.append(p_embedding_loc)
+                predictor_embedding_scales.append(p_embedding_scale)
 
-                # Sample predictor embeddings from the variational distribution.
-                # <float32> [num_predictor_samples, predictor_emb_size].
-                p_embeddings = p_approx_posterior.sample(self.num_predictor_samples)
-                predictor_embeddings.append(p_embeddings)
+        with tf.variable_scope("encoder", reuse=tf.AUTO_REUSE):
+            # <float32> [num_predictors, predictor_emb_size].
+            predictor_embedding_locs = tf.concat(predictor_embedding_locs, axis=0)
+            predictor_embedding_scales = tf.concat(predictor_embedding_scales, axis=0)
+            predictor_approx_posteriors = tfd.MultivariateNormalDiag(
+                loc=predictor_embedding_locs,
+                scale_diag=predictor_embedding_scales,
+                name="predictor_emb_dist"
+            )
 
-        # Construct predictor embeddings for each predictor in the batch.
-        # <float32> [num_predictors, num_predictor_samples, predictor_emb_size].
-        predictor_embeddings = tf.stack(predictor_embeddings)
+            # Sample predictor embeddings from the variational distribution.
+            # <float32> [num_predictor_samples, num_predictors, predictor_emb_size].
+            predictor_embeddings = predictor_approx_posteriors.sample(self.num_predictor_samples)
+            # <float32> [num_predictors, num_predictor_samples, predictor_emb_size].
+            predictor_embeddings = tf.transpose(predictor_embeddings, perm=[1, 0, 2])
+            print(predictor_embeddings)
 
-        # Add an all-zeros embedding for each predictor for warm up.
-        predictor_embeddings = tf.pad(
-            predictor_embeddings,
-            paddings=[[0, 0], [1, 0], [0, 0]],
-            model="CONSTANT",
-            constant_values=0,
-        )
+            # Add an all-zeros embedding for each predictor for warm up.
+            predictor_embeddings = tf.pad(
+                predictor_embeddings,
+                paddings=[[0, 0], [1, 0], [0, 0]],
+                mode="CONSTANT",
+                constant_values=0,
+            )
 
         return predictor_embeddings, predictor_approx_posteriors
 
@@ -548,14 +556,22 @@ class VariationalNoisyModel(Model):
                 confusions.append(c)
 
         # Compute KL between priors and posteriors (regularization terms).
-        prior = tfd.MultivariateNormalDiag(
-            loc=tf.zeros(self.predictors_emb_size),
-            scale_diag=tf.ones(self.predictors_emb_size)
+        prior_loc = tf.zeros(
+            shape=(self.num_predictors, self.predictors_emb_size),
+            dtype=tf.float32
         )
-        regularization_terms = []
-        for p_approx_posterior in approx_posteriors:
-            p_kl = tf.reduce_mean(tfd.kl_divergence(p_approx_posterior, prior))
-            regularization_terms.append(self.gamma * p_kl)
+        prior_scale = self.prior_scale * tf.ones(
+            shape=(self.num_predictors, self.predictors_emb_size),
+            dtype=tf.float32
+        )
+        priors = tfd.MultivariateNormalDiag(
+            loc=prior_loc,
+            scale_diag=prior_scale,
+        )
+        regularization_terms = [
+            # KL divergence between prior and posterior averaged over predictors.
+            self.gamma * tf.reduce_mean(tfd.kl_divergence(approx_posteriors, priors))
+        ]
 
         return BuiltVariationalModel(
             regularization_terms=regularization_terms,

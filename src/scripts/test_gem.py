@@ -88,9 +88,9 @@ def train_eval_predictors(args, dataset, time_stamp):
                 learner.train(
                     dataset=train_dataset,
                     batch_size=128,
-                    max_em_steps=2000,
+                    max_em_steps=5000,
                     log_em_steps=100,
-                    warm_up_em_steps=1,
+                    warm_up_em_steps=2,
                     use_progress_bar=False,
                 )
                 # TODO: Average results across all labels.
@@ -150,17 +150,17 @@ def run_experiment(num_proc=1):
         raise NotImplementedError
 
     models = {
-        "VNM[4]": VariationalNoisyModel(
+        "VNM[16]": VariationalNoisyModel(
             dataset=dataset,
             num_labels=len(dataset.labels),
             num_classes=dataset.num_classes,
             num_predictors=len(dataset.predictors),
-            num_predictor_samples=5,
-            predictors_emb_size=4,
-            instances_hidden=[4],
-            predictors_hidden=[4],
+            num_predictor_samples=20,
+            predictors_emb_size=16,
+            instances_hidden=[16],
+            predictors_hidden=[16],
             q_latent_size=None,
-            prior_scale=1.0,
+            prior_scale=2.0,
             gamma=1.0,
         ),
     }

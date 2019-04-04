@@ -262,7 +262,7 @@ class EMLearner(Learner):
       try:
         p = self._session.run(self._ops['predictions'])
         if self.predictions_output_fn is not None:
-          p = self.predictions_output_fn(p)
+          p = list(map(self.predictions_output_fn, p))
         predictions.append(p)
       except tf.errors.OutOfRangeError:
         break

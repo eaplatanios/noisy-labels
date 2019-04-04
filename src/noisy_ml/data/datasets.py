@@ -387,7 +387,12 @@ class Dataset(object):
           confusions[l_id].append(np.zeros((nc, nc), dtype=np.float32))
           # Count confusions.
           for i, v in zip(*indices_values):
-            gt = ground_truth[i]
+            v = int(np.round(v)) if isinstance(v, float) else v
+            if isinstance(ground_truth[i], float):
+              gt = int(np.round(ground_truth[i]))
+            else:
+              gt = ground_truth[i]
+            print(l_id, p_id, gt, v)
             confusions[l_id][p_id][gt, v] += 1
           # Normalize the confusion matrix.
           confusions[l_id][p_id] /= confusions[l_id][p_id].sum(-1, keepdims=True)

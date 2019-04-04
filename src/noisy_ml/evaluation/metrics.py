@@ -189,6 +189,7 @@ class Evaluator(object):
       all_predictions = dict()
       for p, indices_values in six.iteritems(self.dataset.predicted_labels[l_id]):
         for i, v in zip(*indices_values):
+          v = int(np.round(v)) if isinstance(v, float) else v
           if i not in all_predictions:
             all_predictions[i] = list()
           all_predictions[i].append(v)
@@ -212,6 +213,7 @@ class Evaluator(object):
         if p_id not in confusions_with_maj:
           confusions_with_maj[p_id] = np.zeros((nc, nc), dtype=np.float32)
         for i, v in zip(*indices_values):
+          v = int(np.round(v)) if isinstance(v, float) else v
           maj = np.argmax(predictions[i])
           confusions_with_maj[p_id][maj, v] += 1
         confusions_with_maj[p_id] /= confusions_with_maj[p_id].sum(-1, keepdims=True)

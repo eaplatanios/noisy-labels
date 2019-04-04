@@ -27,8 +27,11 @@ from .datasets import Dataset
 __author__ = ['alshedivat', 'eaplatanios']
 
 __all__ = [
-  'BlueBirdsLoader', 'SentimentPopularityLoader',
-  'WeatherSentimentLoader']
+  'BlueBirdsLoader',
+  'SentimentPopularityLoader',
+  'WeatherSentimentLoader',
+  'AgeLoader',
+]
 
 logger = logging.getLogger(__name__)
 
@@ -224,3 +227,80 @@ class WeatherSentimentLoader(object):
       instances, predictors, labels,
       true_labels, predicted_labels,
       num_classes=num_classes)
+
+
+class AgeLoader(object):
+  """Age dataset.
+
+  Source: TODO
+  """
+
+  @staticmethod
+  def load(data_dir, load_features=True):
+    data_dir = os.path.join(
+      data_dir, 'crowdsourced', 'age')
+
+    def bin_labels(labels, splits):
+      assert labels.ndim == 1
+
+      splits = splits[None, :]
+      labels = labels[:, None]
+      labels_ub = labels < splits
+      labels_lb = labels >= splits
+
+      labels_one_hot = np.concatenate([
+        labels_ub[..., :1],
+        np.logical_and(labels_lb[..., :-1], labels_ub[..., 1:]),
+        labels_lb[..., -1:],
+      ], axis=-1)
+
+      return labels_one_hot.nonzero()[-1]
+
+    # Load the ground truth.
+    gt_filename = os.path.join(data_dir, 'ground_truth.npy')
+    ground_truth = np.load(gt_filename)
+
+    # Load annotators and labels.
+    annotators_filename = os.path.join(data_dir, 'annotators.npy')
+    annotator_ids = np.load(annotators_filename)
+    labels_filename = os.path.join(data_dir, 'labels.npy')
+    predicted_ages = np.load(labels_filename)
+
+    # Bin age values as proposed by Zhou et al., 2015.
+    age_splits = np.asarray([10, 20, 30, 40, 50, 60])
+    gt_labels = bin_labels(ground_truth, age_splits)
+    ann_labels_flat = bin_labels(predicted_ages.flatten(), age_splits)
+    ann_labels = ann_labels_flat.reshape(predicted_ages.shape)
+
+    assert gt_labels.max() == ann_labels.max() == len(age_splits)
+    num_classes = [len(age_splits) + 1]
+
+    # Convert data to our format.
+    instances = list(range(len(ground_truth)))
+    predictors = list(range(annotator_ids.max() + 1))
+    labels = [0]
+
+    true_labels = {0: {i: gt for i, gt in enumerate(gt_labels)}}
+
+    predicted_labels = {0: {}}
+    for i, (ann_ids, ann_labels) in enumerate(zip(annotator_ids, ann_labels)):
+      for ai, al in zip(ann_ids, ann_labels):
+        if ai not in predicted_labels[0]:
+          predicted_labels[0][ai] = {}
+        predicted_labels[0][ai][i] = al
+    for ai in predicted_labels[0].keys():
+      keys = list(predicted_labels[0][ai].keys())
+      values = list(predicted_labels[0][ai].values())
+      predicted_labels[0][ai] = (keys, values)
+
+    if load_features:
+      # TODO
+      instance_features = None
+    else:
+      instance_features = None
+
+    return Dataset(
+      instances, predictors, labels,
+      true_labels, predicted_labels,
+      num_classes=num_classes,
+      instance_features=instance_features)

@@ -231,7 +231,7 @@ class Dataset(object):
 
     return Dataset(
       instances, predictors, labels,
-      true_labels, predicted_labels,
+      true_labels, predicted_labels, self.num_classes,
       instance_features, predictor_features,
       label_features)
 
@@ -299,7 +299,7 @@ class Dataset(object):
 
     return Dataset(
       new_instances, new_predictors, self.labels,
-      true_labels, predicted_labels,
+      true_labels, predicted_labels, self.num_classes,
       instance_features, predictor_features,
       label_features)
 
@@ -332,6 +332,7 @@ class Dataset(object):
     return TrainData(instances, predictors, labels, values)
 
   def compute_binary_qualities(self):
+    # TODO: upgrade to multi-class
     num_correct = list()
     num_total = list()
     for l, label in enumerate(self.labels):
@@ -350,6 +351,7 @@ class Dataset(object):
     return num_correct / num_total
 
   def compute_binary_qualities_full_confusion(self):
+    # TODO: upgrade to multi-class
     num_confused = list()
     num_total = list()
     for l, label in enumerate(self.labels):
@@ -374,3 +376,19 @@ class Dataset(object):
     num_confused = np.array(num_confused, np.float32)
     num_total = np.array(num_total, np.float32)
     return num_confused / num_total
+
+  def compute_confusions(self):
+    """Computes true empirical confusions for the annotators."""
+    confusions = []
+    for l_id, nc in enumerate(self.num_classes):
+      confusions.append([])
+      ground_truth = self.true_labels[l_id]
+      for p_id, indices_values in six.iteritems(self.predicted_labels[l_id]):
+          confusions[l_id].append(np.zeros((nc, nc), dtype=np.float32))
+          # Count confusions.
+          for i, v in zip(*indices_values):
+            gt = ground_truth[i]
+            confusions[l_id][p_id][gt, v] += 1
+          # Normalize the confusion matrix.
+          confusions[l_id][p_id] /= confusions[l_id][p_id].sum(-1, keepdims=True)
+    return np.asarray(confusions)

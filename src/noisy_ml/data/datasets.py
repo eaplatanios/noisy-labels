@@ -392,7 +392,6 @@ class Dataset(object):
               gt = int(np.round(ground_truth[i]))
             else:
               gt = ground_truth[i]
-            print(l_id, p_id, gt, v)
             confusions[l_id][p_id][gt, v] += 1
           # Normalize the confusion matrix.
           confusions[l_id][p_id] /= confusions[l_id][p_id].sum(-1, keepdims=True)

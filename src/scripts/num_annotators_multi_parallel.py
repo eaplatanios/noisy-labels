@@ -64,7 +64,7 @@ def learner_fn(model, dataset):
       optimizer=AMSGrad(1e-3),
       lambda_entropy=0.0,
       use_soft_maj=True,
-      use_soft_y_hat=True),
+      use_soft_y_hat=False),
     predictions_output_fn=np.exp)
 
 
@@ -86,9 +86,9 @@ def train_eval_predictors(args, dataset, time_stamp):
     evaluator = Evaluator(data)
 
     if model == 'MAJ':
-      result = evaluator.evaluate_maj_per_label(soft=False)[0]
+      result = evaluator.evaluate_maj_multi_per_label(soft=False)[0]
     elif model == 'MAJ-S':
-      result = evaluator.evaluate_maj_per_label(soft=True)[0]
+      result = evaluator.evaluate_maj_multi_per_label(soft=True)[0]
     else:
       with tf.Graph().as_default():
         train_data = data.to_train(shuffle=True)
@@ -101,10 +101,10 @@ def train_eval_predictors(args, dataset, time_stamp):
         learner = learner_fn(model, dataset)
         learner.train(
           dataset=train_dataset,
-          batch_size=128,
+          batch_size=256,
           warm_start=True,
-          max_m_steps=1000,
-          max_em_steps=10,
+          max_m_steps=2000,
+          max_em_steps=20,
           max_marginal_steps=0,
           log_m_steps=None,
           use_progress_bar=True)
@@ -138,7 +138,7 @@ def train_eval_predictors(args, dataset, time_stamp):
 def run_experiment(num_proc=1):
   reset_seed()
 
-  dataset = 'wordsim'
+  dataset = 'age'
   working_dir = os.getcwd()
   data_dir = os.path.join(working_dir, os.pardir, 'data')
   results_dir = os.path.join(working_dir, os.pardir, 'results')
@@ -161,24 +161,78 @@ def run_experiment(num_proc=1):
     num_predictors = [1, 2, 5, 10]
     num_repetitions = [20, 10, 5, 1]
     results_path = os.path.join(results_dir, 'wordsim.csv')
+  elif dataset is 'age':
+    dataset = AgeLoader.load(data_dir, load_features=True)
+    num_predictors = [1, 2, 5, 10, 20, 50, 100, 165]
+    num_repetitions = [20, 20, 20, 20, 10, 10, 3, 1]
+    results_path = os.path.join(results_dir, 'age.csv')
   else:
     raise NotImplementedError
 
   models = {
     'MAJ': 'MAJ',
-    'MMCE-M (γ=0.25)': MMCE_M(dataset, gamma=0.25),
+    # TODO: make it work for multi-class case.
+    # 'MMCE-M (γ=0.25)': MMCE_M(dataset, gamma=0.25),
     'LNL[4]': MultiClassLNL(
-      dataset=dataset, instances_emb_size=4,
-      predictors_emb_size=4, q_latent_size=1, gamma=0.00),
+      dataset=dataset,
+      instances_emb_size=4,
+      predictors_emb_size=4,
+      q_latent_size=1,
+      gamma=0.00),
+    'LNL[4] (γ=0.25)': MultiClassLNL(
+      dataset=dataset,
+      instances_emb_size=4,
+      predictors_emb_size=4,
+      q_latent_size=1,
+      gamma=0.25),
+    'LNL[4] (γ=0.50)': MultiClassLNL(
+      dataset=dataset,
+      instances_emb_size=4,
+      predictors_emb_size=4,
+      q_latent_size=1,
+      gamma=0.50),
     'LNL[16]': MultiClassLNL(
-      dataset=dataset, instances_emb_size=16,
-      predictors_emb_size=16, q_latent_size=1, gamma=0.00),
-    'LNL-F[16]': MultiClassLNL(
-      dataset=dataset, instances_emb_size=None,
+      dataset=dataset,
+      instances_emb_size=16,
       predictors_emb_size=16,
-      instances_hidden=[16, 16, 16, 16],
+      q_latent_size=1,
+      gamma=0.00),
+    'LNL[16] (γ=0.25)': MultiClassLNL(
+      dataset=dataset,
+      instances_emb_size=16,
+      predictors_emb_size=16,
+      q_latent_size=1,
+      gamma=0.25),
+    'LNL[16] (γ=0.50)': MultiClassLNL(
+      dataset=dataset,
+      instances_emb_size=16,
+      predictors_emb_size=16,
+      q_latent_size=1,
+      gamma=0.50),
+    'LNL-F[16, 16]': MultiClassLNL(
+      dataset=dataset,
+      instances_emb_size=None,
+      predictors_emb_size=16,
+      instances_hidden=[16, 16],
       predictors_hidden=[],
-      q_latent_size=1, gamma=0.00)
+      q_latent_size=1,
+      gamma=0.00),
+    'LNL-F[16, 16] (γ=0.25)': MultiClassLNL(
+      dataset=dataset,
+      instances_emb_size=None,
+      predictors_emb_size=16,
+      instances_hidden=[16, 16],
+      predictors_hidden=[],
+      q_latent_size=1,
+      gamma=0.25),
+    'LNL-F[16, 16] (γ=0.50)': MultiClassLNL(
+      dataset=dataset,
+      instances_emb_size=None,
+      predictors_emb_size=16,
+      instances_hidden=[16, 16],
+      predictors_hidden=[],
+      q_latent_size=1,
+      gamma=0.50),
   }
 
   results = pd.DataFrame(
@@ -243,4 +297,4 @@ def run_experiment(num_proc=1):
 
 
 if __name__ == '__main__':
-  run_experiment(num_proc=16)
+  run_experiment(num_proc=12)

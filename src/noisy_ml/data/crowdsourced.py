@@ -294,8 +294,12 @@ class AgeLoader(object):
       predicted_labels[0][ai] = (keys, values)
 
     if load_features:
-      # TODO
-      instance_features = None
+      f_file = os.path.join(data_dir, 'vgg16_features.npz')
+      f_contents = np.load(f_file)
+      ids = f_contents['arr_0']
+      features = f_contents['arr_1']
+      features = dict(zip(ids, features))
+      instance_features = [features[i] for i in instances]
     else:
       instance_features = None
 

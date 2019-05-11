@@ -34,6 +34,23 @@ class RelationExtractionLoader(object):
            ["CAUSES", "TREATS"].
     """
 
+    RELATIONS = (
+        "ASSOCIATED_WITH",
+        "CAUSES",
+        "CONTRAINDICATES",
+        "DIAGNOSE_BY_TEST_OR_DRUG",
+        "IS_A",
+        "LOCATION",
+        "MANIFESTATION",
+        "NONE",
+        "PART_OF",
+        "PREVENTS",
+        "SIDE_EFFECT",
+        "SYMPTOM",
+        "TREATS",
+        "OTHER",
+    )
+
     @staticmethod
     def load_ground_truth(data_dir):
         names = {"cause": "CAUSES", "treat": "TREATS"}
@@ -41,7 +58,7 @@ class RelationExtractionLoader(object):
         ground_truth = {}
         for relation in ["cause", "treat"]:
             gt_path = os.path.join(
-                data_dir, "train_dev_test", "ground_truth_%s.xlsx" % relation
+                data_dir, "ground_truth", "ground_truth_%s.xlsx" % relation
             )
             gt_df = pd.read_excel(gt_path)
 
@@ -56,7 +73,7 @@ class RelationExtractionLoader(object):
 
     @staticmethod
     def load_crowdsourced(data_dir):
-        crowdsourced_dir = os.path.join(data_dir, "raw", "relex")
+        crowdsourced_dir = os.path.join(data_dir, "raw", "RelEx")
         work_feature_names = ["_channel", "_trust", "_country"]
         sent_feature_names = ["sentence", "term1", "term2"]
 
@@ -67,10 +84,7 @@ class RelationExtractionLoader(object):
         for batch_path in glob.glob(os.path.join(crowdsourced_dir, "*.csv")):
             batch_df = pd.read_csv(batch_path)
             # Sentence ids and features.
-            batch_sids = list(map(
-                lambda x: int(x.split("-")[0]),
-                batch_df["sent_id"].values
-            ))
+            batch_sids = batch_df["sent_id"].values.tolist()
             batch_sfeats = batch_df[sent_feature_names].values.tolist()
             sentence_ids.extend(batch_sids)
             sentence_features.extend(batch_sfeats)
@@ -87,6 +101,12 @@ class RelationExtractionLoader(object):
                 batch_df["relations"].values
             ))
             relations.extend(batch_relations)
+
+        # Clean up sentence ids (make all of them ints).
+        sentence_ids = [
+            int(sid.split("-")[0]) if isinstance(sid, str) else sid
+            for sid in sentence_ids
+        ]
 
         # Determine unique relations.
         unique_relations = set([r for r_list in relations for r in r_list])
@@ -107,16 +127,16 @@ class RelationExtractionLoader(object):
         return crowdsourced
 
     @staticmethod
-    def load_bert_features(data_dir, sentence_descriptions):
+    def load_bert_features(data_dir, descriptions):
         features_dir = os.path.join(data_dir, "bert")
         features_path = os.path.join(features_dir, "sentence_features.txt")
 
         # Compute features, if do not exist.
         if not os.path.exists(features_path):
             os.makedirs(features_dir, exist_ok=True)
-            bc = BertClient(ip="128.2.204.114")
+            bc = BertClient(ip="localhost")
             with open(features_path, "w") as f:
-                for sentence, term1, term2 in sentence_descriptions:
+                for sentence, term1, term2 in descriptions:
                     terms12 = "%s and %s" % (term1, term2)
                     line_features = bc.encode(["%s ||| %s" % (sentence, terms12)])[0]
                     line_features_str = " ".join(map(str, line_features.tolist()))
@@ -133,14 +153,16 @@ class RelationExtractionLoader(object):
 
     @staticmethod
     def load(data_dir, load_relations=("CAUSES", "TREATS"), load_features=True):
+        data_dir = os.path.join(data_dir, "crowdsourced", "medical_relations")
+
         """Loads data."""
         ground_truth = RelationExtractionLoader.load_ground_truth(data_dir)
         crowdsourced = RelationExtractionLoader.load_crowdsourced(data_dir)
         unique_relations = crowdsourced["relations"][-1]
 
         # Convert everything to the required format.
-        instances = [sid for sid, _ in crowdsourced["sentences"]]
-        predictors = [wid for wid, _ in crowdsourced["workers"]]
+        instances = sorted(set(crowdsourced["sentences"][0]))
+        predictors = sorted(set(crowdsourced["workers"][0]))
         labels = [unique_relations.index(r) for r in load_relations]
         num_classes = [2 for _ in labels]
 
@@ -150,26 +172,31 @@ class RelationExtractionLoader(object):
             true_labels[gt_key_id] = dict(zip(*gt_val))
 
         # Extract annotations.
-        predicted_labels = defaultdict(defaultdict(list))
+        predicted_labels = {}
         crowdsourced_data = (
             crowdsourced["sentences"][:1] +
             crowdsourced["workers"][:1] +
             crowdsourced["relations"][1:2]
         )
-        for l in labels:
-            for sid, wid, rid in zip(*crowdsourced_data):
-                predicted_labels[l][wid].append((sid, int(l in rid)))
-            predicted_labels[l][wid] = tuple(zip(*predicted_labels[l][wid]))
+        for lid, l in enumerate(labels):
+            predicted_labels[lid] = defaultdict(list)
+            for s, w, rlist in zip(*crowdsourced_data):
+                wid = predictors.index(w)
+                predicted_labels[lid][wid].append((s, int(l in rlist)))
+            for wid in range(len(predictors)):
+                predicted_labels[lid][wid] = list(zip(*predicted_labels[lid][wid]))
 
         # Load features.
         if load_features:
             sentence_ids = crowdsourced["sentences"][0]
             sentence_descriptions = crowdsourced["sentences"][1]
-            sentence_features = RelationExtractionLoader.load_bert_features(
-                data_dir, sentence_descriptions
+            instance_descriptions = [
+                sentence_descriptions[sentence_ids.index(i)]
+                for i in instances
+            ]
+            instance_features = RelationExtractionLoader.load_bert_features(
+                data_dir, instance_descriptions
             )
-            features = dict(zip(sentence_ids, sentence_features))
-            instance_features = [features[i] for i in instances]
         else:
             instance_features = None
 

@@ -177,7 +177,7 @@ class Evaluator(object):
 
     return results
 
-  def evaluate_maj_multi_per_label(self, soft=False):
+  def evaluate_maj_multi_per_label(self, soft=False, eps=1e-10):
     """Evaluates MAJ for each multi-class label."""
     del soft  # Unused.
 
@@ -187,25 +187,27 @@ class Evaluator(object):
     for l_id, nc in enumerate(self.dataset.num_classes):
       # Get a dict of all predictions for each instance.
       all_predictions = dict()
-      for p, indices_values in six.iteritems(self.dataset.predicted_labels[l_id]):
+      for i in self.dataset.instance_indices():
+        all_predictions[i] = []
+      for indices_values in six.itervalues(self.dataset.predicted_labels[l_id]):
         for i, v in zip(*indices_values):
           v = int(np.round(v)) if isinstance(v, float) else v
-          if i not in all_predictions:
-            all_predictions[i] = list()
           all_predictions[i].append(v)
-      for i in range(len(self.dataset.instances)):
-        if i not in all_predictions:
-          all_predictions[i] = []
 
-      # Get ground truth and predictions.
+      # Get predictions.
+      gt_indices = []
       ground_truth = []
       predictions = []
-      for i, values in six.iteritems(all_predictions):
-        ground_truth.append(self.dataset.true_labels[l_id][i])
+      for i in self.dataset.instance_indices():
+        values = all_predictions[i]
         pred = np.zeros(nc)
         for v in values:
           pred[v] += 1
         predictions.append(pred)
+        if i in self.dataset.true_labels[l_id]:
+          gt = self.dataset.true_labels[l_id][i]
+          gt_indices.append(i)
+          ground_truth.append(gt)
 
       # Get predictor qualities.
       confusions_with_maj = dict()
@@ -216,7 +218,7 @@ class Evaluator(object):
           v = int(np.round(v)) if isinstance(v, float) else v
           maj = np.argmax(predictions[i])
           confusions_with_maj[p_id][maj, v] += 1
-        confusions_with_maj[p_id] /= confusions_with_maj[p_id].sum(-1, keepdims=True)
+        confusions_with_maj[p_id] /= (confusions_with_maj[p_id].sum(-1, keepdims=True) + eps)
 
       gt = np.array(ground_truth, np.int32)
       p = np.array(predictions, np.float32)
@@ -230,8 +232,8 @@ class Evaluator(object):
       results.append(Result(
         mad_error_rank=compute_mad_error_rank(pc, tc),
         mad_error=compute_mad_error(pc, tc),
-        accuracy=compute_accuracy(p, gt),
-        auc=compute_auc(p, gt),
+        accuracy=compute_accuracy(p[gt_indices], gt),
+        auc=compute_auc(p[gt_indices], gt),
       ))
 
     return results

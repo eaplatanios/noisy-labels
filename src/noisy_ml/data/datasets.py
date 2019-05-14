@@ -197,7 +197,7 @@ class Dataset(object):
 
       # Filter the true labels.
       true_labels[l] = dict()
-      for i_old, true_label in six.iteritems(self.true_labels[label]):
+      for i_old, true_label in six.iteritems(self.true_labels[l_old]):
         i = i_indices.get(i_old)
         if i is None:
           i = len(instances)
@@ -288,7 +288,7 @@ class Dataset(object):
 
       # Filter the true labels.
       true_labels[l] = dict()
-      for i_old, true_label in six.iteritems(self.true_labels[label]):
+      for i_old, true_label in six.iteritems(self.true_labels[l]):
         if keep_instances:
           i = i_old
         else:
@@ -377,7 +377,7 @@ class Dataset(object):
     num_total = np.array(num_total, np.float32)
     return num_confused / num_total
 
-  def compute_confusions(self):
+  def compute_confusions(self, eps=1e-10):
     """Computes true empirical confusions for the annotators."""
     confusions = []
     for l_id, nc in enumerate(self.num_classes):
@@ -387,6 +387,8 @@ class Dataset(object):
           confusions[l_id].append(np.zeros((nc, nc), dtype=np.float32))
           # Count confusions.
           for i, v in zip(*indices_values):
+            if i not in ground_truth:
+              continue
             v = int(np.round(v)) if isinstance(v, float) else v
             if isinstance(ground_truth[i], float):
               gt = int(np.round(ground_truth[i]))
@@ -394,5 +396,5 @@ class Dataset(object):
               gt = ground_truth[i]
             confusions[l_id][p_id][gt, v] += 1
           # Normalize the confusion matrix.
-          confusions[l_id][p_id] /= confusions[l_id][p_id].sum(-1, keepdims=True)
+          confusions[l_id][p_id] /= (confusions[l_id][p_id].sum(-1, keepdims=True) + eps)
     return np.asarray(confusions)

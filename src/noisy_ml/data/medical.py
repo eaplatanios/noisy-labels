@@ -67,7 +67,8 @@ class RelationExtractionLoader(object):
             sentence_ids = gt_df.ix[index]["SID"].values
             baseline = gt_df.ix[index]["baseline"].values
             expert = gt_df.ix[index]["expert"].values
-            ground_truth[names[relation]] = (sentence_ids, baseline * expert)
+            gt_labels = ((baseline * expert) > 0).astype(np.int32)
+            ground_truth[names[relation]] = (sentence_ids, gt_labels)
 
         return ground_truth
 
@@ -167,12 +168,15 @@ class RelationExtractionLoader(object):
         num_classes = [2 for _ in labels]
 
         true_labels = {}
-        for gt_key, gt_val in ground_truth.items():
-            gt_key_id = unique_relations.index(gt_key)
-            true_labels[gt_key_id] = dict(zip(*gt_val))
+        for relation in load_relations:
+            label_id = labels.index(unique_relations.index(relation))
+            true_labels[label_id] = dict([
+                (instances.index(sid), gt_label)
+                for sid, gt_label in zip(*ground_truth[relation])
+            ])
 
         # Extract annotations.
-        predicted_labels = {}
+        predicted_labels = dict()
         crowdsourced_data = (
             crowdsourced["sentences"][:1] +
             crowdsourced["workers"][:1] +
@@ -180,11 +184,12 @@ class RelationExtractionLoader(object):
         )
         for lid, l in enumerate(labels):
             predicted_labels[lid] = defaultdict(list)
-            for s, w, rlist in zip(*crowdsourced_data):
-                wid = predictors.index(w)
-                predicted_labels[lid][wid].append((s, int(l in rlist)))
-            for wid in range(len(predictors)):
-                predicted_labels[lid][wid] = list(zip(*predicted_labels[lid][wid]))
+            for sid, wid, rlist in zip(*crowdsourced_data):
+                iid = instances.index(sid)
+                pid = predictors.index(wid)
+                predicted_labels[lid][pid].append((iid, int(l in rlist)))
+            for pid in range(len(predictors)):
+                predicted_labels[lid][pid] = list(zip(*predicted_labels[lid][pid]))
 
         # Load features.
         if load_features:

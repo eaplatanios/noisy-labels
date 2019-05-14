@@ -27,6 +27,7 @@ from functools import partial
 from itertools import product
 
 from noisy_ml.data.crowdsourced import *
+from noisy_ml.data.medical import *
 from noisy_ml.data.rte import *
 from noisy_ml.data.wordsim import *
 from noisy_ml.evaluation.metrics import *
@@ -138,7 +139,7 @@ def train_eval_predictors(args, dataset, time_stamp):
 def run_experiment(num_proc=1):
   reset_seed()
 
-  dataset = 'age'
+  dataset = 'medical-causes'
   working_dir = os.getcwd()
   data_dir = os.path.join(working_dir, os.pardir, 'data')
   results_dir = os.path.join(working_dir, os.pardir, 'results')
@@ -166,6 +167,30 @@ def run_experiment(num_proc=1):
     num_predictors = [1, 2, 5, 10, 20, 50, 100, 165]
     num_repetitions = [20, 20, 20, 20, 10, 10, 3, 1]
     results_path = os.path.join(results_dir, 'age.csv')
+  elif dataset is 'medical-causes':
+    relations = ('CAUSES',)
+    dataset = RelationExtractionLoader.load(
+      data_dir, relations, load_features=True
+    )
+    num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
+    num_repetitions = [20, 20, 20, 20, 10, 5, 3, 1]
+    results_path = os.path.join(results_dir, 'medical-causes.csv')
+  elif dataset is 'medical-treats':
+    relations = ('TREATS',)
+    dataset = RelationExtractionLoader.load(
+      data_dir, relations, load_features=True
+    )
+    num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
+    num_repetitions = [20, 20, 20, 20, 10, 5, 3, 1]
+    results_path = os.path.join(results_dir, 'medical-treats.csv')
+  elif dataset is 'medical-causes-treats':
+    relations = ('CAUSES', 'TREATS',)
+    dataset = RelationExtractionLoader.load(
+      data_dir, relations, load_features=True
+    )
+    num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
+    num_repetitions = [20, 20, 20, 20, 10, 5, 3, 1]
+    results_path = os.path.join(results_dir, 'medical-causes-treats.csv')
   else:
     raise NotImplementedError
 
@@ -173,58 +198,18 @@ def run_experiment(num_proc=1):
     'MAJ': 'MAJ',
     # TODO: make it work for multi-class case.
     # 'MMCE-M (γ=0.25)': MMCE_M(dataset, gamma=0.25),
-    'LNL[4]': MultiClassLNL(
+    'LNL[4] (γ=0.75)': MultiClassLNL(
       dataset=dataset,
       instances_emb_size=4,
       predictors_emb_size=4,
       q_latent_size=1,
-      gamma=0.00),
-    'LNL[4] (γ=0.25)': MultiClassLNL(
+      gamma=0.75),
+    'LNL[4] (γ=1.00)': MultiClassLNL(
       dataset=dataset,
       instances_emb_size=4,
       predictors_emb_size=4,
       q_latent_size=1,
-      gamma=0.25),
-    'LNL[4] (γ=0.50)': MultiClassLNL(
-      dataset=dataset,
-      instances_emb_size=4,
-      predictors_emb_size=4,
-      q_latent_size=1,
-      gamma=0.50),
-    'LNL[16]': MultiClassLNL(
-      dataset=dataset,
-      instances_emb_size=16,
-      predictors_emb_size=16,
-      q_latent_size=1,
-      gamma=0.00),
-    'LNL[16] (γ=0.25)': MultiClassLNL(
-      dataset=dataset,
-      instances_emb_size=16,
-      predictors_emb_size=16,
-      q_latent_size=1,
-      gamma=0.25),
-    'LNL[16] (γ=0.50)': MultiClassLNL(
-      dataset=dataset,
-      instances_emb_size=16,
-      predictors_emb_size=16,
-      q_latent_size=1,
-      gamma=0.50),
-    'LNL-F[16, 16]': MultiClassLNL(
-      dataset=dataset,
-      instances_emb_size=None,
-      predictors_emb_size=16,
-      instances_hidden=[16, 16],
-      predictors_hidden=[],
-      q_latent_size=1,
-      gamma=0.00),
-    'LNL-F[16, 16] (γ=0.25)': MultiClassLNL(
-      dataset=dataset,
-      instances_emb_size=None,
-      predictors_emb_size=16,
-      instances_hidden=[16, 16],
-      predictors_hidden=[],
-      q_latent_size=1,
-      gamma=0.25),
+      gamma=1.00),
     'LNL-F[16, 16] (γ=0.50)': MultiClassLNL(
       dataset=dataset,
       instances_emb_size=None,
@@ -233,6 +218,38 @@ def run_experiment(num_proc=1):
       predictors_hidden=[],
       q_latent_size=1,
       gamma=0.50),
+    'LNL-F[16, 16] (γ=0.75)': MultiClassLNL(
+      dataset=dataset,
+      instances_emb_size=None,
+      predictors_emb_size=16,
+      instances_hidden=[16, 16],
+      predictors_hidden=[],
+      q_latent_size=1,
+      gamma=0.75),
+    'LNL-F[16, 16] (γ=1.00)': MultiClassLNL(
+      dataset=dataset,
+      instances_emb_size=None,
+      predictors_emb_size=16,
+      instances_hidden=[16, 16],
+      predictors_hidden=[],
+      q_latent_size=1,
+      gamma=1.00),
+    'LNL-F[16, 16]-QL-2 (γ=0.50)': MultiClassLNL(
+      dataset=dataset,
+      instances_emb_size=None,
+      predictors_emb_size=16,
+      instances_hidden=[16, 16],
+      predictors_hidden=[],
+      q_latent_size=2,
+      gamma=0.50),
+    'LNL-F[32, 32] (γ=1.00)': MultiClassLNL(
+      dataset=dataset,
+      instances_emb_size=None,
+      predictors_emb_size=32,
+      instances_hidden=[32, 32],
+      predictors_hidden=[],
+      q_latent_size=1,
+      gamma=1.00),
   }
 
   results = pd.DataFrame(
@@ -297,4 +314,4 @@ def run_experiment(num_proc=1):
 
 
 if __name__ == '__main__':
-  run_experiment(num_proc=12)
+  run_experiment(num_proc=1)

@@ -314,4 +314,4 @@ def run_experiment(num_proc=1):
 
 
 if __name__ == '__main__':
-  run_experiment(num_proc=1)
+  run_experiment(num_proc=4)

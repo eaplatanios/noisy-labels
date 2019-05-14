@@ -57,13 +57,11 @@ def compute_auc(predictions, true_labels):
 
 
 class Result(object):
-  def __init__(
-      self, mad_error_rank, mad_error,
-      accuracy, auc):
-    self.mad_error_rank = mad_error_rank
-    self.mad_error = mad_error
+  def __init__(self, accuracy, auc, mad_error=None, mad_error_rank=None):
     self.accuracy = accuracy
     self.auc = auc
+    self.mad_error = mad_error
+    self.mad_error_rank = mad_error_rank
 
   def __str__(self):
     return 'MAD Error Rank = %7.4f, MAD Error = %6.4f, Accuracy = %6.4f, AUC = %6.4f' % \
@@ -75,10 +73,11 @@ class Result(object):
   @staticmethod
   def merge(results):
     return Result(
-      mad_error_rank=np.mean([r.mad_error_rank for r in results]),
-      mad_error=np.mean([r.mad_error for r in results]),
+      # mad_error_rank=np.mean([r.mad_error_rank for r in results]),
+      # mad_error=np.mean([r.mad_error for r in results]),
       accuracy=np.mean([r.accuracy for r in results]),
-      auc=np.mean([r.auc for r in results]))
+      auc=np.mean([r.auc for r in results]),
+    )
 
   def log(self, prefix=None):
     message = str(self)
@@ -101,24 +100,25 @@ class Evaluator(object):
     predictions = learner.predict(instances, batch_size=batch_size)
 
     # predicted_qualities shape: [NumLabels, NumPredictors]
-    # true_qualities shape:      [NumLabels, NumPredictors]
     predicted_qualities = np.mean(
       learner.qualities(
           instances, predictors, labels,
           batch_size=batch_size),
       axis=0)
-    true_qualities = self.dataset.compute_binary_qualities()
+
+    # true_qualities shape:      [NumLabels, NumPredictors]
+    # true_qualities = self.dataset.compute_binary_qualities()
 
     results = []
     for l in range(len(predictions)):
       l_instances = list(six.iterkeys(self.dataset.true_labels[l]))
       tl = [self.dataset.true_labels[l][i] for i in l_instances]
       p = predictions[l][l_instances]
-      pq = predicted_qualities[l]
-      tq = true_qualities[l]
+      # pq = predicted_qualities[l]
+      # tq = true_qualities[l]
       results.append(Result(
-        mad_error_rank=compute_mad_error_rank(pq, tq),
-        mad_error=compute_mad_error(pq, tq),
+        # mad_error_rank=compute_mad_error_rank(pq, tq),
+        # mad_error=compute_mad_error(pq, tq),
         accuracy=compute_accuracy(p, tl),
         auc=compute_auc(p, tl)))
 
@@ -209,29 +209,30 @@ class Evaluator(object):
           gt_indices.append(i)
           ground_truth.append(gt)
 
-      # Get predictor qualities.
-      confusions_with_maj = dict()
-      for p_id, indices_values in six.iteritems(self.dataset.predicted_labels[l_id]):
-        if p_id not in confusions_with_maj:
-          confusions_with_maj[p_id] = np.zeros((nc, nc), dtype=np.float32)
-        for i, v in zip(*indices_values):
-          v = int(np.round(v)) if isinstance(v, float) else v
-          maj = np.argmax(predictions[i])
-          confusions_with_maj[p_id][maj, v] += 1
-        confusions_with_maj[p_id] /= (confusions_with_maj[p_id].sum(-1, keepdims=True) + eps)
-
       gt = np.array(ground_truth, np.int32)
       p = np.array(predictions, np.float32)
-      pc = np.array(list(map(
-        lambda kv: kv[1],
-        sorted(
-          six.iteritems(confusions_with_maj),
-          key=lambda kv: kv[0])
-      )))
-      tc = confusions_with_truth[l_id]
+
+      # Get predictor qualities.
+      # confusions_with_maj = dict()
+      # for p_id, indices_values in six.iteritems(self.dataset.predicted_labels[l_id]):
+      #   if p_id not in confusions_with_maj:
+      #     confusions_with_maj[p_id] = np.zeros((nc, nc), dtype=np.float32)
+      #   for i, v in zip(*indices_values):
+      #     v = int(np.round(v)) if isinstance(v, float) else v
+      #     maj = np.argmax(predictions[i])
+      #     confusions_with_maj[p_id][maj, v] += 1
+      #   confusions_with_maj[p_id] /= (confusions_with_maj[p_id].sum(-1, keepdims=True) + eps)
+
+      # pc = np.array(list(map(
+      #   lambda kv: kv[1],
+      #   sorted(
+      #     six.iteritems(confusions_with_maj),
+      #     key=lambda kv: kv[0])
+      # )))
+      # tc = confusions_with_truth[l_id]
       results.append(Result(
-        mad_error_rank=compute_mad_error_rank(pc, tc),
-        mad_error=compute_mad_error(pc, tc),
+        # mad_error_rank=compute_mad_error_rank(pc, tc),
+        # mad_error=compute_mad_error(pc, tc),
         accuracy=compute_accuracy(p[gt_indices], gt),
         auc=compute_auc(p[gt_indices], gt),
       ))

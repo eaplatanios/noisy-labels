@@ -19,6 +19,6 @@ from . import datasets
 from . import nell
 from . import rte
 
-__author__ = 'eaplatanios'
+__author__ = "eaplatanios"
 
-__all__ = ['crowdsourced', 'datasets', 'nell', 'rte']
+__all__ = ["crowdsourced", "datasets", "nell", "rte"]

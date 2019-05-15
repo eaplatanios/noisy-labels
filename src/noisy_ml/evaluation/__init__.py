@@ -16,6 +16,6 @@ from __future__ import absolute_import, division, print_function
 
 from . import metrics
 
-__author__ = 'eaplatanios'
+__author__ = "eaplatanios"
 
-__all__ = ['metrics']
+__all__ = ["metrics"]

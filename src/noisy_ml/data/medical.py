@@ -97,10 +97,12 @@ class RelationExtractionLoader(object):
             worker_features.extend(batch_wfeats)
 
             # Crowdsourced relations.
-            batch_relations = list(map(
-                lambda x: [s[1:-1] for s in x.split()],
-                batch_df["relations"].values
-            ))
+            batch_relations = list(
+                map(
+                    lambda x: [s[1:-1] for s in x.split()],
+                    batch_df["relations"].values,
+                )
+            )
             relations.extend(batch_relations)
 
         # Clean up sentence ids (make all of them ints).
@@ -115,8 +117,7 @@ class RelationExtractionLoader(object):
 
         # Index relations.
         relation_ids = [
-            [unique_relations.index(r) for r in r_list]
-            for r_list in relations
+            [unique_relations.index(r) for r in r_list] for r_list in relations
         ]
 
         crowdsourced = {
@@ -139,8 +140,12 @@ class RelationExtractionLoader(object):
             with open(features_path, "w") as f:
                 for sentence, term1, term2 in descriptions:
                     terms12 = "%s and %s" % (term1, term2)
-                    line_features = bc.encode(["%s ||| %s" % (sentence, terms12)])[0]
-                    line_features_str = " ".join(map(str, line_features.tolist()))
+                    line_features = bc.encode(
+                        ["%s ||| %s" % (sentence, terms12)]
+                    )[0]
+                    line_features_str = " ".join(
+                        map(str, line_features.tolist())
+                    )
                     f.write(line_features_str + "\n")
 
         # Load features.
@@ -170,17 +175,19 @@ class RelationExtractionLoader(object):
         true_labels = {}
         for relation in load_relations:
             label_id = labels.index(unique_relations.index(relation))
-            true_labels[label_id] = dict([
-                (instances.index(sid), gt_label)
-                for sid, gt_label in zip(*ground_truth[relation])
-            ])
+            true_labels[label_id] = dict(
+                [
+                    (instances.index(sid), gt_label)
+                    for sid, gt_label in zip(*ground_truth[relation])
+                ]
+            )
 
         # Extract annotations.
         predicted_labels = dict()
         crowdsourced_data = (
-            crowdsourced["sentences"][:1] +
-            crowdsourced["workers"][:1] +
-            crowdsourced["relations"][1:2]
+            crowdsourced["sentences"][:1]
+            + crowdsourced["workers"][:1]
+            + crowdsourced["relations"][1:2]
         )
         for lid, l in enumerate(labels):
             predicted_labels[lid] = defaultdict(list)
@@ -189,15 +196,16 @@ class RelationExtractionLoader(object):
                 pid = predictors.index(wid)
                 predicted_labels[lid][pid].append((iid, int(l in rlist)))
             for pid in range(len(predictors)):
-                predicted_labels[lid][pid] = list(zip(*predicted_labels[lid][pid]))
+                predicted_labels[lid][pid] = list(
+                    zip(*predicted_labels[lid][pid])
+                )
 
         # Load features.
         if load_features:
             sentence_ids = crowdsourced["sentences"][0]
             sentence_descriptions = crowdsourced["sentences"][1]
             instance_descriptions = [
-                sentence_descriptions[sentence_ids.index(i)]
-                for i in instances
+                sentence_descriptions[sentence_ids.index(i)] for i in instances
             ]
             instance_features = RelationExtractionLoader.load_bert_features(
                 data_dir, instance_descriptions
@@ -206,7 +214,11 @@ class RelationExtractionLoader(object):
             instance_features = None
 
         return Dataset(
-            instances, predictors, labels,
-            true_labels, predicted_labels,
+            instances,
+            predictors,
+            labels,
+            true_labels,
+            predicted_labels,
             num_classes=num_classes,
-            instance_features=instance_features)
+            instance_features=instance_features,
+        )

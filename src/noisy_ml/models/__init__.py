@@ -20,7 +20,6 @@ from . import learners
 from . import models
 from . import utilities
 
-__author__ = 'eaplatanios'
+__author__ = "eaplatanios"
 
-__all__ = [
-  'amsgrad', 'layers', 'learners', 'models', 'utilities']
+__all__ = ["amsgrad", "layers", "learners", "models", "utilities"]

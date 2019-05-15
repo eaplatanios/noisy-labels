@@ -77,7 +77,7 @@ class WordSimLoader(object):
     def load(data_dir, load_features=True):
         # Load data.
         data_dir = os.path.join(data_dir, "wordsim")
-        df = pd.read_table(os.path.join(data_dir, "original.tsv"))
+        df = pd.read_csv(os.path.join(data_dir, "original.tsv"), sep="\t")
 
         # Extract instances and predictors.
         instances = df["orig_id"].unique().astype(str).tolist()

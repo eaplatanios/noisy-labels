@@ -116,7 +116,7 @@ class LNL(Model):
     def build(self, instances, predictors, labels):
         if (
             self.dataset.instance_features is None
-            or self.instances_emb_size is not None
+            or self.instances_emb_size > 0
         ):
             instances = Embedding(
                 num_inputs=len(self.dataset.instances),
@@ -225,10 +225,7 @@ class MultiClassLNL(Model):
         self.gamma = gamma
 
     def build(self, instances, predictors, labels):
-        """Builds ops.
-
-    TODO: refactor into sub-functions + factor out network creation code into `networks` module.
-    """
+        """Builds ops."""
         if (
             self.dataset.instance_features is None
             or self.instances_emb_size is not None
@@ -297,7 +294,8 @@ class MultiClassLNL(Model):
         # If annotator confusions are modeled as instance-independent.
         if self.q_latent_size is None:
             with tf.variable_scope("q_fn"):
-                # Confusions is a list of num_labels tensors log-normalized along the last axis:
+                # Confusions is a list of num_labels tensors log-normalized
+                # along the last axis:
                 # <float32> [batch_size, num_classes, num_classes].
                 confusions = []
                 for pqc in pre_q_confusions:
@@ -329,7 +327,8 @@ class MultiClassLNL(Model):
 
             with tf.variable_scope("q_fn_d_fn"):
                 # Combine pre_q_confusions and pre_d_confusions.
-                # Confusions is a list of num_labels tensors log-normalized along the last axis:
+                # Confusions is a list of num_labels tensors log-normalized
+                # along the last axis:
                 # <float32> [batch_size, num_classes, num_classes].
                 confusions = []
                 for pqc, pdc in zip(pre_q_confusions, pre_d_confusions):

@@ -57,7 +57,7 @@ def learner_fn(
     learner_cls=EMLearner,
     config_cls=MultiLabelMultiClassEMConfig,
     optimizer="amsgrad",
-    optimizer_kwargs=("lr", 1e-3),
+    optimizer_kwargs=(("learning_rate", 1e-3),),
 ):
     if optimizer == "amsgrad":
         optimizer = AMSGrad(**dict(optimizer_kwargs))
@@ -81,30 +81,27 @@ def learner_fn(
 
 def get_dataset_setup(dataset, data_dir, results_dir):
     """Returns experimental setup parameters for the given dataset."""
-    if not os.path.exists(results_dir):
-        os.makedirs(results_dir)
-
-    if dataset is "bluebirds":
+    if dataset == "bluebirds":
         dataset = BlueBirdsLoader.load(data_dir, load_features=True)
         num_predictors = [1, 10, 20, 39]
         num_repetitions = [20, 10, 5, 1]
         results_path = os.path.join(results_dir, "bluebirds.csv")
-    elif dataset is "rte":
+    elif dataset == "rte":
         dataset = RTELoader.load(data_dir, load_features=True)
         num_predictors = [1, 10, 20, 50, 100, 164]
         num_repetitions = [20, 10, 10, 5, 3, 1]
         results_path = os.path.join(results_dir, "rte.csv")
-    elif dataset is "wordsim":
+    elif dataset == "wordsim":
         dataset = WordSimLoader.load(data_dir, load_features=True)
         num_predictors = [1, 2, 5, 10]
         num_repetitions = [20, 10, 5, 1]
         results_path = os.path.join(results_dir, "wordsim.csv")
-    elif dataset is "age":
+    elif dataset == "age":
         dataset = AgeLoader.load(data_dir, load_features=True)
         num_predictors = [1, 2, 5, 10, 20, 50, 100, 165]
         num_repetitions = [20, 20, 20, 20, 10, 10, 3, 1]
         results_path = os.path.join(results_dir, "age.csv")
-    elif dataset is "medical-causes":
+    elif dataset == "medical-causes":
         relations = ("CAUSES",)
         dataset = RelationExtractionLoader.load(
             data_dir, relations, load_features=True
@@ -112,7 +109,7 @@ def get_dataset_setup(dataset, data_dir, results_dir):
         num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
         num_repetitions = [20, 20, 20, 20, 10, 5, 3, 1]
         results_path = os.path.join(results_dir, "medical-causes.csv")
-    elif dataset is "medical-treats":
+    elif dataset == "medical-treats":
         relations = ("TREATS",)
         dataset = RelationExtractionLoader.load(
             data_dir, relations, load_features=True
@@ -120,7 +117,7 @@ def get_dataset_setup(dataset, data_dir, results_dir):
         num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
         num_repetitions = [20, 20, 20, 20, 10, 5, 3, 1]
         results_path = os.path.join(results_dir, "medical-treats.csv")
-    elif dataset is "medical-causes-treats":
+    elif dataset == "medical-causes-treats":
         relations = ("CAUSES", "TREATS")
         dataset = RelationExtractionLoader.load(
             data_dir, relations, load_features=True
@@ -136,7 +133,7 @@ def get_dataset_setup(dataset, data_dir, results_dir):
 
 def get_models(
     dataset,
-    instances_emb_size=(4, None),
+    instances_emb_size=(4, 0),
     instances_hidden=([], [16, 16]),
     predictors_emb_size=(4, 16),
     predictors_hidden=([],),
@@ -145,25 +142,28 @@ def get_models(
 ):
     """Generates a dict of models for the specified parameters."""
     # Generate configurations.
-    configuration_values = list(itertools.product(
-        instances_emb_size,
-        instances_hidden,
-        predictors_emb_size,
-        predictors_hidden,
-        q_latent_size,
-        gamma,
-    ))
-    configuration_names = len(configuration_values) * [[
-        "instances_emb_size",
-        "instances_hidden",
-        "predictors_emb_size",
-        "predictors_hidden",
-        "q_latent_size",
-        "gamma",
-    ]]
+    config_values = list(
+        itertools.product(
+            instances_emb_size,
+            instances_hidden,
+            predictors_emb_size,
+            predictors_hidden,
+            q_latent_size,
+            gamma,
+        )
+    )
+    config_names = len(config_values) * [
+        [
+            "instances_emb_size",
+            "instances_hidden",
+            "predictors_emb_size",
+            "predictors_hidden",
+            "q_latent_size",
+            "gamma",
+        ]
+    ]
     configuration_dicts = map(
-        lambda x: dict(zip(*x)),
-        zip(configuration_names, configuration_values)
+        lambda x: dict(zip(*x)), zip(config_names, config_values)
     )
 
     models = {"MAJ": "MAJ"}
@@ -179,6 +179,7 @@ def get_models(
 
 def train_eval_predictors(
     model,
+    model_name,
     num_predictors,
     num_repetitions,
     dataset,
@@ -201,10 +202,10 @@ def train_eval_predictors(
     )
 
     # Train and evaluate for each set of sampled predictors.
-    for r, predictors in enumerate(predictor_sets, 1):
+    for r, predictors in enumerate(predictor_sets, start=1):
         logger.info(
             "Running repetition %d/%d for %s for %d predictors."
-            % (r, len(predictor_sets), model.name, num_predictors)
+            % (r, len(predictor_sets), model_name, num_predictors)
         )
         data = dataset.filter_predictors(predictors, keep_instances=True)
         evaluator = Evaluator(data)
@@ -246,7 +247,7 @@ def train_eval_predictors(
     accuracies = [r.accuracy for r in results]
     acc_result = {
         "time": time_stamp,
-        "model": model.name,
+        "model": model_name,
         "num_predictors": num_predictors,
         "metric": "accuracy",
         "value_mean": np.mean(accuracies),
@@ -256,7 +257,7 @@ def train_eval_predictors(
     aucs = [r.auc for r in results]
     auc_result = {
         "time": time_stamp,
-        "model": model.name,
+        "model": model_name,
         "num_predictors": num_predictors,
         "metric": "auc",
         "value_mean": np.mean(aucs),

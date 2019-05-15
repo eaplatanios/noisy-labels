@@ -3,7 +3,6 @@
 import itertools
 import logging
 import os
-import six
 
 import random
 import numpy as np
@@ -178,11 +177,11 @@ def get_models(
 
 
 def train_eval_predictors(
+    dataset,
     model,
     model_name,
     num_predictors,
     num_repetitions,
-    dataset,
     batch_size=256,
     max_m_steps=2000,
     max_em_steps=20,

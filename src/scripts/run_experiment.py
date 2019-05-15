@@ -21,7 +21,7 @@ def _parse_int_list(list_str):
     return int_list
 
 
-def _unpack_kwargs(kwargs, f):
+def _unpack(kwargs, f):
     return f(**kwargs)
 
 
@@ -143,14 +143,13 @@ def main(
         gamma=gamma,
     )
 
+    # Setup a DataFrame for results.
     res_cols = ["model", "num_predictors", "metric", "value_mean", "value_std"]
     results = pd.DataFrame(columns=res_cols)
     time_stamp = pd.Timestamp.now()
 
     with futures.ProcessPoolExecutor(num_proc) as executor:
-        func = partial(
-            train_eval_predictors, dataset=dataset, time_stamp=time_stamp
-        )
+        # Generate experiment configurations.
         inputs = [
             (
                 ("model", model),
@@ -164,9 +163,11 @@ def main(
         ]
         seeds = [random.randint(0, 2 ** 20) for _ in range(len(inputs))]
         input_dicts = [dict(x + (("seed", s),)) for x, s in zip(inputs, seeds)]
-        model_results = executor.map(
-            partial(_unpack_kwargs, f=func), input_dicts
-        )
+
+        # Run experiments for each configuration (in parallel).
+        logger.info("Running %d experiments..." % len(input_dicts))
+        func = partial(train_eval_predictors, dataset, time_stamp=time_stamp)
+        model_results = executor.map(partial(_unpack, f=func), input_dicts)
         for n, res in enumerate(model_results, start=1):
             logger.info(
                 "Finished experiment for %d/%d predictors."

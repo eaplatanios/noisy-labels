@@ -25,7 +25,7 @@ __author__ = "eaplatanios"
 logger = logging.getLogger(__name__)
 
 
-def run_experiment():
+def run_experiment(labels=None):
     dataset = "rte"
     working_dir = os.getcwd()
     results_dir = os.path.join(working_dir, os.pardir, "results")
@@ -48,6 +48,8 @@ def run_experiment():
     fig, ax = plt.subplots()
     results_auc = results[results.metric == "accuracy"]
     for label, auc in results_auc.groupby("model"):
+        if labels is not None and label not in labels:
+            continue
         ax.plot(
             auc.num_predictors.astype(np.int32), auc.value_mean, label=label
         )
@@ -64,6 +66,8 @@ def run_experiment():
     fig, ax = plt.subplots()
     results_auc = results[results.metric == "auc"]
     for label, auc in results_auc.groupby("model"):
+        if labels is not None and label not in labels:
+            continue
         ax.plot(
             auc.num_predictors.astype(np.int32), auc.value_mean, label=label
         )

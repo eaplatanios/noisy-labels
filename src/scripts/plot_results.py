@@ -24,7 +24,7 @@ from noisy_ml.models.amsgrad import *
 logger = logging.getLogger(__name__)
 
 
-def plot_results():
+def plot_results(labels=None):
     dataset = "age"
     working_dir = os.getcwd()
     results_dir = os.path.join(working_dir, os.pardir, "results")
@@ -36,6 +36,8 @@ def plot_results():
     fig, ax = plt.subplots()
     results_auc = results[results.metric == "accuracy"]
     for label, auc in results_auc.groupby("model"):
+        if labels is not None and label not in labels:
+            continue
         ax.plot(
             auc.num_predictors.astype(np.int32), auc.value_mean, label=label
         )
@@ -52,6 +54,8 @@ def plot_results():
     fig, ax = plt.subplots()
     results_auc = results[results.metric == "auc"]
     for label, auc in results_auc.groupby("model"):
+        if labels is not None and label not in labels:
+            continue
         ax.plot(
             auc.num_predictors.astype(np.int32), auc.value_mean, label=label
         )

@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: noisy-labels-exp-
+spec:
+  template:
+    spec:
+      containers:
+      - name: experiment-container
+        image: gcr.io/warm-pixel-219323/noisy-labels-tf
+        command: ["/bin/sh"]
+        args: ["-c", "/run-experiment.sh"]
+        volumeMounts:
+        - name: noisy-labels-cluster-volume
+          mountPath: /storage
+      restartPolicy: Never
+      volumes:
+      - name: noisy-labels-cluster-volume
+        persistentVolumeClaim:
+          claimName: noisy-labels-cluster-volume-claim
+          readOnly: false

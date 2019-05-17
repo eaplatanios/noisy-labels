@@ -1,16 +1,17 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Install dependencies.
 pip install -e /storage/code/noisy-ml
 
 # Create a directory for the a new experiment.
+DATASET=wordsim
 DATA_DIR="/storage/data"
-RESULTS_DIR="/storage/results/$(date +'%Y-%m-%d/exp_%H_%M_%S')"
+RESULTS_DIR="/storage/results/${DATASET}"
 mkdir -p ${RESULTS_DIR}
 
 # Run experiment.
 python /storage/code/noisy-ml/src/scripts/run_experiment.py \
-  --dataset-name bluebirds \
+  --dataset-name ${DATASET} \
   --data-dir ${DATA_DIR} \
   --results-dir ${RESULTS_DIR} \
   --instances-emb-size 4 \
@@ -21,6 +22,7 @@ python /storage/code/noisy-ml/src/scripts/run_experiment.py \
   --predictors-emb-size 16 \
   --predictors-hidden "[]" \
   --q-latent-size 1 \
+  --gamma 0.25 \
   --gamma 0.50 \
   --gamma 0.75 \
   --gamma 1.00 \

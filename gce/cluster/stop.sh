@@ -1,8 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-CLUSTER_NAME=noisy-labels-cluster
-ZONE=us-east1-b
+# Source cluster profile.
+source "$(dirname "$0")/.profile"
 
 # Create a container cluster
 gcloud container clusters delete ${CLUSTER_NAME} --zone ${ZONE}
-

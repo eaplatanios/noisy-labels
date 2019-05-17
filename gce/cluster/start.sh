@@ -1,14 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-PROJECT_ID="$(gcloud config get-value project -q)"
-CLUSTER_NAME=noisy-labels-cluster
-DISK_SIZE=16GB
-IMAGE_TYPE=UBUNTU
-MACHINE_TYPE=n1-highcpu-4
-MAX_NODES=8
-MIN_NODES=0
-NUM_NODES=5
-ZONE=us-east1-b
+# Source cluster profile.
+source "$(dirname "$0")/.profile"
 
 # Create a container cluster
 gcloud container clusters create ${CLUSTER_NAME} \

@@ -105,7 +105,7 @@ def k_fold_cv(
                     batch_size=batch_size,
                     warm_start=warm_start,
                     max_m_steps=max_m_steps,
-                    max_em_steps=max_em_steps,
+                    max_em_iters=max_em_steps,
                     log_m_steps=log_m_steps,
                     em_step_callback=em_step_callback,
                 )
@@ -216,7 +216,7 @@ class EMLearner(Learner):
         batch_size=128,
         warm_start=False,
         max_m_steps=1000,
-        max_em_steps=100,
+        max_em_iters=100,
         log_m_steps=100,
         max_marginal_steps=0,
         em_step_callback=None,
@@ -233,7 +233,7 @@ class EMLearner(Learner):
             m_step_dataset
         )
 
-        em_steps_range = range(max_em_steps)
+        em_steps_range = range(max_em_iters)
         if use_progress_bar:
             em_steps_range = tqdm(em_steps_range, "EM Step (%s)" % os.getpid())
 
@@ -588,7 +588,6 @@ class MultiLabelMultiClassEMConfig(EMConfig):
         model,
         optimizer,
         lambda_entropy=0.0,
-        use_soft_maj=True,
         use_soft_y_hat=False,
     ):
         super(MultiLabelMultiClassEMConfig, self).__init__()
@@ -599,7 +598,6 @@ class MultiLabelMultiClassEMConfig(EMConfig):
         self.model = model
         self.optimizer = optimizer
         self.lambda_entropy = lambda_entropy
-        self.use_soft_maj = use_soft_maj
         self.use_soft_y_hat = use_soft_y_hat
 
     def build_ops(self):
@@ -665,7 +663,8 @@ class MultiLabelMultiClassEMConfig(EMConfig):
 
         # Convert values in y_hats.
         # y_hats: list of  <float32> [batch_size, num_classes] for each label.
-        # y_hats[l][i, k] is the probability/indicator that instance i has value k for label l.
+        # y_hats[l][i, k] is the probability/indicator that instance i has
+        # value k for label l.
         y_hats = []
         for l_mask, nc in zip(l_indices_onehot, self.num_classes):
             values_l = tf.boolean_mask(values, l_mask)

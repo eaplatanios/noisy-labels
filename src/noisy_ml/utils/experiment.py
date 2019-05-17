@@ -51,12 +51,14 @@ def sample_predictors(predictors, num_to_sample, num_sets=5):
 
 
 def learner_fn(
-    model,
     dataset,
+    model,
     learner_cls=EMLearner,
     config_cls=MultiLabelMultiClassEMConfig,
     optimizer="amsgrad",
     optimizer_kwargs=(("learning_rate", 1e-3),),
+    lambda_entropy=0.,
+    use_soft_y_hat=False,
 ):
     if optimizer == "amsgrad":
         optimizer = AMSGrad(**dict(optimizer_kwargs))
@@ -70,9 +72,8 @@ def learner_fn(
             num_classes=dataset.num_classes,
             model=model,
             optimizer=optimizer,
-            lambda_entropy=0.0,
-            use_soft_maj=True,
-            use_soft_y_hat=False,
+            lambda_entropy=lambda_entropy,
+            use_soft_y_hat=use_soft_y_hat,
         ),
         predictions_output_fn=np.exp,
     )
@@ -182,13 +183,18 @@ def train_eval_predictors(
     model_name,
     num_predictors,
     num_repetitions,
-    batch_size=256,
-    max_m_steps=2000,
-    max_em_steps=20,
-    max_marginal_steps=0,
+    batch_size=1024,
+    max_em_iters=10,
+    max_m_steps=1000,
+    max_marginal_steps=1000,
+    optimizer="amsgrad",
+    optimizer_kwargs=(("learning_rate", 1e-3),),
     log_m_steps=None,
     warm_start=True,
-    use_progress_bar=True,
+    lambda_entropy=0.,
+    use_soft_maj=False,
+    use_soft_y_hat=False,
+    use_progress_bar=False,
     time_stamp=None,
     seed=None,
 ):
@@ -210,9 +216,7 @@ def train_eval_predictors(
         evaluator = Evaluator(data)
 
         if model == "MAJ":
-            result = evaluator.evaluate_maj_multi_per_label(soft=False)[0]
-        elif model == "MAJ-S":
-            result = evaluator.evaluate_maj_multi_per_label(soft=True)[0]
+            result = evaluator.evaluate_maj_multi_per_label(soft=use_soft_maj)[0]
         else:
             with tf.Graph().as_default():
                 train_data = data.to_train(shuffle=True)
@@ -225,13 +229,20 @@ def train_eval_predictors(
                     }
                 )
 
-                learner = learner_fn(model, dataset)
+                learner = learner_fn(
+                    dataset=dataset,
+                    model=model,
+                    optimizer=optimizer,
+                    optimizer_kwargs=optimizer_kwargs,
+                    lambda_entropy=lambda_entropy,
+                    use_soft_y_hat=use_soft_y_hat,
+                )
                 learner.train(
                     dataset=train_dataset,
                     batch_size=batch_size,
                     warm_start=warm_start,
+                    max_em_iters=max_em_iters,
                     max_m_steps=max_m_steps,
-                    max_em_steps=max_em_steps,
                     max_marginal_steps=max_marginal_steps,
                     log_m_steps=log_m_steps,
                     use_progress_bar=use_progress_bar,

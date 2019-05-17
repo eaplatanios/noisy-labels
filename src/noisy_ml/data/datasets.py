@@ -47,20 +47,20 @@ class Dataset(object):
     ):
         """Creates a new dataset.
 
-    Args:
-      instances: List of instances.
-      predictors: List of predictors.
-      labels: List of labels.
-      true_labels: Nested dictionary data structure that
-        contains the true label value per label and
-        per instance.
-      num_classes: List of the number of possible classes per label.
-      predicted_labels: Nested dictionary data structure
-        that contains a tuple of two lists (instance
-        indices and predicted values) per label and
-        per predictor.
-      TODO: Add the rest of the arguments.
-    """
+        Args:
+            instances: List of instances.
+            predictors: List of predictors.
+            labels: List of labels.
+            true_labels: Nested dictionary data structure that
+                contains the true label value per label and
+                per instance.
+            num_classes: List of the number of possible classes per label.
+            predicted_labels: Nested dictionary data structure
+                that contains a tuple of two lists (instance
+                indices and predicted values) per label and
+                per predictor.
+            TODO: Add the rest of the arguments.
+        """
         self.instances = instances
         self.predictors = predictors
         self.labels = labels

@@ -204,7 +204,7 @@ class Evaluator(object):
         """Evaluates MAJ for each multi-class label."""
         del soft  # Unused.
 
-        confusions_with_truth = self.dataset.compute_confusions()
+        # confusions_with_truth = self.dataset.compute_confusions()
 
         results = []
         for l_id, nc in enumerate(self.dataset.num_classes):

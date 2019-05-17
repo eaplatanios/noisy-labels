@@ -87,6 +87,58 @@ def _unpack(kwargs, f):
     help="Values of gamma to try.",
 )
 @click.option(
+    "--optimizer",
+    type=str,
+    default="amsgrad",
+    help="Name of the optimizer to use.",
+)
+@click.option(
+    "--batch-size",
+    type=int,
+    default=1024,
+    help="Size of the batches to use in M-steps.",
+)
+@click.option(
+    "--max-em-iters",
+    type=int,
+    default=10,
+    help="Number of maximum EM iterations.",
+)
+@click.option(
+    "--max-m-steps",
+    type=int,
+    default=1000,
+    help="Number of maximum M-steps per iteration.",
+)
+@click.option(
+    "--max-marginal-steps",
+    type=int,
+    default=1000,
+    help="Number of marginal optimization steps after EM.",
+)
+@click.option(
+    "--lambda-entropy",
+    type=float,
+    multiple=True,
+    default=[0.],
+    help="Values of the entropy regularization to try.",
+)
+@click.option(
+    "--use-soft-maj",
+    is_flag=True,
+    help="Whether to use soft majority voting.",
+)
+@click.option(
+    "--use-soft-y-hat",
+    is_flag=True,
+    help="Whether to treat predictor outputs as soft targets.",
+)
+@click.option(
+    "--use-progress-bar",
+    is_flag=True,
+    help="Whether to use progress bar.",
+)
+@click.option(
     "--num-proc",
     type=int,
     default=4,
@@ -110,6 +162,15 @@ def main(
     predictors_hidden,
     q_latent_size,
     gamma,
+    optimizer,
+    batch_size,
+    max_em_iters,
+    max_m_steps,
+    max_marginal_steps,
+    lambda_entropy,
+    use_soft_maj,
+    use_soft_y_hat,
+    use_progress_bar,
     num_proc,
     seed,
 ):
@@ -144,8 +205,11 @@ def main(
     )
 
     # Setup a DataFrame for results.
-    res_cols = ["model", "num_predictors", "metric", "value_mean", "value_std"]
-    results = pd.DataFrame(columns=res_cols)
+    if os.path.exists(results_path):
+        results = pd.read_csv(results_path)
+    else:
+        res_cols = ["model", "num_predictors", "metric", "value_mean", "value_std"]
+        results = pd.DataFrame(columns=res_cols)
     time_stamp = pd.Timestamp.now()
 
     with futures.ProcessPoolExecutor(num_proc) as executor:
@@ -156,17 +220,40 @@ def main(
                 ("model_name", name),
                 ("num_predictors", num_p),
                 ("num_repetitions", num_r),
+                ("lambda_entropy", lam_ent)
             )
-            for (name, model), (num_p, num_r) in product(
-                models.items(), zip(num_predictors, num_repetitions)
+            for (name, model), (num_p, num_r), lam_ent in product(
+                models.items(), zip(num_predictors, num_repetitions), lambda_entropy
             )
         ]
+        print("Total configs: %d" % len(inputs))
+
+        # Filter out configurations for which we have results.
+        excludes = set(
+            map(tuple, results[["model", "num_predictors"]].values.tolist())
+        )
+        inputs = [i for i in inputs if (i[1][1], i[2][1]) not in excludes]
+        print("Total configs after filtering: %d" % len(inputs))
+
+        # Generate unique seed for each config and form input dicts.
         seeds = [random.randint(0, 2 ** 20) for _ in range(len(inputs))]
         input_dicts = [dict(x + (("seed", s),)) for x, s in zip(inputs, seeds)]
 
         # Run experiments for each configuration (in parallel).
         logger.info("Running %d experiments..." % len(input_dicts))
-        func = partial(train_eval_predictors, dataset, time_stamp=time_stamp)
+        func = partial(
+            train_eval_predictors,
+            dataset=dataset,
+            optimizer=optimizer,
+            batch_size=batch_size,
+            max_m_steps=max_m_steps,
+            max_em_iters=max_em_iters,
+            max_marginal_steps=max_marginal_steps,
+            use_soft_maj=use_soft_maj,
+            use_soft_y_hat=use_soft_y_hat,
+            use_progress_bar=use_progress_bar,
+            time_stamp=time_stamp
+        )
         model_results = executor.map(partial(_unpack, f=func), input_dicts)
         for n, res in enumerate(model_results, start=1):
             logger.info(

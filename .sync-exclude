@@ -1,4 +1,8 @@
-.*
+.DS_Store
+.git
+.gitignore
+.idea
+.python-version
 *.pyc
 *.egg-info
 sync

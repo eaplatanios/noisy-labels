@@ -15,12 +15,16 @@ setup(
     description="Learning from Noisy Labels",
     url="https://github.com/eaplatanios/noisy-labels",
     install_requires=[
+        "bert-serving-client",
         "click",
         "nltk",
         "numpy>=1.5",
+        "pandas",
+        "pyyaml",
         "scikit-learn>=0.20.1",
         "six",
         "tensorflow>=1.11",
         "tqdm",
+        "xlrd",
     ],
 )

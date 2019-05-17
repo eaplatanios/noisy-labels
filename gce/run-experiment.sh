@@ -10,7 +10,7 @@ mkdir -p ${RESULTS_DIR}
 
 # Run experiment.
 python /storage/code/noisy-ml/src/scripts/run_experiment.py \
-  --dataset-name rte \
+  --dataset-name bluebirds \
   --data-dir ${DATA_DIR} \
   --results-dir ${RESULTS_DIR} \
   --instances-emb-size 4 \

@@ -205,10 +205,10 @@ def main(
     )
 
     # Setup a DataFrame for results.
+    res_cols = ["model", "num_predictors", "metric", "value_mean", "value_std"]
     if os.path.exists(results_path):
-        results = pd.read_csv(results_path)
+        results = pd.read_csv(results_path, usecols=res_cols)
     else:
-        res_cols = ["model", "num_predictors", "metric", "value_mean", "value_std"]
         results = pd.DataFrame(columns=res_cols)
     time_stamp = pd.Timestamp.now()
 

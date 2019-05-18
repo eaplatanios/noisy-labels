@@ -47,8 +47,8 @@ class Model(with_metaclass(abc.ABCMeta, object)):
 class MMCE_M(Model):
     """Model proposed in 'Regularized Minimax Conditional Entropy for Crowdsourcing'.
 
-  Source: https://arxiv.org/pdf/1503.07240.pdf
-  """
+      Source: https://arxiv.org/pdf/1503.07240.pdf
+      """
 
     def __init__(self, dataset, gamma=0.25):
         self.dataset = dataset
@@ -89,6 +89,92 @@ class MMCE_M(Model):
 
         return BuiltModel(
             predictions, q_params, regularization_terms, include_y_prior=False
+        )
+
+
+class MultiClassMMCE_M(Model):
+    """
+    A multi-class version of MMCE.
+    """
+    def __init__(
+        self,
+        dataset,
+        instances_emb_size=4,
+        gamma=0.25
+    ):
+        self.dataset = dataset
+        self.instances_emb_size = instances_emb_size
+        self.gamma = gamma
+
+    def build(self, instances, predictors, labels):
+        instance_embeddings = Embedding(
+            num_inputs=len(self.dataset.instances),
+            emb_size=len(self.dataset.labels),
+            name="instance_embeddings",
+        )(instances)
+
+        # Predictions is a list of num_labels tensors:
+        # <float32> [batch_size, num_classes].
+        with tf.variable_scope("predictions"):
+            predictions = []
+            for l, nc in enumerate(self.dataset.num_classes):
+                # <float32> [batch_size, num_classes].
+                logits_l = Embedding(
+                    num_inputs=len(self.dataset.instances),
+                    emb_size=nc,
+                    name="logits_label_%d" % l,
+                )(instances)
+                predictions.append(tf.nn.log_softmax(logits_l))
+
+        # Embeddings are lists of num_labels tensors:
+        # <float32> [batch_size, num_classes, num_classes].
+        with tf.variable_scope("embeddings"):
+            q_is, q_ps = [], []
+            for l, nc in enumerate(self.dataset.num_classes):
+                # Instance embeddings.
+                q_i = Embedding(
+                    num_inputs=len(self.dataset.instances),
+                    emb_size=(nc * nc),
+                    name="q_i/instance_emb_label_%d" % l,
+                )(instances)
+                q_i = tf.reshape(q_i, [-1, nc, nc])
+                q_is.append(q_i)
+                # Predictor embeddings.
+                q_p = Embedding(
+                    num_inputs=len(self.dataset.predictors),
+                    emb_size=(nc * nc),
+                    name="q_p/predictor_emb_label_%d" % l,
+                )(predictors)
+                q_p = tf.reshape(q_p, [-1, nc, nc])
+                q_ps.append(q_p)
+
+        # Confusions is a list of num_labels tensors log-normalized along the
+        # last axis: <float32> [batch_size, num_classes, num_classes].
+        with tf.variable_scope("confusions"):
+            confusions = []
+            for q_i, q_p in zip(q_is, q_ps):
+                # Compute confusion matrices.
+                c = tf.nn.log_softmax(q_i + q_p, axis=-1)
+                confusions.append(c)
+
+        # Regularization terms.
+        with tf.variable_scope("regularization"):
+            num_labels_per_worker = self.dataset.avg_labels_per_predictor()
+            num_labels_per_item = self.dataset.avg_labels_per_item()
+            alpha = self.gamma * ((len(self.dataset.labels) * 2) ** 2)
+            beta = alpha * num_labels_per_worker / num_labels_per_item
+            regularization_terms = []
+            for q_i, q_p in zip(q_is, q_ps):
+                regularization_terms.extend([
+                    beta * tf.reduce_sum(q_i * q_i) / 2,
+                    alpha * tf.reduce_sum(q_p * q_p) / 2,
+                ])
+
+        return BuiltModel(
+            predictions=predictions,
+            q_params=confusions,
+            regularization_terms=regularization_terms,
+            include_y_prior=False,
         )
 
 
@@ -201,8 +287,8 @@ class LNL(Model):
 class MultiClassLNL(Model):
     """A multi-class version of LNL model.
 
-  TODO: refactor LNL and merge with this to avoid code duplication.
-  """
+    TODO: refactor LNL and merge with this to avoid code duplication.
+    """
 
     def __init__(
         self,
@@ -325,11 +411,10 @@ class MultiClassLNL(Model):
                         )
                     )
 
+            # Combine pre_q_confusions and pre_d_confusions.
+            # Confusions is a list of num_labels tensors log-normalized along
+            # the last axis: <float32> [batch_size, num_classes, num_classes].
             with tf.variable_scope("q_fn_d_fn"):
-                # Combine pre_q_confusions and pre_d_confusions.
-                # Confusions is a list of num_labels tensors log-normalized
-                # along the last axis:
-                # <float32> [batch_size, num_classes, num_classes].
                 confusions = []
                 for pqc, pdc in zip(pre_q_confusions, pre_d_confusions):
                     # Compute confusion matrices.
@@ -337,21 +422,18 @@ class MultiClassLNL(Model):
                     c = tf.reduce_logsumexp(c, axis=-1)
                     confusions.append(c)
 
+            # Compute regularization terms.
             with tf.variable_scope("reg_terms"):
-                # Compute regularization terms.
                 num_labels_per_worker = self.dataset.avg_labels_per_predictor()
                 num_labels_per_item = self.dataset.avg_labels_per_item()
-                # TODO: not sure how to adjust this for multi-class case...
                 alpha = self.gamma * ((len(self.dataset.labels) * 2) ** 2)
                 beta = alpha * num_labels_per_worker / num_labels_per_item
-                regularization_terms = [
-                    beta
-                    * tf.reduce_sum(sum(q_i * q_i for q_i in pre_q_confusions))
-                    / 2,
-                    alpha
-                    * tf.reduce_sum(sum(q_p * q_p for q_p in pre_d_confusions))
-                    / 2,
-                ]
+                regularization_terms = []
+                for q_i, q_p in zip(pre_q_confusions, pre_d_confusions):
+                    regularization_terms.extend([
+                        beta * tf.reduce_sum(q_i * q_i) / 2,
+                        alpha * tf.reduce_sum(q_p * q_p) / 2,
+                    ])
 
         return BuiltModel(
             predictions=predictions,

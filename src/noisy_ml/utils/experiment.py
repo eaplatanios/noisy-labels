@@ -21,6 +21,7 @@ from ..models.learners import EMLearner
 from ..models.learners import MultiLabelEMConfig
 from ..models.learners import MultiLabelMultiClassEMConfig
 from ..models.models import MultiClassLNL
+from ..models.models import MultiClassMMCE_M
 
 __all__ = [
     "reset_seed",
@@ -141,8 +142,11 @@ def get_models(
     gamma=(0.50, 0.75, 1.00),
 ):
     """Generates a dict of models for the specified parameters."""
-    # Generate configurations.
-    config_values = list(
+    # Generate MMCE configurations.
+    mmce_config_dicts =[{"gamma": val} for val in gamma]
+
+    # Generate LNL configurations.
+    lnl_config_values = list(
         itertools.product(
             instances_emb_size,
             instances_hidden,
@@ -152,7 +156,7 @@ def get_models(
             gamma,
         )
     )
-    config_names = len(config_values) * [
+    lnl_config_names = len(lnl_config_values) * [
         [
             "instances_emb_size",
             "instances_hidden",
@@ -162,12 +166,19 @@ def get_models(
             "gamma",
         ]
     ]
-    configuration_dicts = map(
-        lambda x: dict(zip(*x)), zip(config_names, config_values)
+    lnl_config_dicts = map(
+        lambda x: dict(zip(*x)), zip(lnl_config_names, lnl_config_values)
     )
 
     models = {"MAJ": "MAJ"}
-    for config in configuration_dicts:
+    # Add MMCE models.
+    for config in mmce_config_dicts:
+        name = "MMCE-M"
+        name += " (γ=%.2f)" % config["gamma"]
+        models[name] = MultiClassMMCE_M(dataset, **config)
+
+    # Add LNL models.
+    for config in lnl_config_dicts:
         name = "LNL"
         name += "-F" if config["instances_emb_size"] is None else ""
         name += "%s" % config["instances_hidden"]

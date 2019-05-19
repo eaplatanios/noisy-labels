@@ -314,7 +314,7 @@ class MultiClassLNL(Model):
         """Builds ops."""
         if (
             self.dataset.instance_features is None
-            or self.instances_emb_size is not None
+            or self.instances_emb_size > 0
         ):
             instances = Embedding(
                 num_inputs=len(self.dataset.instances),
@@ -334,17 +334,15 @@ class MultiClassLNL(Model):
             # hiddens: <float32> [batch_size, hidden_size].
             hiddens = instances
             for h_units in self.instances_hidden:
-                hiddens = tf.layers.Dense(units=h_units, activation=tf.nn.selu)(
-                    hiddens
-                )
+                Layer = tf.layers.Dense(units=h_units, activation=tf.nn.selu)
+                hiddens = Layer(hiddens)
             # Predictions is a list of num_labels tensors:
             # <float32> [batch_size, num_classes].
             with tf.variable_scope("log_softmax"):
                 predictions = []
                 for nc in self.dataset.num_classes:
-                    predictions.append(
-                        tf.nn.log_softmax(tf.layers.Dense(units=nc)(hiddens))
-                    )
+                    logits_l = tf.layers.Dense(units=nc)(hiddens)
+                    predictions.append(tf.nn.log_softmax(logits_l))
 
         # Predictor embeddings.
         # predictors: <float32> [batch_size, predictor_emb_size]
@@ -361,9 +359,8 @@ class MultiClassLNL(Model):
             # hiddens: <float32> [batch_size, hidden_size].
             hiddens = predictors
             for h_units in self.predictors_hidden:
-                hiddens = tf.layers.Dense(units=h_units, activation=tf.nn.selu)(
-                    hiddens
-                )
+                Layer = tf.layers.Dense(units=h_units, activation=tf.nn.selu)
+                hiddens = Layer(hiddens)
             # Pre-confusions is a list of num_labels tensors:
             # <float32> [batch_size, num_classes, num_classes, latent_size].
             pre_q_confusions = []

@@ -144,7 +144,7 @@ def get_models(
 ):
     """Generates a dict of models for the specified parameters."""
     # Generate MMCE configurations.
-    mmce_config_dicts =[{"gamma": val} for val in gamma]
+    mmce_config_dicts = [{"gamma": val} for val in gamma]
 
     # Generate LNL configurations.
     lnl_config_values = list(
@@ -182,8 +182,10 @@ def get_models(
     for config in lnl_config_dicts:
         # If we use embeddings, no hidden layers.
         if (
-            config["instances_emb_size"] > 0 and config["instances_hidden"]
-            or config["predictors_emb_size"] > 0 and config["predictors_hidden"]
+            (config["instances_emb_size"] > 0 and config["instances_hidden"])
+            or (config["predictors_emb_size"] > 0 and config["predictors_hidden"])
+            or (config["instances_emb_size"] == 0 and not config["instances_hidden"])
+            or (config["predictors_emb_size"] == 0 and not config["predictors_hidden"])
         ):
             continue
         name = "LNL"
@@ -277,7 +279,6 @@ def train_eval_predictors(
                         "values": train_data.values,
                     }
                 )
-
                 learner = learner_fn(
                     dataset=dataset,
                     model=model,

@@ -50,6 +50,7 @@ class RelationExtractionLoader(object):
         "TREATS",
         "OTHER",
     )
+    RELATION_NUM_CLASSES = (2,) * 14
 
     @staticmethod
     def load_ground_truth(data_dir):
@@ -111,11 +112,8 @@ class RelationExtractionLoader(object):
             for sid in sentence_ids
         ]
 
-        # Determine unique relations.
-        unique_relations = set([r for r_list in relations for r in r_list])
-        unique_relations = list(unique_relations)
-
         # Index relations.
+        unique_relations = RelationExtractionLoader.RELATIONS
         relation_ids = [
             [unique_relations.index(r) for r in r_list] for r_list in relations
         ]
@@ -123,7 +121,7 @@ class RelationExtractionLoader(object):
         crowdsourced = {
             "sentences": (sentence_ids, sentence_features),
             "workers": (worker_ids, worker_features),
-            "relations": (relations, relation_ids, unique_relations),
+            "relations": (relations, relation_ids),
         }
 
         return crowdsourced
@@ -164,16 +162,19 @@ class RelationExtractionLoader(object):
         """Loads data."""
         ground_truth = RelationExtractionLoader.load_ground_truth(data_dir)
         crowdsourced = RelationExtractionLoader.load_crowdsourced(data_dir)
-        unique_relations = crowdsourced["relations"][-1]
+        unique_relations = RelationExtractionLoader.RELATIONS
+        num_classes = RelationExtractionLoader.RELATION_NUM_CLASSES
 
         # Convert everything to the required format.
         instances = sorted(set(crowdsourced["sentences"][0]))
         predictors = sorted(set(crowdsourced["workers"][0]))
         labels = [unique_relations.index(r) for r in load_relations]
-        num_classes = [2 for _ in labels]
+        num_classes = [num_classes[l] for l in labels]
 
         true_labels = {}
         for relation in load_relations:
+            if relation not in ground_truth:
+                continue
             label_id = labels.index(unique_relations.index(relation))
             true_labels[label_id] = dict(
                 [
@@ -187,7 +188,7 @@ class RelationExtractionLoader(object):
         crowdsourced_data = (
             crowdsourced["sentences"][:1]
             + crowdsourced["workers"][:1]
-            + crowdsourced["relations"][1:2]
+            + crowdsourced["relations"][1:]
         )
         for lid, l in enumerate(labels):
             predicted_labels[lid] = defaultdict(list)

@@ -214,30 +214,9 @@ def main(
 
     with futures.ProcessPoolExecutor(num_proc) as executor:
         # Generate experiment configurations.
-        inputs = [
-            (
-                ("model", model),
-                ("model_name", name),
-                ("num_predictors", num_p),
-                ("num_repetitions", num_r),
-                ("lambda_entropy", lam_ent)
-            )
-            for (name, model), (num_p, num_r), lam_ent in product(
-                models.items(), zip(num_predictors, num_repetitions), lambda_entropy
-            )
-        ]
-        print("Total configs: %d" % len(inputs))
-
-        # Filter out configurations for which we have results.
-        excludes = set(
-            map(tuple, results[["model", "num_predictors"]].values.tolist())
+        input_dicts = gen_exp_configs(
+            models, num_predictors, num_repetitions, results
         )
-        inputs = [i for i in inputs if (i[1][1], i[2][1]) not in excludes]
-        print("Total configs after filtering: %d" % len(inputs))
-
-        # Generate unique seed for each config and form input dicts.
-        seeds = [random.randint(0, 2 ** 20) for _ in range(len(inputs))]
-        input_dicts = [dict(x + (("seed", s),)) for x, s in zip(inputs, seeds)]
 
         # Run experiments for each configuration (in parallel).
         logger.info("Running %d experiments..." % len(input_dicts))

@@ -29,6 +29,7 @@ __all__ = [
     "learner_fn",
     "get_dataset_setup",
     "get_models",
+    "gen_exp_configs",
     "train_eval_predictors",
 ]
 
@@ -179,13 +180,50 @@ def get_models(
 
     # Add LNL models.
     for config in lnl_config_dicts:
+        # If we use embeddings, no hidden layers.
+        if (
+            config["instances_emb_size"] > 0 and config["instances_hidden"]
+            or config["predictors_emb_size"] > 0 and config["predictors_hidden"]
+        ):
+            continue
         name = "LNL"
-        name += "-F" if config["instances_emb_size"] is None else ""
-        name += "%s" % config["instances_hidden"]
-        name += " (γ=%.2f)" % config["gamma"]
+        name += "-IE-%d" % config["instances_emb_size"]
+        name += "-IH-%s" % config["instances_hidden"]
+        name += "-PE-%d" % config["predictors_emb_size"]
+        name += "-PH-%s" % config["predictors_hidden"]
+        name += " (gam=%.2f)" % config["gamma"]
         models[name] = MultiClassLNL(dataset, **config)
 
     return models
+
+
+def gen_exp_configs(models, num_predictors, num_repetitions, results=None):
+    inputs = [
+        (
+            ("model", model),
+            ("model_name", name),
+            ("num_predictors", num_p),
+            ("num_repetitions", num_r),
+        )
+        for (name, model), (num_p, num_r) in itertools.product(
+            models.items(), zip(num_predictors, num_repetitions)
+        )
+    ]
+    print("Total configs: %d" % len(inputs))
+
+    # Filter out configurations for which we have results.
+    excludes = set()
+    if results is not None:
+        res_exclude = results[["model", "num_predictors"]].values.tolist()
+        excludes.update(map(tuple, res_exclude))
+    inputs = [i for i in inputs if (i[1][1], i[2][1]) not in excludes]
+    print("Total configs after filtering: %d" % len(inputs))
+
+    # Generate unique seed for each config and form input dicts.
+    seeds = [random.randint(0, 2 ** 20) for _ in range(len(inputs))]
+    configs = [dict(x + (("seed", s),)) for x, s in zip(inputs, seeds)]
+
+    return configs
 
 
 def train_eval_predictors(

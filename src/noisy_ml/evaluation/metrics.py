@@ -47,8 +47,7 @@ def compute_mad_error(predicted_qualities, true_qualities):
 
 def compute_accuracy(predictions, true_labels):
     if len(predictions.shape) > 1:
-        # p = predictions.argmax(-1).astype(np.int32)
-        p = (predictions[:, -1] >= 0.5).astype(np.int32)
+        p = (np.random.random(predictions.shape) * 1e-3 + predictions).argmax(axis=-1).astype(np.int32)
     else:
         p = (predictions >= 0.5).astype(np.int32)
     return metrics.accuracy_score(true_labels, p)

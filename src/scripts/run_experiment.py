@@ -45,6 +45,11 @@ def _unpack(kwargs, f):
     help="Path to the results directory.",
 )
 @click.option(
+    "--enforce-redundancy-limit",
+    is_flag=True,
+    help="Whether to run experiments for different redundancies.",
+)
+@click.option(
     "--instances-emb-size",
     type=int,
     multiple=True,
@@ -156,6 +161,7 @@ def main(
     dataset_name,
     data_dir,
     results_dir,
+    enforce_redundancy_limit,
     instances_emb_size,
     instances_hidden,
     predictors_emb_size,
@@ -189,8 +195,17 @@ def main(
         json.dump(ctx.params, fp, indent=4, sort_keys=True)
 
     # Get dataset setup.
-    dataset, num_predictors, num_repetitions, results_path = get_dataset_setup(
-        dataset=dataset_name, data_dir=data_dir, results_dir=results_dir
+    (
+        dataset,
+        num_predictors,
+        num_repetitions,
+        max_redundancy,
+        results_path,
+    ) = get_dataset_setup(
+        dataset=dataset_name,
+        data_dir=data_dir,
+        results_dir=results_dir,
+        enforce_redundancy_limit=enforce_redundancy_limit,
     )
 
     # Get models.
@@ -205,7 +220,10 @@ def main(
     )
 
     # Setup a DataFrame for results.
-    res_cols = ["model", "num_predictors", "metric", "value_mean", "value_std"]
+    if not enforce_redundancy_limit:
+        res_cols = ["model", "num_predictors", "metric", "value_mean", "value_std"]
+    else:
+        res_cols = ["model", "max_redundancy", "metric", "value_mean", "value_std"]
     if os.path.exists(results_path):
         results = pd.read_csv(results_path, usecols=res_cols)
     else:
@@ -215,7 +233,7 @@ def main(
     with futures.ProcessPoolExecutor(num_proc) as executor:
         # Generate experiment configurations.
         input_dicts = gen_exp_configs(
-            models, num_predictors, num_repetitions, results
+            models, num_predictors, num_repetitions, max_redundancy, results
         )
 
         # Run experiments for each configuration (in parallel).
@@ -228,6 +246,7 @@ def main(
             max_m_steps=max_m_steps,
             max_em_iters=max_em_iters,
             max_marginal_steps=max_marginal_steps,
+            lambda_entropy=lambda_entropy,
             use_soft_maj=use_soft_maj,
             use_soft_y_hat=use_soft_y_hat,
             use_progress_bar=use_progress_bar,
@@ -235,13 +254,11 @@ def main(
         )
         model_results = executor.map(partial(_unpack, f=func), input_dicts)
         for n, res in enumerate(model_results, start=1):
-            logger.info(
-                "Finished experiment for %d/%d predictors."
-                % (n, len(num_predictors))
-            )
+            logger.info("Finished %d/%d experiment." % (n, len(num_repetitions)))
             for r in res:
                 results = results.append(r, ignore_index=True)
                 results.to_csv(results_path)
+                print("Saved!")
             logger.info("Results so far:\n%s" % str(results))
 
     logger.info("Results:\n%s" % str(results))

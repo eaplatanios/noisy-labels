@@ -81,56 +81,98 @@ def learner_fn(
     )
 
 
-def get_dataset_setup(dataset, data_dir, results_dir):
+def get_dataset_setup(dataset, data_dir, results_dir, enforce_redundancy_limit=False):
     """Returns experimental setup parameters for the given dataset."""
     if dataset == "bluebirds":
-        dataset = BlueBirdsLoader.load(data_dir, load_features=True)
-        num_predictors = [1, 10, 20, 39]
-        num_repetitions = [20, 10, 5, 1]
         results_path = os.path.join(results_dir, "bluebirds.csv")
+        dataset = BlueBirdsLoader.load(data_dir, load_features=True)
+        if not enforce_redundancy_limit:
+            num_predictors = [1, 10, 20, 39]
+            num_repetitions = [20, 10, 5, 1]
+            max_redundancy = None
+        else:
+            num_predictors = None
+            max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 1]
     elif dataset == "rte":
-        dataset = RTELoader.load(data_dir, load_features=True)
-        num_predictors = [1, 10, 20, 50, 100, 164]
-        num_repetitions = [20, 10, 10, 5, 3, 1]
         results_path = os.path.join(results_dir, "rte.csv")
+        dataset = RTELoader.load(data_dir, load_features=True)
+        if not enforce_redundancy_limit:
+            num_predictors = [1, 10, 20, 50, 100, 164]
+            num_repetitions = [20, 10, 10, 5, 3, 1]
+            max_redundancy = None
+        else:
+            num_predictors = None
+            max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 1]
     elif dataset == "wordsim":
-        dataset = WordSimLoader.load(data_dir, load_features=True)
-        num_predictors = [1, 2, 5, 10]
-        num_repetitions = [20, 10, 5, 1]
         results_path = os.path.join(results_dir, "wordsim.csv")
+        dataset = WordSimLoader.load(data_dir, load_features=True)
+        if not enforce_redundancy_limit:
+            num_predictors = [1, 2, 5, 10]
+            num_repetitions = [20, 10, 5, 1]
+            max_redundancy = None
+        else:
+            num_predictors = None
+            max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 1]
     elif dataset == "age":
-        dataset = AgeLoader.load(data_dir, load_features=True)
-        num_predictors = [1, 2, 5, 10, 20, 50, 100, 165]
-        num_repetitions = [20, 20, 20, 20, 10, 10, 3, 1]
         results_path = os.path.join(results_dir, "age.csv")
+        dataset = AgeLoader.load(data_dir, load_features=True)
+        if not enforce_redundancy_limit:
+            num_predictors = [1, 2, 5, 10, 20, 50, 100, 165]
+            num_repetitions = [20, 20, 20, 20, 10, 10, 3, 1]
+            max_redundancy = None
+        else:
+            num_predictors = None
+            max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 1]
     elif dataset == "medical-causes":
+        results_path = os.path.join(results_dir, "medical-causes.csv")
         relations = ("CAUSES",)
         dataset = RelationExtractionLoader.load(
             data_dir, relations, load_features=True
         )
-        num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
-        num_repetitions = [20, 20, 20, 20, 10, 5, 3, 1]
-        results_path = os.path.join(results_dir, "medical-causes.csv")
+        if not enforce_redundancy_limit:
+            num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
+            num_repetitions = [20, 20, 20, 20, 10, 5, 3, 1]
+            max_redundancy = None
+        else:
+            num_predictors = None
+            max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 1]
     elif dataset == "medical-treats":
+        results_path = os.path.join(results_dir, "medical-treats.csv")
         relations = ("TREATS",)
         dataset = RelationExtractionLoader.load(
             data_dir, relations, load_features=True
         )
-        num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
-        num_repetitions = [20, 20, 20, 20, 10, 5, 3, 1]
-        results_path = os.path.join(results_dir, "medical-treats.csv")
+        if not enforce_redundancy_limit:
+            num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
+            num_repetitions = [20, 20, 20, 20, 10, 5, 3, 1]
+            max_redundancy = None
+        else:
+            num_predictors = None
+            max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 1]
     elif dataset == "medical-causes-treats":
+        results_path = os.path.join(results_dir, "medical-causes-treats.csv")
         relations = ("CAUSES", "TREATS")
         dataset = RelationExtractionLoader.load(
             data_dir, relations, load_features=True
         )
-        num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
-        num_repetitions = [20, 20, 20, 20, 10, 5, 3, 1]
-        results_path = os.path.join(results_dir, "medical-causes-treats.csv")
+        if not enforce_redundancy_limit:
+            num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
+            num_repetitions = [20, 20, 20, 20, 10, 5, 3, 1]
+            max_redundancy = None
+        else:
+            num_predictors = None
+            max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 1]
     else:
         raise NotImplementedError
 
-    return dataset, num_predictors, num_repetitions, results_path
+    return dataset, num_predictors, num_repetitions, max_redundancy, results_path
 
 
 def get_models(
@@ -199,24 +241,41 @@ def get_models(
     return models
 
 
-def gen_exp_configs(models, num_predictors, num_repetitions, results=None):
-    inputs = [
-        (
-            ("model", model),
-            ("model_name", name),
-            ("num_predictors", num_p),
-            ("num_repetitions", num_r),
-        )
-        for (name, model), (num_p, num_r) in itertools.product(
-            models.items(), zip(num_predictors, num_repetitions)
-        )
-    ]
+def gen_exp_configs(models, num_predictors, num_repetitions, max_redundancy, results=None):
+    if num_predictors is not None:
+        inputs = [
+            (
+                ("model", model),
+                ("model_name", name),
+                ("num_predictors", num_p),
+                ("num_repetitions", num_r),
+            )
+            for (name, model), (num_p, num_r) in itertools.product(
+                models.items(), zip(num_predictors, num_repetitions)
+            )
+        ]
+    else:
+        assert max_redundancy is not None
+        inputs = [
+            (
+                ("model", model),
+                ("model_name", name),
+                ("max_redundancy", max_r),
+                ("num_repetitions", num_r),
+            )
+            for (name, model), (max_r, num_r) in itertools.product(
+                models.items(), zip(max_redundancy, num_repetitions)
+            )
+        ]
     print("Total configs: %d" % len(inputs))
 
     # Filter out configurations for which we have results.
     excludes = set()
     if results is not None:
-        res_exclude = results[["model", "num_predictors"]].values.tolist()
+        if num_predictors is not None:
+            res_exclude = results[["model", "num_predictors"]].values.tolist()
+        else:
+            res_exclude = results[["model", "max_redundancy"]].values.tolist()
         excludes.update(map(tuple, res_exclude))
     inputs = [i for i in inputs if (i[1][1], i[2][1]) not in excludes]
     print("Total configs after filtering: %d" % len(inputs))
@@ -232,8 +291,9 @@ def train_eval_predictors(
     dataset,
     model,
     model_name,
-    num_predictors,
     num_repetitions,
+    num_predictors=None,
+    max_redundancy=None,
     batch_size=1024,
     max_em_iters=10,
     max_m_steps=1000,
@@ -253,17 +313,32 @@ def train_eval_predictors(
     reset_seed(seed)
 
     results = []
-    predictor_sets = list(
-        sample_predictors(dataset.predictors, num_predictors, num_repetitions)
-    )
+
+    if num_predictors is not None:
+        predictor_sets = list(
+            sample_predictors(
+                dataset.predictors, num_predictors, num_repetitions
+            )
+        )
+    elif max_redundancy is None:
+        raise ValueError("num_predictors or max_redundancy must be given.")
 
     # Train and evaluate for each set of sampled predictors.
-    for r, predictors in enumerate(predictor_sets, start=1):
-        logger.info(
-            "Running repetition %d/%d for %s for %d predictors."
-            % (r, len(predictor_sets), model_name, num_predictors)
-        )
-        data = dataset.filter_predictors(predictors, keep_instances=True)
+    for r in range(num_repetitions):
+        if num_predictors is not None:
+            predictors = predictor_sets[r]
+            logger.info(
+                "Running repetition %d/%d for %s for %d predictors."
+                % (r + 1, num_repetitions, model_name, num_predictors)
+            )
+            data = dataset.filter_predictors(predictors, keep_instances=True)
+        else:
+            logger.info(
+                "Running repetition %d/%d for %s for %d maximum redundancy."
+                % (r + 1, num_repetitions, model_name, max_redundancy)
+            )
+            data = dataset.enforce_redundancy_limit(max_redundancy)
+
         evaluator = Evaluator(data)
 
         if model == "MAJ":
@@ -308,7 +383,6 @@ def train_eval_predictors(
     acc_result = {
         "time": time_stamp,
         "model": model_name,
-        "num_predictors": num_predictors,
         "metric": "accuracy",
         "value_mean": np.mean(accuracies),
         "value_std": np.std(accuracies),
@@ -318,10 +392,16 @@ def train_eval_predictors(
     auc_result = {
         "time": time_stamp,
         "model": model_name,
-        "num_predictors": num_predictors,
         "metric": "auc",
         "value_mean": np.mean(aucs),
         "value_std": np.std(aucs),
     }
+
+    if num_predictors is not None:
+        acc_result["num_predictors"] = num_predictors
+        auc_result["num_predictors"] = num_predictors
+    else:
+        acc_result["max_redundancy"] = max_redundancy
+        auc_result["max_redundancy"] = max_redundancy
 
     return acc_result, auc_result

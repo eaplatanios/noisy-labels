@@ -14,10 +14,14 @@
 
 from __future__ import absolute_import, division, print_function
 
+import copy
 import logging
-import numpy as np
+import random
 import six
 
+import numpy as np
+
+from collections import defaultdict
 from collections import namedtuple
 
 __author__ = "eaplatanios"
@@ -331,6 +335,79 @@ class Dataset(object):
                     if i is None:
                         continue
                 true_labels[l][i] = true_label
+
+        return Dataset(
+            new_instances,
+            new_predictors,
+            self.labels,
+            true_labels,
+            predicted_labels,
+            self.num_classes,
+            instance_features,
+            predictor_features,
+            label_features,
+        )
+
+    def enforce_redundancy_limit(self, max_redundancy, keep_instances=True):
+        """Enforces maximum number of different labels per instance."""
+        p_indices = dict()
+        new_instances = list()
+        new_predictors = list()
+        true_labels = dict()
+        predicted_labels = dict()
+
+        has_if = self.instance_features is not None
+        has_pf = self.predictor_features is not None
+        has_lf = self.label_features is not None
+        instance_features = list() if has_if else None
+        predictor_features = list() if has_pf else None
+        label_features = list() if has_lf else None
+
+        if keep_instances:
+            new_instances = self.instances
+            instance_features = self.instance_features
+
+        # Create map from instances to all their annotations.
+        instance_annotations = dict()
+        for lid, l in enumerate(self.labels):
+            instance_annotations[lid] = defaultdict(list)
+            for p_old, preds in self.predicted_labels[lid].items():
+                for iid, pred in zip(*preds):
+                    instance_annotations[lid][iid].append((p_old, pred))
+            # Discard some annotations to enforce the limit on redundancy.
+            for iid, wid_pred_tuples in instance_annotations[lid].items():
+                random.shuffle(wid_pred_tuples)
+                instance_annotations[lid][iid] = [
+                    (p_old, pred) for p_old, pred in wid_pred_tuples[:max_redundancy]
+                ]
+
+        # Construct new predicted labels dict.
+        for l, label in enumerate(self.labels):
+            if has_lf:
+                label_features.append(self.label_features[l])
+
+            # Filter the predicted labels.
+            predicted_labels[l] = dict()
+            for iid, wid_pred_list in instance_annotations[l].items():
+                for p_old, pred in wid_pred_list:
+                    p = p_indices.get(p_old)
+                    if p is None:
+                        p = len(new_predictors)
+                        new_predictors.append(self.predictors[p_old])
+                        p_indices[p_old] = p
+                        if has_pf:
+                            predictor_features.append(
+                                self.predictor_features[p_old]
+                            )
+                    if p not in predicted_labels[l]:
+                        predicted_labels[l][p] = ([], [])
+                    predicted_labels[l][p][0].append(iid)
+                    predicted_labels[l][p][1].append(pred)
+
+            # Filter the true labels.
+            true_labels[l] = dict()
+            for i_old, true_label in six.iteritems(self.true_labels[l]):
+                true_labels[l][i_old] = true_label
 
         return Dataset(
             new_instances,

@@ -12,9 +12,9 @@ import matplotlib.pyplot as plt
 def plot_results(labels=None):
     matplotlib.rc("text", usetex=False)
 
-    dataset = "age"
+    dataset = "wordsim"
     working_dir = os.getcwd()
-    results_dir = os.path.join(working_dir, "results")
+    results_dir = os.path.join(working_dir, "results/test")
     results_path = os.path.join(results_dir, "%s.csv" % dataset)
 
     results = pd.read_csv(results_path)
@@ -57,11 +57,4 @@ def plot_results(labels=None):
 
 
 if __name__ == "__main__":
-    labels = [
-        "MAJ",
-        "MMCE-M (γ=0.50)",
-        "LNL[] (γ=0.50)",
-        "LNL[16, 16] (γ=0.75)",
-        "LNL[16, 16, 16, 16] (γ=0.50)",
-    ]
-    plot_results(labels)
+    plot_results()

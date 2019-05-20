@@ -110,7 +110,7 @@ def get_dataset_setup(dataset, data_dir, results_dir, enforce_redundancy_limit=F
         dataset = WordSimLoader.load(data_dir, load_features=True)
         if not enforce_redundancy_limit:
             num_predictors = [1, 2, 5, 10]
-            num_repetitions = [20, 10, 5, 1]
+            num_repetitions = [100, 100, 100, 1]
             max_redundancy = None
         else:
             num_predictors = None
@@ -214,11 +214,14 @@ def get_models(
     )
 
     models = {"MAJ": "MAJ"}
+    return models
     # Add MMCE models.
     for config in mmce_config_dicts:
         name = "MMCE-M"
         name += " (γ=%.2f)" % config["gamma"]
         models[name] = MultiClassMMCE_M(dataset, **config)
+
+    return models
 
     # Add LNL models.
     for config in lnl_config_dicts:

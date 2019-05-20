@@ -3,7 +3,7 @@
 # Create a directory for the a new experiment.
 DATASET=wordsim
 DATA_DIR="data"
-RESULTS_DIR="results/${DATASET}"
+RESULTS_DIR="results/debug"
 # RESULTS_DIR="results/$(date +'%Y-%m-%d/exp_%H_%M_%S')"
 mkdir -p ${RESULTS_DIR}
 
@@ -23,11 +23,7 @@ CUDA_VISIBLE_DEVICES="" \
         --predictors-emb-size 16 \
         --predictors-hidden "[]" \
         --q-latent-size 1 \
-        --gamma 0.00 \
         --gamma 0.25 \
-        --gamma 0.50 \
-        --gamma 0.75 \
-        --gamma 1.00 \
         --optimizer "amsgrad" \
         --batch-size 1024 \
         --max-em-iters 10 \
@@ -36,5 +32,5 @@ CUDA_VISIBLE_DEVICES="" \
         --lambda-entropy 0. \
         --use-soft-y-hat \
         --use-progress-bar \
-        --num-proc 6 \
+        --num-proc 4 \
         --seed 42

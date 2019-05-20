@@ -18,6 +18,7 @@ import logging
 import numpy as np
 import six
 
+from collections import defaultdict
 from sklearn import metrics
 
 __author__ = "eaplatanios"
@@ -46,10 +47,11 @@ def compute_mad_error(predicted_qualities, true_qualities):
 
 def compute_accuracy(predictions, true_labels):
     if len(predictions.shape) > 1:
-        p = predictions.argmax(-1).astype(np.int32)
+        # p = predictions.argmax(-1).astype(np.int32)
+        p = (predictions[:, -1] >= 0.5).astype(np.int32)
     else:
         p = (predictions >= 0.5).astype(np.int32)
-    return np.mean(p == true_labels)
+    return metrics.accuracy_score(true_labels, p)
 
 
 def compute_auc(predictions, true_labels):
@@ -99,34 +101,17 @@ class Evaluator(object):
 
     def evaluate_per_label(self, learner, batch_size=128):
         instances = self.dataset.instance_indices()
-        predictors = self.dataset.predictor_indices()
-        labels = self.dataset.label_indices()
 
         # List of <float32> [batch_size, num_classes_l] for each label l.
         predictions = learner.predict(instances, batch_size=batch_size)
-
-        # predicted_qualities shape: [NumLabels, NumPredictors]
-        predicted_qualities = np.mean(
-            learner.qualities(
-                instances, predictors, labels, batch_size=batch_size
-            ),
-            axis=0,
-        )
-
-        # true_qualities shape:      [NumLabels, NumPredictors]
-        # true_qualities = self.dataset.compute_binary_qualities()
 
         results = []
         for l in range(len(predictions)):
             l_instances = list(six.iterkeys(self.dataset.true_labels[l]))
             tl = [self.dataset.true_labels[l][i] for i in l_instances]
             p = predictions[l][l_instances]
-            # pq = predicted_qualities[l]
-            # tq = true_qualities[l]
             results.append(
                 Result(
-                    # mad_error_rank=compute_mad_error_rank(pq, tq),
-                    # mad_error=compute_mad_error(pq, tq),
                     accuracy=compute_accuracy(p, tl),
                     auc=compute_auc(p, tl),
                 )
@@ -136,7 +121,6 @@ class Evaluator(object):
 
     def evaluate_maj_per_label(self, soft=False):
         labels = self.dataset.label_indices()
-        true_qualities = self.dataset.compute_binary_qualities()
 
         results = []
         for l in range(len(labels)):
@@ -153,46 +137,17 @@ class Evaluator(object):
             for i in range(len(self.dataset.instances)):
                 if i not in all_predictions:
                     all_predictions[i] = [0.5]
-            all_predictions_mean = dict()
+
             true_labels = []
             predictions = []
             for i, values in six.iteritems(all_predictions):
-                values_mean = np.mean(values)
-                all_predictions_mean[i] = values_mean
                 true_labels.append(self.dataset.true_labels[l][i])
-                predictions.append(values_mean)
-
-            predicted_qualities = dict()
-            for p, indices_values in six.iteritems(
-                self.dataset.predicted_labels[l]
-            ):
-                if p not in predicted_qualities:
-                    predicted_qualities[p] = []
-                for i, v in zip(*indices_values):
-                    v = int(v >= 0.5)
-                    maj = int(all_predictions_mean[i] >= 0.5)
-                    c = int(v == maj)
-                    predicted_qualities[p].append(c)
-                predicted_qualities[p] = np.mean(predicted_qualities[p])
+                predictions.append(np.mean(values))
 
             tl = np.array(true_labels, np.int32)
             p = np.array(predictions, np.float32)
-            pq = np.array(
-                list(
-                    map(
-                        lambda kv: kv[1],
-                        sorted(
-                            six.iteritems(predicted_qualities),
-                            key=lambda kv: kv[0],
-                        ),
-                    )
-                )
-            )
-            tq = true_qualities[l]
             results.append(
                 Result(
-                    mad_error_rank=compute_mad_error_rank(pq, tq),
-                    mad_error=compute_mad_error(pq, tq),
                     accuracy=compute_accuracy(p, tl),
                     auc=compute_auc(p, tl),
                 )
@@ -202,22 +157,28 @@ class Evaluator(object):
 
     def evaluate_maj_multi_per_label(self, soft=False, eps=1e-10):
         """Evaluates MAJ for each multi-class label."""
-        del soft  # Unused.
-
-        # confusions_with_truth = self.dataset.compute_confusions()
 
         results = []
         for l_id, nc in enumerate(self.dataset.num_classes):
             # Get a dict of all predictions for each instance.
-            all_predictions = dict()
-            for i in self.dataset.instance_indices():
-                all_predictions[i] = []
+            all_predictions = defaultdict(list)
             for indices_values in six.itervalues(
                 self.dataset.predicted_labels[l_id]
             ):
                 for i, v in zip(*indices_values):
-                    v = int(np.round(v)) if isinstance(v, float) else v
+                    if isinstance(v, float):
+                        if not soft:
+                            v = int(v >= 0.5)
+                        v = np.asarray([1 - v, v])
+                    elif isinstance(v, int):
+                        v_vec = np.zeros(nc)
+                        v_vec[v] = 1
+                        v = v_vec
                     all_predictions[i].append(v)
+            for i in range(len(self.dataset.instances)):
+                if i not in all_predictions:
+                    v_unif = np.ones(nc) / nc
+                    all_predictions[i].append(v_unif)
 
             # Get predictions.
             gt_indices = []
@@ -225,10 +186,8 @@ class Evaluator(object):
             predictions = []
             for i in self.dataset.instance_indices():
                 values = all_predictions[i]
-                pred = np.zeros(nc)
-                for v in values:
-                    pred[v] += 1
-                predictions.append(pred)
+                predictions.append(np.mean(values, axis=0))
+                assert np.isclose(predictions[-1].sum(), 1.)
                 if i in self.dataset.true_labels[l_id]:
                     gt = self.dataset.true_labels[l_id][i]
                     gt_indices.append(i)
@@ -236,29 +195,8 @@ class Evaluator(object):
 
             gt = np.array(ground_truth, np.int32)
             p = np.array(predictions, np.float32)
-
-            # Get predictor qualities.
-            # confusions_with_maj = dict()
-            # for p_id, indices_values in six.iteritems(self.dataset.predicted_labels[l_id]):
-            #   if p_id not in confusions_with_maj:
-            #     confusions_with_maj[p_id] = np.zeros((nc, nc), dtype=np.float32)
-            #   for i, v in zip(*indices_values):
-            #     v = int(np.round(v)) if isinstance(v, float) else v
-            #     maj = np.argmax(predictions[i])
-            #     confusions_with_maj[p_id][maj, v] += 1
-            #   confusions_with_maj[p_id] /= (confusions_with_maj[p_id].sum(-1, keepdims=True) + eps)
-
-            # pc = np.array(list(map(
-            #   lambda kv: kv[1],
-            #   sorted(
-            #     six.iteritems(confusions_with_maj),
-            #     key=lambda kv: kv[0])
-            # )))
-            # tc = confusions_with_truth[l_id]
             results.append(
                 Result(
-                    # mad_error_rank=compute_mad_error_rank(pc, tc),
-                    # mad_error=compute_mad_error(pc, tc),
                     accuracy=compute_accuracy(p[gt_indices], gt),
                     auc=compute_auc(p[gt_indices], gt),
                 )

@@ -16,9 +16,10 @@ from __future__ import absolute_import, division, print_function
 
 from . import crowdsourced
 from . import datasets
+from . import medical
 from . import nell
 from . import rte
 
 __author__ = 'eaplatanios'
 
-__all__ = ['crowdsourced', 'datasets', 'nell', 'rte']
+__all__ = ['crowdsourced', 'datasets', 'medical', 'nell', 'rte']

@@ -50,9 +50,7 @@ def compute_auc(predictions, true_labels):
 
 
 class Result(object):
-  def __init__(
-      self, mad_error_rank, mad_error,
-      accuracy, auc):
+  def __init__(self, accuracy, auc, mad_error_rank=None, mad_error=None):
     self.mad_error_rank = mad_error_rank
     self.mad_error = mad_error
     self.accuracy = accuracy
@@ -68,8 +66,6 @@ class Result(object):
   @staticmethod
   def merge(results):
     return Result(
-      mad_error_rank=np.mean([r.mad_error_rank for r in results]),
-      mad_error=np.mean([r.mad_error for r in results]),
       accuracy=np.mean([r.accuracy for r in results]),
       auc=np.mean([r.auc for r in results]))
 
@@ -87,29 +83,17 @@ class Evaluator(object):
 
   def evaluate_per_label(self, learner, batch_size=128):
     instances = self.dataset.instance_indices()
-    predictors = self.dataset.predictor_indices()
-    labels = self.dataset.label_indices()
 
     # predictions shape:         [NumLabels, BatchSize]
-    # predicted_qualities shape: [NumLabels, NumPredictors]
-    # true_qualities shape:      [NumLabels, NumPredictors]
     predictions = learner.predict(
       instances, batch_size=batch_size).T
-    predicted_qualities = np.mean(learner.qualities(
-      instances, predictors, labels,
-      batch_size=batch_size), axis=0)
-    true_qualities = self.dataset.compute_binary_qualities()
 
     results = []
     for l in range(predictions.shape[0]):
       l_instances = list(six.iterkeys(self.dataset.true_labels[l]))
       tl = [self.dataset.true_labels[l][i] for i in l_instances]
       p = predictions[l, l_instances]
-      pq = predicted_qualities[l]
-      tq = true_qualities[l]
       results.append(Result(
-        mad_error_rank=compute_mad_error_rank(pq, tq),
-        mad_error=compute_mad_error(pq, tq),
         accuracy=compute_accuracy(p, tl),
         auc=compute_auc(p, tl)))
 
@@ -117,7 +101,6 @@ class Evaluator(object):
 
   def evaluate_maj_per_label(self, soft=False):
     labels = self.dataset.label_indices()
-    true_qualities = self.dataset.compute_binary_qualities()
 
     results = []
     for l in range(len(labels)):
@@ -132,37 +115,21 @@ class Evaluator(object):
       for i in range(len(self.dataset.instances)):
         if i not in all_predictions:
           all_predictions[i] = [0.5]
+
       all_predictions_mean = dict()
       true_labels = []
       predictions = []
       for i, values in six.iteritems(all_predictions):
+        if i not in self.dataset.true_labels[l]:
+          continue
         values_mean = np.mean(values)
         all_predictions_mean[i] = values_mean
         true_labels.append(self.dataset.true_labels[l][i])
         predictions.append(values_mean)
 
-      predicted_qualities = dict()
-      for p, indices_values in six.iteritems(self.dataset.predicted_labels[l]):
-        if p not in predicted_qualities:
-          predicted_qualities[p] = []
-        for i, v in zip(*indices_values):
-          v = int(v >= 0.5)
-          maj = int(all_predictions_mean[i] >= 0.5)
-          c = int(v == maj)
-          predicted_qualities[p].append(c)
-        predicted_qualities[p] = np.mean(predicted_qualities[p])
-
       tl = np.array(true_labels, np.int32)
       p = np.array(predictions, np.float32)
-      pq = np.array(list(map(
-        lambda kv: kv[1],
-        sorted(six.iteritems(
-          predicted_qualities),
-          key=lambda kv: kv[0]))))
-      tq = true_qualities[l]
       results.append(Result(
-        mad_error_rank=compute_mad_error_rank(pq, tq),
-        mad_error=compute_mad_error(pq, tq),
         accuracy=compute_accuracy(p, tl),
         auc=compute_auc(p, tl)))
 

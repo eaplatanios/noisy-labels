@@ -276,7 +276,7 @@ class Dataset(object):
 
       # Filter the true labels.
       true_labels[l] = dict()
-      for i_old, true_label in six.iteritems(self.true_labels[label]):
+      for i_old, true_label in six.iteritems(self.true_labels[l]):
         if keep_instances:
           i = i_old
         else:

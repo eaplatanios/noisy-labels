@@ -377,9 +377,7 @@ class Dataset(object):
             # Discard some annotations to enforce the limit on redundancy.
             for iid, wid_pred_tuples in instance_annotations[lid].items():
                 random.shuffle(wid_pred_tuples)
-                instance_annotations[lid][iid] = [
-                    (p_old, pred) for p_old, pred in wid_pred_tuples[:max_redundancy]
-                ]
+                instance_annotations[lid][iid] = wid_pred_tuples[:max_redundancy]
 
         # Construct new predicted labels dict.
         for l, label in enumerate(self.labels):

@@ -45,11 +45,8 @@ def reset_seed(seed=None):
 
 def sample_predictors(predictors, num_to_sample, num_sets=5):
     """A generator that sub-samples sets of predictors from the provided."""
-    if len(predictors) <= num_to_sample:
-        yield predictors
-    else:
-        for _ in range(num_sets):
-            yield random.sample(predictors, num_to_sample)
+    for _ in range(num_sets):
+        yield random.sample(predictors, num_to_sample)
 
 
 def learner_fn(
@@ -87,46 +84,46 @@ def get_dataset_setup(dataset, data_dir, results_dir, enforce_redundancy_limit=F
         results_path = os.path.join(results_dir, "bluebirds.csv")
         dataset = BlueBirdsLoader.load(data_dir, load_features=True)
         if not enforce_redundancy_limit:
-            num_predictors = [1, 10, 20, 39]
-            num_repetitions = [20, 10, 5, 1]
+            num_predictors = [1, 2, 5, 10, 20, 39]
+            num_repetitions = [10] * len(num_predictors)
             max_redundancy = None
         else:
             num_predictors = None
-            max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 1]
+            max_redundancy = [1, 2, 5, 10, 20, 39]
+            num_repetitions = [10] * len(max_redundancy)
     elif dataset == "rte":
         results_path = os.path.join(results_dir, "rte.csv")
         dataset = RTELoader.load(data_dir, load_features=True)
         if not enforce_redundancy_limit:
             num_predictors = [1, 10, 20, 50, 100, 164]
-            num_repetitions = [20, 10, 10, 5, 3, 1]
+            num_repetitions = [50, 50, 50, 50, 20, 10]
             max_redundancy = None
         else:
             num_predictors = None
             max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 1]
+            num_repetitions = [10] * len(max_redundancy)
     elif dataset == "wordsim":
         results_path = os.path.join(results_dir, "wordsim.csv")
         dataset = WordSimLoader.load(data_dir, load_features=True)
         if not enforce_redundancy_limit:
             num_predictors = [1, 2, 5, 10]
-            num_repetitions = [20, 10, 5, 1]
+            num_repetitions = [50, 50, 50, 10]
             max_redundancy = None
         else:
             num_predictors = None
             max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 1]
+            num_repetitions = [10] * len(max_redundancy)
     elif dataset == "age":
         results_path = os.path.join(results_dir, "age.csv")
         dataset = AgeLoader.load(data_dir, load_features=True)
         if not enforce_redundancy_limit:
             num_predictors = [1, 2, 5, 10, 20, 50, 100, 165]
-            num_repetitions = [20, 20, 20, 20, 10, 10, 3, 1]
+            num_repetitions = [20, 20, 20, 20, 10, 10, 3, 3]
             max_redundancy = None
         else:
             num_predictors = None
             max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 1]
+            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 3]
     elif dataset == "medical-causes":
         results_path = os.path.join(results_dir, "medical-causes.csv")
         relations = ("CAUSES",)
@@ -135,12 +132,12 @@ def get_dataset_setup(dataset, data_dir, results_dir, enforce_redundancy_limit=F
         )
         if not enforce_redundancy_limit:
             num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
-            num_repetitions = [20, 20, 20, 20, 10, 5, 3, 1]
+            num_repetitions = [20, 20, 20, 20, 10, 5, 3, 3]
             max_redundancy = None
         else:
             num_predictors = None
             max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 1]
+            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 3]
     elif dataset == "medical-treats":
         results_path = os.path.join(results_dir, "medical-treats.csv")
         relations = ("TREATS",)
@@ -149,12 +146,12 @@ def get_dataset_setup(dataset, data_dir, results_dir, enforce_redundancy_limit=F
         )
         if not enforce_redundancy_limit:
             num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
-            num_repetitions = [20, 20, 20, 20, 10, 5, 3, 1]
+            num_repetitions = [20, 20, 20, 20, 10, 5, 3, 3]
             max_redundancy = None
         else:
             num_predictors = None
             max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 1]
+            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 3]
     elif dataset == "medical-causes-treats":
         results_path = os.path.join(results_dir, "medical-causes-treats.csv")
         relations = ("CAUSES", "TREATS")
@@ -163,12 +160,12 @@ def get_dataset_setup(dataset, data_dir, results_dir, enforce_redundancy_limit=F
         )
         if not enforce_redundancy_limit:
             num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
-            num_repetitions = [20, 20, 20, 20, 10, 5, 3, 1]
+            num_repetitions = [20, 20, 20, 20, 10, 5, 3, 3]
             max_redundancy = None
         else:
             num_predictors = None
             max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 1]
+            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 3]
     else:
         raise NotImplementedError
 
@@ -186,7 +183,7 @@ def get_models(
 ):
     """Generates a dict of models for the specified parameters."""
     # Generate MMCE configurations.
-    mmce_config_dicts = [{"gamma": val} for val in gamma]
+    mmce_config_dicts = [{"gamma": 0.25}]
 
     # Generate LNL configurations.
     lnl_config_values = list(
@@ -224,9 +221,7 @@ def get_models(
     for config in lnl_config_dicts:
         # If we use embeddings, no hidden layers.
         if (
-            (config["instances_emb_size"] > 0 and config["instances_hidden"])
-            or (config["predictors_emb_size"] > 0 and config["predictors_hidden"])
-            or (config["instances_emb_size"] == 0 and not config["instances_hidden"])
+            (config["instances_emb_size"] == 0 and not config["instances_hidden"])
             or (config["predictors_emb_size"] == 0 and not config["predictors_hidden"])
         ):
             continue
@@ -294,7 +289,7 @@ def train_eval_predictors(
     num_repetitions,
     num_predictors=None,
     max_redundancy=None,
-    batch_size=1024,
+    batch_size=128,
     max_em_iters=10,
     max_m_steps=1000,
     max_marginal_steps=1000,

@@ -165,11 +165,11 @@ class Evaluator(object):
                 self.dataset.predicted_labels[l_id]
             ):
                 for i, v in zip(*indices_values):
-                    if isinstance(v, float):
+                    if isinstance(v, (float, np.float32, np.float64)):
                         if not soft:
                             v = int(v >= 0.5)
                         v = np.asarray([1 - v, v])
-                    elif isinstance(v, int):
+                    elif isinstance(v, (int, np.int32, np.int64)):
                         v_vec = np.zeros(nc)
                         v_vec[v] = 1
                         v = v_vec

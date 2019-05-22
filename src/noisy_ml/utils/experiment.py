@@ -123,7 +123,7 @@ def get_dataset_setup(dataset, data_dir, results_dir, enforce_redundancy_limit=F
         else:
             num_predictors = None
             max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 3]
+            num_repetitions = [50] * len(max_redundancy)
     elif dataset == "medical-causes":
         results_path = os.path.join(results_dir, "medical-causes.csv")
         relations = ("CAUSES",)

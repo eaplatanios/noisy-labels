@@ -5,10 +5,7 @@ source "$(dirname "$0")/.profile"
 
 # Create a container cluster
 gcloud container clusters create ${CLUSTER_NAME} \
-	--enable-autoscaling \
 	--enable-ip-alias \
-	--max-nodes=${MAX_NODES} \
-	--min-nodes=${MIN_NODES} \
 	--num-nodes=${NUM_NODES} \
 	--machine-type=${MACHINE_TYPE} \
 	--image-type=${IMAGE_TYPE} \

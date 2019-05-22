@@ -7,7 +7,7 @@ spec:
     spec:
       containers:
       - name: experiment-container
-        image: gcr.io/warm-pixel-219323/noisy-labels-tf
+        image: gcr.io/noisy-labels/noisy-labels-tf
         command: ["/bin/sh"]
         args: ["-c", "/run-experiment.sh"]
         volumeMounts:

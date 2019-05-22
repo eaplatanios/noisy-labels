@@ -14,7 +14,7 @@ def plot_results(labels=None):
 
     dataset = "wordsim"
     working_dir = os.getcwd()
-    results_dir = os.path.join(working_dir, "results/test")
+    results_dir = os.path.join(working_dir, "results/debug")
     results_path = os.path.join(results_dir, "%s.csv" % dataset)
 
     results = pd.read_csv(results_path)

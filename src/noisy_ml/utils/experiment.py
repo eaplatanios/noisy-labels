@@ -123,7 +123,7 @@ def get_dataset_setup(dataset, data_dir, results_dir, enforce_redundancy_limit=F
         else:
             num_predictors = None
             max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-            num_repetitions = [50] * len(max_redundancy)
+            num_repetitions = [5] * len(max_redundancy)
     elif dataset == "medical-causes":
         results_path = os.path.join(results_dir, "medical-causes.csv")
         relations = ("CAUSES",)
@@ -137,7 +137,7 @@ def get_dataset_setup(dataset, data_dir, results_dir, enforce_redundancy_limit=F
         else:
             num_predictors = None
             max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 3]
+            num_repetitions = [40] * len(max_redundancy)
     elif dataset == "medical-treats":
         results_path = os.path.join(results_dir, "medical-treats.csv")
         relations = ("TREATS",)
@@ -151,10 +151,19 @@ def get_dataset_setup(dataset, data_dir, results_dir, enforce_redundancy_limit=F
         else:
             num_predictors = None
             max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 3]
-    elif dataset == "medical-causes-treats":
+            num_repetitions = [40] * len(max_redundancy)
+    elif dataset == "medical-causes-multi":
         results_path = os.path.join(results_dir, "medical-causes-treats.csv")
-        relations = ("CAUSES", "TREATS")
+        relations = (
+            "CAUSES",
+            "TREATS",
+            "ASSOCIATED_WITH",
+            "MANIFESTATION",
+            "NONE",
+            "PART_OF",
+            "PREVENTS",
+            "SYMPTOM",
+        )
         dataset = RelationExtractionLoader.load(
             data_dir, relations, load_features=True
         )
@@ -164,8 +173,31 @@ def get_dataset_setup(dataset, data_dir, results_dir, enforce_redundancy_limit=F
             max_redundancy = None
         else:
             num_predictors = None
-            max_redundancy = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-            num_repetitions = [10, 10, 10, 5, 5, 5, 3, 3, 3, 3]
+            max_redundancy = [1, 2, 5, 10]
+            num_repetitions = [30] * len(max_redundancy)
+    elif dataset == "medical-treats-multi":
+        results_path = os.path.join(results_dir, "medical-causes-treats.csv")
+        relations = (
+            "TREATS",
+            "CAUSES",
+            "ASSOCIATED_WITH",
+            "MANIFESTATION",
+            "NONE",
+            "PART_OF",
+            "PREVENTS",
+            "SYMPTOM",
+        )
+        dataset = RelationExtractionLoader.load(
+            data_dir, relations, load_features=True
+        )
+        if not enforce_redundancy_limit:
+            num_predictors = [1, 10, 20, 50, 100, 200, 400, 467]
+            num_repetitions = [20, 20, 20, 20, 10, 5, 3, 3]
+            max_redundancy = None
+        else:
+            num_predictors = None
+            max_redundancy = [1, 2, 5, 10]
+            num_repetitions = [30] * len(max_redundancy)
     else:
         raise NotImplementedError
 
@@ -183,7 +215,7 @@ def get_models(
 ):
     """Generates a dict of models for the specified parameters."""
     # Generate MMCE configurations.
-    mmce_config_dicts = [{"gamma": 0.25}]
+    mmce_config_dicts = [{"gamma": 0.00}]
 
     # Generate LNL configurations.
     lnl_config_values = list(
@@ -211,6 +243,7 @@ def get_models(
     )
 
     models = {"MAJ": "MAJ"}
+
     # Add MMCE models.
     for config in mmce_config_dicts:
         name = "MMCE-M"

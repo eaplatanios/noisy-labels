@@ -403,9 +403,10 @@ class Dataset(object):
                     predicted_labels[l][p][1].append(pred)
 
             # Filter the true labels.
-            true_labels[l] = dict()
-            for i_old, true_label in six.iteritems(self.true_labels[l]):
-                true_labels[l][i_old] = true_label
+            if l in self.true_labels:
+                true_labels[l] = dict()
+                for i_old, true_label in six.iteritems(self.true_labels[l]):
+                    true_labels[l][i_old] = true_label
 
         return Dataset(
             new_instances,

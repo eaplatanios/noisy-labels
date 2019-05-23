@@ -655,10 +655,11 @@ class MultiLabelMultiClassEMConfig(EMConfig):
             xl_indices.append(tf.boolean_mask(x_indices, l))
 
         # Slice predictions and confusions for each label.
+        predictions_masked = []
         for j, (p, c, l) in enumerate(
             zip(predictions, q_params, l_indices_onehot)
         ):
-            predictions[j] = tf.boolean_mask(p, l)
+            predictions_masked.append(tf.boolean_mask(p, l))
             q_params[j] = tf.boolean_mask(c, l)
 
         # Convert values in y_hats.
@@ -677,7 +678,7 @@ class MultiLabelMultiClassEMConfig(EMConfig):
         # Compute mean qualities.
         # qualities_mean_logs: list of <float32> [batch_size_l] for each label l.
         qualities_mean_log = []
-        for h_log, q_log in zip(predictions, q_params):
+        for h_log, q_log in zip(predictions_masked, q_params):
             h_log_q_log = q_log + tf.expand_dims(h_log, axis=-1)
             qualities_mean_log.append(
                 # <float32> [batch_size_l].
@@ -709,7 +710,7 @@ class MultiLabelMultiClassEMConfig(EMConfig):
                     trainable=False,
                 )
                 for l, (nc, h_log) in enumerate(
-                    zip(self.num_classes, predictions)
+                    zip(self.num_classes, predictions_masked)
                 )
             ]
 
@@ -801,7 +802,7 @@ class MultiLabelMultiClassEMConfig(EMConfig):
             # Compute EM NLL: <float32> [].
             em_ll_term0 = sum(
                 tf.reduce_sum(e_y * h_log)
-                for e_y, h_log in zip(e_ys, predictions)
+                for e_y, h_log in zip(e_ys, predictions_masked)
             )
             em_ll_term1 = sum(
                 tf.reduce_sum(q_log_y_hat * e_y)
@@ -812,7 +813,7 @@ class MultiLabelMultiClassEMConfig(EMConfig):
             # Compute marginal NLL: <float32> [].
             marginal_ll_list = [
                 q_log_y_hat + h_log
-                for q_log_y_hat, h_log in zip(q_log_y_hats, predictions)
+                for q_log_y_hat, h_log in zip(q_log_y_hats, predictions_masked)
             ]
             marginal_nll = -sum(
                 [
@@ -830,7 +831,7 @@ class MultiLabelMultiClassEMConfig(EMConfig):
 
             # Entropy regularization.
             h_entropy = sum(
-                [tf.reduce_sum(tf.exp(h_log) * h_log) for h_log in predictions]
+                [tf.reduce_sum(tf.exp(h_log) * h_log) for h_log in predictions_masked]
             )
             neg_log_likelihood += self.lambda_entropy * h_entropy
 

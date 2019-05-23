@@ -106,6 +106,8 @@ class Evaluator(object):
 
         results = []
         for l in range(len(predictions)):
+            if l not in self.dataset.true_labels:
+                continue
             l_instances = list(six.iterkeys(self.dataset.true_labels[l]))
             tl = [self.dataset.true_labels[l][i] for i in l_instances]
             p = predictions[l][l_instances]
@@ -159,6 +161,9 @@ class Evaluator(object):
 
         results = []
         for l_id, nc in enumerate(self.dataset.num_classes):
+            if l_id not in self.dataset.true_labels:
+                continue
+
             # Get a dict of all predictions for each instance.
             all_predictions = defaultdict(list)
             for indices_values in six.itervalues(

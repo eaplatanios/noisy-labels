@@ -1,9 +1,11 @@
 .DS_Store
 .git
 .gitignore
+*.xcodeproj
 .idea
 .python-version
 *.pyc
 *.egg-info
 sync
 results
+temp

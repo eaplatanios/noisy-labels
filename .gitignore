@@ -1,18 +1,25 @@
 # Project-specific
 results/
+temp/
+
+# Swift
+.build
 
 # Visual Studio Code
 .vscode/
 
-# Eclipse
-.classpath
-.project
-.settings/
+# XCode
+*.xcodeproj/
 
 # IntelliJ
 .idea/
 *.iml
 *.iws
+
+# Eclipse
+.classpath
+.project
+.settings/
 
 # Pyenv
 .python-version

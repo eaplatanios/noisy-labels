@@ -1,0 +1,300 @@
+// Copyright 2019, Emmanouil Antonios Platanios. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not
+// use this file except in compliance with the License. You may obtain a copy of
+// the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+// WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+// License for the specific language governing permissions and limitations under
+// the License.
+
+import SwiftyBeaver
+import TensorFlow
+
+fileprivate let logger: SwiftyBeaver.Type = SwiftyBeaver.self
+
+public protocol Learner {
+  mutating func train<Instance, Predictor, Label>(using data: Data<Instance, Predictor, Label>)
+  func labelProbabilities(forInstances instances: [Int]) -> [Tensor<Float>]
+  func qualities(forInstances instances: [Int], predictors: [Int], labels: [Int]) -> Tensor<Float>
+}
+
+public struct MajorityVoteLearner: Learner {
+  public let useSoftMajorityVote: Bool
+  public let verbose: Bool
+
+  /// Array over instances and labels, which contains the estimated label probabilities.
+  private var estimatedLabelProbabilities: [[Float]] = [[Float]]()
+  private var estimatedQualities: [[[Float]]] = [[[Float]]]()
+
+  public init(useSoftMajorityVote: Bool, verbose: Bool = false) {
+    self.useSoftMajorityVote = useSoftMajorityVote
+    self.verbose = verbose
+  }
+
+  public mutating func train<Instance, Predictor, Label>(
+    using data: Data<Instance, Predictor, Label>
+  ) {
+    // Count the "votes".
+    if verbose { logger.info("Counting the \"votes\".") }
+    let instanceCount: Int = data.instances.count
+    let labelCount: Int = data.labels.count
+    for l in 0..<data.labels.count {
+      var values = [Float](repeating: 0.0, count: instanceCount)
+      var counts = [Int](repeating: 0, count: instanceCount)
+      for predictions in data.predictedLabels[l]!.values {
+        for (i, v) in zip(predictions.instances, predictions.values) {
+          values[i] += useSoftMajorityVote ? v : (v >= 0.5 ? 1.0 : 0.0)
+          counts[i] += 1
+        }
+      }
+      for i in 0..<instanceCount {
+        if counts[i] > 0 {
+          values[i] /= Float(counts[i])
+        } else {
+          values[i] = 0.5
+        }
+      }
+      estimatedLabelProbabilities.append(values)
+    }
+
+    estimatedQualities = [[[Float]]](
+      repeating: [[Float]](
+        repeating: [Float](repeating: -1.0, count: data.predictors.count),
+        count: labelCount),
+      count: instanceCount)
+    for l in 0..<labelCount {
+      for (p, predictions) in data.predictedLabels[l]! {
+        for (i, v) in zip(predictions.instances, predictions.values) {
+          if (v >= 0.5) == (estimatedLabelProbabilities[l][i] >= 0.5) {
+            estimatedQualities[i][l][p] = 1.0
+          } else {
+            estimatedQualities[i][l][p] = 0.0
+          }
+        }
+      }
+    }
+
+    if verbose { logger.info("Finished counting the \"votes\".") }
+  }
+
+  public func labelProbabilities(forInstances instances: [Int]) -> [Tensor<Float>] {
+    return estimatedLabelProbabilities.map { p in
+      Tensor<Float>(instances.map { p[$0] })
+    }
+  }
+
+  public func qualities(
+    forInstances instances: [Int],
+    predictors: [Int],
+    labels: [Int]
+  ) -> Tensor<Float> {
+    return Tensor<Float>(instances.map { i in
+      Tensor<Float>(labels.map { l in
+        Tensor<Float>(predictors.map { p in estimatedQualities[i][l][p] })
+      })
+    })
+  }
+}
+
+public struct EMLearner<Model: EMModel>: Learner {
+  public private(set) var model: Model
+
+  public let randomSeed: Int64
+  public let batchSize: Int
+  public let useWarmStarting: Bool
+  public let mStepCount: Int
+  public let emStepCount: Int
+  public let marginalStepCount: Int
+  public let mStepLogCount: Int?
+  public let emStepCallback: (EMLearner) -> Void
+  public let verbose: Bool
+
+  public init(
+    for model: Model,
+    randomSeed: Int64,
+    batchSize: Int = 128,
+    useWarmStarting: Bool = true,
+    mStepCount: Int = 1000,
+    emStepCount: Int = 100,
+    marginalStepCount: Int = 0,
+    mStepLogCount: Int? = 100,
+    emStepCallback: @escaping (EMLearner) -> Void = { _ in },
+    verbose: Bool = false
+  ) {
+    self.model = model
+    self.randomSeed = randomSeed
+    self.batchSize = batchSize
+    self.useWarmStarting = useWarmStarting
+    self.mStepCount = mStepCount
+    self.emStepCount = emStepCount
+    self.marginalStepCount = marginalStepCount
+    self.mStepLogCount = mStepLogCount
+    self.emStepCallback = emStepCallback
+    self.verbose = verbose
+  }
+
+  public mutating func train<Instance, Predictor, Label>(
+    using data: Data<Instance, Predictor, Label>
+  ) {
+    let dataset = Dataset(elements: data.trainingData())
+
+    for emStep in 0..<emStepCount {
+      // E-Step
+      if verbose { logger.info("Iteration \(emStep) - Running E-Step") }
+      model.prepareForEStep()
+      for batch in dataset.batched(batchSize) {
+        model.executeEStep(using: batch, majorityVote: emStep == 0)
+      }
+      model.finalizeEStep(majorityVote: emStep == 0)
+
+      // M-Step
+      if verbose { logger.info("Iteration \(emStep) - Running M-Step") }
+      if !useWarmStarting { model.prepareForMStep() }
+      var accumulatedNLL = Float(0.0)
+      var accumulatedSteps = 0
+      var datasetIterator = dataset.repeated()
+        // .shuffled(sampleCount: 10000, randomSeed: randomSeed)
+        .batched(batchSize)
+        .prefetched(count: 100)
+        .makeIterator()
+
+      for mStep in 0..<mStepCount {
+        accumulatedNLL += model.executeMStep(
+          using: datasetIterator.next()!,
+          majorityVote: emStep == 0)
+        accumulatedSteps += 1
+        if verbose {
+          if let logSteps = mStepLogCount, mStep % logSteps == 0 || mStep == mStepCount - 1 {
+            let nll = accumulatedNLL / Float(accumulatedSteps)
+            logger.info(
+              "M-Step \(String(format: "%5d", mStep)) | " + 
+              "Negative Log-Likelihood: \(String(format: "%.8f", nll))")
+            accumulatedNLL = 0.0
+            accumulatedSteps = 0
+          }
+        }
+      }
+
+      emStepCallback(self)
+    }
+
+    // Marginal Likelihood Optimization
+    if marginalStepCount > 0 {
+      if verbose { logger.info("Optimizing marginal likelihood.") }
+      var accumulatedNLL = Float(0.0)
+      var accumulatedSteps = 0
+      var datasetIterator = dataset.repeated()
+        // .shuffled(sampleCount: 10000, randomSeed: randomSeed)
+        .batched(batchSize).makeIterator()
+      for step in 0..<marginalStepCount {
+        accumulatedNLL += model.executeMarginalStep(using: datasetIterator.next()!)
+        accumulatedSteps += 1
+        if verbose {
+          if let logSteps = mStepLogCount, step % logSteps == 0 || step == marginalStepCount - 1 {
+            let nll = accumulatedNLL / Float(accumulatedSteps)
+            logger.info(
+              "Marginal-Step \(String(format: "%5d", step)) | " + 
+              "Negative Log-Likelihood: \(String(format: "%.8f", nll))")
+            accumulatedNLL = 0.0
+            accumulatedSteps = 0
+          }
+        }
+      }
+    }
+  }
+
+  public func negativeLogLikelihood(for data: TrainingData) -> Float {
+    var nll = Float(0.0)
+    for batch in Dataset(elements: data).batched(batchSize) {
+      nll += model.negativeLogLikelihood(for: batch)
+    }
+    return nll
+  }
+
+  public func labelProbabilities(forInstances instances: [Int]) -> [Tensor<Float>] {
+    let instances = Tensor<Int32>(instances.map(Int32.init))
+    var labelProbabilities = [[Tensor<Float>]]()
+    for batch in Dataset(elements: instances).batched(batchSize) {
+      let predictions = model.labelProbabilities(forInstances: batch)
+      if labelProbabilities.isEmpty {
+        for p in predictions {
+          labelProbabilities.append([p])
+        }
+      } else {
+        for (i, p) in predictions.enumerated() {
+          labelProbabilities[i].append(p)
+        }
+      }
+    }
+    return labelProbabilities.map {
+      $0.count > 1 ? Tensor<Float>(concatenating: $0, alongAxis: 0) : $0[0]
+    }
+  }
+
+  public func qualities(
+    forInstances instances: [Int],
+    predictors: [Int],
+    labels: [Int]
+  ) -> Tensor<Float> {
+    // TODO: Make the following batched and lazy.
+    // Compute the Cartesian product of instances, predictors, and labels.
+    let productCount = instances.count * predictors.count * labels.count
+    var productInstances = [Int]()
+    var productPredictors = [Int]()
+    var productLabels = [Int]()
+    productInstances.reserveCapacity(productCount)
+    productPredictors.reserveCapacity(productCount)
+    productLabels.reserveCapacity(productCount)
+    for i in 0..<instances.count {
+      for p in 0..<predictors.count {
+        for l in 0..<labels.count {
+          productInstances.append(instances[i])
+          productPredictors.append(predictors[p])
+          productLabels.append(labels[l])
+        }
+      }
+    }
+
+    let dataset = Dataset(elements: InferenceData(
+      instances: Tensor<Int32>(productInstances.map(Int32.init)),
+      predictors: Tensor<Int32>(productPredictors.map(Int32.init)),
+      labels: Tensor<Int32>(productLabels.map(Int32.init))))
+
+    // Collect the qualities for each batch.
+    var qualities = [[Tensor<Float>]]()
+    for batch in dataset.batched(batchSize) {
+      let predictions = model.qualities(
+        forInstances: batch.instances,
+        predictors: batch.predictors,
+        labels: batch.labels)
+      if qualities.isEmpty {
+        for p in predictions {
+          qualities.append([p])
+        }
+      } else {
+        for (i, p) in predictions.enumerated() {
+          qualities[i].append(p)
+        }
+      }
+    }
+
+    // Aggregate the collected qualities into a single matrix with shape:
+    // [InstanceCount, LabelCount, PredictorCount].
+    let concatenatedQualities = qualities.map { qualities in
+      qualities.count > 1 ? 
+        exp(Tensor<Float>(concatenating: qualities, alongAxis: 0)) :
+        exp(qualities[0])
+    }
+    let aggregatedQualities = concatenatedQualities.count > 1 ? 
+      Tensor<Float>(concatenating: concatenatedQualities, alongAxis: 0) :
+      concatenatedQualities[0]
+    return aggregatedQualities
+      .reshaped(to: [labels.count, instances.count, predictors.count])
+      .transposed(withPermutations: 1, 0, 2)
+  }
+}

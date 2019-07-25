@@ -12,10 +12,10 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-import SwiftyBeaver
+import Logging
 import TensorFlow
 
-fileprivate let logger: SwiftyBeaver.Type = SwiftyBeaver.self
+fileprivate let logger = Logger(label: "Noisy Labels Learner")
 
 public protocol Learner {
   mutating func train<Instance, Predictor, Label>(using data: Data<Instance, Predictor, Label>)
@@ -171,9 +171,9 @@ public struct EMLearner<Model: EMModel>: Learner {
         if verbose {
           if let logSteps = mStepLogCount, mStep % logSteps == 0 || mStep == mStepCount - 1 {
             let nll = accumulatedNLL / Float(accumulatedSteps)
-            logger.info(
-              "M-Step \(String(format: "%5d", mStep)) | " + 
-              "Negative Log-Likelihood: \(String(format: "%.8f", nll))")
+            let message = "M-Step \(String(format: "%5d", mStep)) | " + 
+              "Negative Log-Likelihood: \(String(format: "%.8f", nll))"
+            logger.info("\(message)")
             accumulatedNLL = 0.0
             accumulatedSteps = 0
           }
@@ -197,9 +197,9 @@ public struct EMLearner<Model: EMModel>: Learner {
         if verbose {
           if let logSteps = mStepLogCount, step % logSteps == 0 || step == marginalStepCount - 1 {
             let nll = accumulatedNLL / Float(accumulatedSteps)
-            logger.info(
-              "Marginal-Step \(String(format: "%5d", step)) | " + 
-              "Negative Log-Likelihood: \(String(format: "%.8f", nll))")
+            let message = "Marginal-Step \(String(format: "%5d", step)) | " + 
+              "Negative Log-Likelihood: \(String(format: "%.8f", nll))"
+            logger.info("\(message)")
             accumulatedNLL = 0.0
             accumulatedSteps = 0
           }

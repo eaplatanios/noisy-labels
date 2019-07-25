@@ -122,7 +122,7 @@ public struct MultiLabelEMModel<
     // yHatProvided shape: [BatchSize, 2]
     // yHat shape: [BatchSize, 2]
     // yAccumulated shape: [BatchSize, 2]
-    let majorityVote = Tensor<Float>(majorityVote ? 0 : 1).withoutDerivative()
+    let majorityVote = Tensor<Float>(majorityVote ? 0 : 1)
     let yHatProvided = Tensor<Float>(stacking: [1.0 - data.values, data.values], alongAxis: -1)
     let yHat = useSoftMajorityVote ? yHatProvided : Tensor<Float>(yHatProvided .>= 0.5)
     let yAccumulated = Raw.gatherNd(
@@ -150,15 +150,14 @@ public struct MultiLabelEMModel<
       //   yAccumulated + log(0.5)
       let qLog = predictions.qualities
       let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
-
       let term1 = -(yExpected * hLog).sum()
       let term2 = -(yExpected * qLogYHat).sum()
       let term3 = predictions.regularizationTerm
-      let term4 = entropyWeight * (exp(hLog) * hLog).sum()
+      let term4 = self.entropyWeight * (exp(hLog) * hLog).sum()
       return term1 + term2 + term3 + term4
     }
 
-    optimizer.update(&predictor.allDifferentiableVariables, along: gradient)
+    optimizer.update(&predictor, along: gradient)
     return negativeLogLikelihood.scalarized()
   }
 
@@ -181,11 +180,11 @@ public struct MultiLabelEMModel<
       let qLogYHat = predictions.qualities * yHat.expandingShape(at: 1)      
       let term1 = -(qLogYHat.sum(squeezingAxes: -1) + hLog).logSumExp(squeezingAxes: -1).sum()
       let term2 = predictions.regularizationTerm
-      let term3 = entropyWeight * (exp(hLog) * hLog).sum()
+      let term3 = self.entropyWeight * (exp(hLog) * hLog).sum()
       return term1 + term2 + term3
     }
 
-    optimizer.update(&predictor.allDifferentiableVariables, along: gradient)
+    optimizer.update(&predictor, along: gradient)
     return negativeLogLikelihood.scalarized()
   }
 

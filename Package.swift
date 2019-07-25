@@ -11,16 +11,13 @@ let package = Package(
     .executable(name: "Experiment", targets: ["Experiment"])
   ],
   dependencies: [
+    .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0"),
     .package(url: "https://github.com/weichsel/ZIPFoundation/", .branch("master")),
-    .package(url: "https://github.com/SwiftyBeaver/SwiftyBeaver.git", from: "1.7.0"),
     .package(url: "https://github.com/jkandzi/Progress.swift", from: "0.4.0"),
     .package(url: "https://github.com/apple/swift-package-manager.git", from: "0.1.0")
   ],
   targets: [
-    .target(
-      name: "NoisyLabels",
-      dependencies: ["SwiftyBeaver", "ZIPFoundation"],
-      linkerSettings: [.linkedLibrary("tensorflow")]),
+    .target(name: "NoisyLabels", dependencies: ["Logging", "ZIPFoundation"]),
     .target(name: "Experiment", dependencies: ["NoisyLabels", "Progress", "Utility"]),
   ]
 )

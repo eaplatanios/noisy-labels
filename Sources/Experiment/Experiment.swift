@@ -15,6 +15,7 @@
 import Foundation
 import NoisyLabels
 import Progress
+import TensorFlow
 
 fileprivate func sample<T>(from a: [T], count k: Int) -> [T] {
   var a = a
@@ -37,8 +38,8 @@ fileprivate extension Array where Element == Float {
   var standardDeviation: Element {
     get {
       let mean = self.reduce(0, { $0 + $1 }) / Float(self.count)
-      let variance = self.map { pow(($0 - mean), 2) }
-      return sqrt(variance.mean)
+      let variance = self.map { ($0 - mean) * ($0 - mean) }
+      return TensorFlow.sqrt(variance.mean)
     }
   }
 }

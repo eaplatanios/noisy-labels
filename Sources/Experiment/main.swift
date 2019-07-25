@@ -13,16 +13,18 @@
 // the License.
 
 import Foundation
+import Logging
 import NoisyLabels
-import SwiftyBeaver
+import TensorFlow
 import Utility
 
-let console: ConsoleDestination = ConsoleDestination()
-let logger: SwiftyBeaver.Type = {
-  console.format = "$DHH:mm:ss.SSS$d $L $M"
-  SwiftyBeaver.addDestination(console)
-  return SwiftyBeaver.self
-}()
+// let console: ConsoleDestination = ConsoleDestination()
+// let logger: SwiftyBeaver.Type = {
+//   console.format = "$DHH:mm:ss.SSS$d $L $M"
+//   SwiftyBeaver.addDestination(console)
+//   return SwiftyBeaver.self
+// }()
+let logger = Logger(label: "Noisy Labels Experiment")
 
 let parser = ArgumentParser(
   usage: "<options>",
@@ -56,7 +58,7 @@ let resultsDir: Foundation.URL = {
   }
   return currentDir.appendingPathComponent("temp/results")
 }()
-let dataset = parsedArguments.get(datasetArgument) ?? .rte // fatalError("No dataset was provided.")
+let dataset = parsedArguments.get(datasetArgument)!
 
 func emLearner(_ data: NoisyLabels.Data<Int, String, Int>) -> Learner {
   let predictor = MinimaxConditionalEntropyPredictor(

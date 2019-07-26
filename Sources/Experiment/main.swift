@@ -61,10 +61,11 @@ let resultsDir: Foundation.URL = {
 let dataset = parsedArguments.get(datasetArgument)!
 
 func emLearner(_ data: NoisyLabels.Data<Int, String, Int>) -> Learner {
-  let predictor = MinimaxConditionalEntropyPredictor(
+  let predictor = MultiClassMinimaxConditionalEntropyPredictor(
     instanceCount: data.instances.count,
     predictorCount: data.predictors.count,
     labelCount: data.labels.count,
+    classCounts: data.classCounts,
     avgLabelsPerPredictor: data.avgLabelsPerPredictor,
     avgLabelsPerItem: data.avgLabelsPerItem,
     gamma: 0.00)
@@ -75,12 +76,9 @@ func emLearner(_ data: NoisyLabels.Data<Int, String, Int>) -> Learner {
     beta2: 0.99,
     epsilon: 1e-8,
     decay: 0)
-  let model = MultiLabelEMModel(
+  let model = MultiClassMultiLabelEMModel(
     predictor: predictor,
     optimizer: optimizer,
-    instanceCount: data.instances.count,
-    predictorCount: data.predictors.count,
-    labelCount: data.labels.count,
     entropyWeight: 0.0,
     useSoftMajorityVote: true,
     useSoftPredictions: false)

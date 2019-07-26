@@ -16,6 +16,10 @@ import TensorFlow
 
 public protocol MultiLabelPredictor: Differentiable, KeyPathIterable
 where AllDifferentiableVariables: KeyPathIterable {
+  var instanceCount: Int { get }
+  var predictorCount: Int { get }
+  var labelCount: Int { get }
+
   @differentiable(wrt: self)
   func predictions(
     forInstances instances: Tensor<Int32>,
@@ -110,86 +114,129 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
   }
 
   public mutating func reset() {
-    pInstanceEmbeddings = Tensor<Float>(glorotUniform: [instanceCount, labelCount]) // TODO: seed.
-    qInstanceEmbeddings = Tensor<Float>(glorotUniform: [instanceCount, 4]) // TODO: seed.
-    qPredictorEmbeddings = Tensor<Float>(glorotUniform: [predictorCount, 4]) // TODO: seed.
+    pInstanceEmbeddings = Tensor<Float>(glorotUniform: [instanceCount, labelCount])
+    qInstanceEmbeddings = Tensor<Float>(glorotUniform: [instanceCount, 4])
+    qPredictorEmbeddings = Tensor<Float>(glorotUniform: [predictorCount, 4])
   }
 }
 
-// public struct MultiClassMinimaxConditionalEntropyPredictor: MultiLabelPredictor {
-//   @noDerivative public let instanceCount: Int
-//   @noDerivative public let predictorCount: Int
-//   @noDerivative public let labelCount: Int
-//   @noDerivative public let numClasses: [Int]
-//   @noDerivative public let alpha: Float
-//   @noDerivative public let beta: Float
+public protocol MultiClassMultiLabelPredictor: Differentiable, KeyPathIterable
+where AllDifferentiableVariables: KeyPathIterable {
+  var instanceCount: Int { get }
+  var predictorCount: Int { get }
+  var labelCount: Int { get }
+  var classCounts: [Int] { get }
 
-//   public var pInstanceEmbeddings: [Tensor<Float>]
-//   public var qInstanceEmbeddings: Tensor<Float>
-//   public var qPredictorEmbeddings: Tensor<Float>
+  @differentiable(wrt: self)
+  func predictions(
+    forInstances instances: Tensor<Int32>,
+    predictors: Tensor<Int32>,
+    labels: Tensor<Int32>
+  ) -> MultiClassMultiLabelPredictions
 
-//   public init(
-//     instanceCount: Int,
-//     predictorCount: Int,
-//     labelCount: Int,
-//     numClasses: [Int],
-//     avgLabelsPerPredictor: Float,
-//     avgLabelsPerItem: Float,
-//     gamma: Float = 0.25
-//   ) {
-//     self.instanceCount = instanceCount
-//     self.predictorCount = predictorCount
-//     self.labelCount = labelCount
-//     self.numClasses = numClasses
-//     self.alpha = 0.5 * gamma * pow(Float(2 * labelCount), 2.0)
-//     self.beta = alpha * avgLabelsPerPredictor / avgLabelsPerItem
+  @differentiable(wrt: self)
+  func labelProbabilities(forInstances instances: Tensor<Int32>) -> [Tensor<Float>]
 
-//     pInstanceEmbeddings = numClasses.map { Tensor<Float>(glorotUniform: [instanceCount, $0]) } // TODO: seed.
-//     qInstanceEmbeddings = Tensor<Float>(glorotUniform: [instanceCount, 2, 2]) // TODO: seed.
-//     qPredictorEmbeddings = Tensor<Float>(glorotUniform: [predictorCount, 2, 2]) // TODO: seed.
-//   }
+  @differentiable(wrt: self)
+  func qualities(
+    forInstances instances: Tensor<Int32>,
+    predictors: Tensor<Int32>,
+    labels: Tensor<Int32>
+  ) -> [Tensor<Float>]
 
-//   @differentiable(wrt: self)
-//   public func predictions(
-//     forInstances instances: Tensor<Int32>,
-//     predictors: Tensor<Int32>,
-//     labels: Tensor<Int32>
-//   ) -> MultiLabelPredictions {
-//     // TODO: If I do: let labelProbabilities = self.labelProbabilities(data), then AD does not work.
-//     let qI = qInstanceEmbeddings.gathering(atIndices: instances)
-//     let qP = qPredictorEmbeddings.gathering(atIndices: predictors)
-//     let qualities = logSoftmax(qI + qP)
-//     let regularizationTerm = beta * (qI * qI).sum() + alpha * (qP * qP).sum()
-//     return MultiLabelPredictions(
-//       labelProbabilities: labelProbabilities(forInstances: instances),
-//       qualities: qualities,
-//       regularizationTerm: regularizationTerm,
-//       includePredictionsPrior: false)
-//   }
+  mutating func reset()
+}
 
-//   @differentiable(wrt: self)
-//   public func labelProbabilities(forInstances instances: Tensor<Int32>) -> [Tensor<Float>] {
-//     let numLabels = numClasses.count
-//     for labelId in 0..<numLabels {
-//       logSigmoid(pInstanceEmbeddings[labelId].gathering(atIndices: instances))
-//     }
-//     return logSigmoid(pInstanceEmbeddings.gathering(atIndices: instances))
-//   }
+public struct MultiClassMultiLabelPredictions: Differentiable {
+  public var labelProbabilities: [Tensor<Float>]
+  public var qualities: [Tensor<Float>]
+  public var regularizationTerm: Tensor<Float>
+  @noDerivative public let includePredictionsPrior: Bool
+}
 
-//   @differentiable(wrt: self)
-//   public func qualities(
-//     forInstances instances: Tensor<Int32>,
-//     predictors: Tensor<Int32>,
-//     labels: Tensor<Int32>
-//   ) -> Tensor<Float> {
-//     let qI = qInstanceEmbeddings.gathering(atIndices: instances)
-//     let qP = qPredictorEmbeddings.gathering(atIndices: predictors)
-//     return logSoftmax(qI + qP)
-//   }
+public struct MultiClassMinimaxConditionalEntropyPredictor: MultiClassMultiLabelPredictor {
+  @noDerivative public let instanceCount: Int
+  @noDerivative public let predictorCount: Int
+  @noDerivative public let labelCount: Int
+  @noDerivative public let classCounts: [Int]
+  @noDerivative public let alpha: Float
+  @noDerivative public let beta: Float
 
-//   public mutating func reset() {
-//     pInstanceEmbeddings = Tensor<Float>(glorotUniform: [instanceCount, labelCount]) // TODO: seed.
-//     qInstanceEmbeddings = Tensor<Float>(glorotUniform: [instanceCount, 4]) // TODO: seed.
-//     qPredictorEmbeddings = Tensor<Float>(glorotUniform: [predictorCount, 4]) // TODO: seed.
-//   }
-// }
+  /// Instance embeddings (one for each label) used for the label prediction function.
+  public var pInstanceEmbeddings: [Tensor<Float>]
+
+  /// Instance embeddings (one for each label) used for the quality prediction function.
+  public var qInstanceEmbeddings: [Tensor<Float>]
+
+  /// Predictor embeddings (one for each label) used for the quality prediction function.
+  public var qPredictorEmbeddings: [Tensor<Float>]
+
+  public init(
+    instanceCount: Int,
+    predictorCount: Int,
+    labelCount: Int,
+    classCounts: [Int],
+    avgLabelsPerPredictor: Float,
+    avgLabelsPerItem: Float,
+    gamma: Float = 0.25
+  ) {
+    self.instanceCount = instanceCount
+    self.predictorCount = predictorCount
+    self.labelCount = labelCount
+    self.classCounts = classCounts
+    self.alpha = 0.5 * gamma * pow(Float(2 * labelCount), 2.0)
+    self.beta = alpha * avgLabelsPerPredictor / avgLabelsPerItem
+    pInstanceEmbeddings = classCounts.map { Tensor<Float>(glorotUniform: [instanceCount, $0]) }
+    qInstanceEmbeddings = classCounts.map { Tensor<Float>(glorotUniform: [instanceCount, $0, $0]) }
+    qPredictorEmbeddings = classCounts.map { Tensor<Float>(glorotUniform: [predictorCount, $0, $0]) }
+  }
+
+  @differentiable(wrt: self)
+  public func predictions(
+    forInstances instances: Tensor<Int32>,
+    predictors: Tensor<Int32>,
+    labels: Tensor<Int32>
+  ) -> MultiClassMultiLabelPredictions {
+    let qI = qInstanceEmbeddings.differentiableMap { $0.gathering(atIndices: instances) }
+    let qP = qPredictorEmbeddings.differentiableMap { $0.gathering(atIndices: predictors) }
+    let qualities = differentiableZip(qI, qP).differentiableMap {
+      logSoftmax($0.first + $0.second)
+    }
+    var regularizationTerm = Tensor<Float>(zeros: [])
+    for l in classCounts.indices {
+      regularizationTerm = regularizationTerm + beta * (qI[l] * qI[l]).sum()
+      regularizationTerm = regularizationTerm + alpha * (qP[l] * qP[l]).sum()
+    }
+    return MultiClassMultiLabelPredictions(
+      labelProbabilities: labelProbabilities(forInstances: instances),
+      qualities: qualities,
+      regularizationTerm: regularizationTerm,
+      includePredictionsPrior: false)
+  }
+
+  @differentiable(wrt: self)
+  public func labelProbabilities(forInstances instances: Tensor<Int32>) -> [Tensor<Float>] {
+    pInstanceEmbeddings.differentiableMap {
+      logSigmoid($0.gathering(atIndices: instances))
+    }
+  }
+
+  @differentiable(wrt: self)
+  public func qualities(
+    forInstances instances: Tensor<Int32>,
+    predictors: Tensor<Int32>,
+    labels: Tensor<Int32>
+  ) -> [Tensor<Float>] {
+    differentiableZip(qInstanceEmbeddings, qPredictorEmbeddings).differentiableMap {
+      logSoftmax(
+        $0.first.gathering(atIndices: instances) +
+        $0.second.gathering(atIndices: predictors))
+    }
+  }
+
+  public mutating func reset() {
+    pInstanceEmbeddings = classCounts.map { Tensor<Float>(glorotUniform: [instanceCount, $0]) }
+    qInstanceEmbeddings = classCounts.map { Tensor<Float>(glorotUniform: [instanceCount, $0, $0]) }
+    qPredictorEmbeddings = classCounts.map { Tensor<Float>(glorotUniform: [predictorCount, $0, $0]) }
+  }
+}

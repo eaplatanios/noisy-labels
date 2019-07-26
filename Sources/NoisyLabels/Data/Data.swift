@@ -10,7 +10,7 @@
 // distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
 // WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 // License for the specific language governing permissions and limitations under
-// the Licens.
+// the License.
 
 import TensorFlow
 
@@ -93,7 +93,7 @@ public struct Data<Instance, Predictor, Label> {
   public let predictedLabels: [Int: [Int: (instances: [Int], values: [Float])]]
 
   /// Number of classes per label.
-  public let numClasses: [Int]
+  public let classCounts: [Int]
 
   public let instanceFeatures: [Tensor<Float>]?
   public let predictorFeatures: [Tensor<Float>]?
@@ -105,7 +105,7 @@ public struct Data<Instance, Predictor, Label> {
     labels: [Label],
     trueLabels: [Int: [Int: Int]], 
     predictedLabels: [Int: [Int: (instances: [Int], values: [Float])]], 
-    numClasses: [Int], 
+    classCounts: [Int], 
     instanceFeatures: [Tensor<Float>]? = nil, 
     predictorFeatures: [Tensor<Float>]? = nil, 
     labelFeatures: [Tensor<Float>]? = nil
@@ -115,7 +115,7 @@ public struct Data<Instance, Predictor, Label> {
     self.labels = labels
     self.trueLabels = trueLabels
     self.predictedLabels = predictedLabels
-    self.numClasses = numClasses
+    self.classCounts = classCounts
     self.instanceFeatures = instanceFeatures
     self.predictorFeatures = predictorFeatures
     self.labelFeatures = labelFeatures
@@ -164,7 +164,7 @@ public struct Data<Instance, Predictor, Label> {
 
     var trueLabels = [Int: [Int: Int]]()
     var predictedLabels = [Int: [Int: (instances: [Int], values: [Float])]]()
-    var numClasses = [Int]()
+    var classCounts = [Int]()
 
     var hasIF = true
     var hasPF = true
@@ -244,7 +244,7 @@ public struct Data<Instance, Predictor, Label> {
         }
 
         // Process the number of classes.
-        numClasses = zip(numClasses, dataset.numClasses).map(+)
+        classCounts = zip(classCounts, dataset.classCounts).map(+)
       }
     }
 
@@ -254,7 +254,7 @@ public struct Data<Instance, Predictor, Label> {
       labels: labels,
       trueLabels: trueLabels,
       predictedLabels: predictedLabels,
-      numClasses: numClasses,
+      classCounts: classCounts,
       instanceFeatures: instanceFeatures,
       predictorFeatures: predictorFeatures,
       labelFeatures: labelFeatures)
@@ -347,7 +347,7 @@ public extension Data where Label: Equatable {
 
     var trueLabels = [Int: [Int: Int]]()
     var predictedLabels = [Int: [Int: (instances: [Int], values: [Float])]]()
-    var numClasses = [Int]()
+    var classCounts = [Int]()
 
     let hasIF = instanceFeatures != nil
     let hasPF = predictorFeatures != nil
@@ -358,7 +358,7 @@ public extension Data where Label: Equatable {
 
     for (l, label) in labels.enumerated() {
       let lOld = self.labels.firstIndex(of: label)!
-      numClasses.append(self.numClasses[lOld])
+      classCounts.append(self.classCounts[lOld])
       if hasLF {
         labelFeatures!.append(self.labelFeatures![lOld])
       }
@@ -413,7 +413,7 @@ public extension Data where Label: Equatable {
       labels: labels,
       trueLabels: trueLabels,
       predictedLabels: predictedLabels,
-      numClasses: numClasses,
+      classCounts: classCounts,
       instanceFeatures: instanceFeatures,
       predictorFeatures: predictorFeatures,
       labelFeatures: labelFeatures)
@@ -430,7 +430,7 @@ public extension Data where Predictor: Equatable {
 
     var trueLabels = [Int: [Int: Int]]()
     var predictedLabels = [Int: [Int: (instances: [Int], values: [Float])]]()
-    var numClasses = [Int]()
+    var classCounts = [Int]()
 
     let hasIF = instanceFeatures != nil
     let hasPF = predictorFeatures != nil
@@ -445,7 +445,7 @@ public extension Data where Predictor: Equatable {
     }
 
     for (l, _) in labels.enumerated() {
-      numClasses.append(self.numClasses[l])
+      classCounts.append(self.classCounts[l])
       if hasLF {
         labelFeatures!.append(self.labelFeatures![l])
       }
@@ -512,7 +512,7 @@ public extension Data where Predictor: Equatable {
       labels: labels,
       trueLabels: trueLabels,
       predictedLabels: predictedLabels,
-      numClasses: numClasses,
+      classCounts: classCounts,
       instanceFeatures: instanceFeatures,
       predictorFeatures: predictorFeatures,
       labelFeatures: labelFeatures)

@@ -96,6 +96,6 @@ public struct RTELoader: DataLoader {
       labels: [0],
       trueLabels: [0: trueLabels],
       predictedLabels: [0: predictedLabels],
-      numClasses: [2])
+      classCounts: [2])
   }
 }

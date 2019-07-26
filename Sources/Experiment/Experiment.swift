@@ -49,6 +49,7 @@ public struct Experiment {
   public let dataset: Dataset
   public let usingFeatures: Bool
   public let learners: [String: (NoisyLabels.Data<Int, String, Int>) -> Learner]
+  public let concurrentTaskCount: Int = 1
 
   let data: NoisyLabels.Data<Int, String, Int>
 
@@ -81,7 +82,7 @@ public struct Experiment {
         ProgressIndex(),
         ProgressBarLine(),
         ProgressTimeEstimates()])
-    let progressBarQueue = DispatchQueue(label: "ProgressBar")
+    let progressBarQueue = DispatchQueue(label: "Noisy Labels Experiment Progress Bar")
     
     var results = [Result]()
     for (learnerName, learner) in learners {

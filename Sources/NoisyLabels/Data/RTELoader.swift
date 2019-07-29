@@ -13,6 +13,7 @@
 // the License.
 
 import Foundation
+import TensorFlow
 import ZIPFoundation
 
 /// PASCAL RTE Amazon Mechanical Turk dataset loader.
@@ -26,7 +27,7 @@ import ZIPFoundation
 public struct RTELoader: DataLoader {
   private let url: URL = URL(
     string: "https://dl.dropboxusercontent.com/s/ebkpj9a5ndy7gh5/rte.zip")!
-  private let featuresUrl: URL = URL(
+  private let featuresURL: URL = URL(
     string: "https://dl.dropboxusercontent.com/s/bc5dr440k6olt79/rte_features.zip")!
 
   public let dataDir: URL
@@ -36,6 +37,8 @@ public struct RTELoader: DataLoader {
   }
 
   public func load(withFeatures: Bool = true) throws -> Data<Int, String, Int> {
+    logger.info("Loading the RTE dataset.")
+
     let dataDir = self.dataDir.appendingPathComponent("rte")
     let compressedFile = dataDir.appendingPathComponent("rte.zip")
 
@@ -53,7 +56,6 @@ public struct RTELoader: DataLoader {
     var predictors = [String]()
     var trueLabels = [Int: Int]()
     var predictedLabels = [Int: (instances: [Int], values: [Float])]()
-
     var instanceIds = [Int: Int]()
     var predictorIds = [String: Int]()
 
@@ -81,7 +83,6 @@ public struct RTELoader: DataLoader {
       }()
 
       trueLabels[instanceId] = trueLabel
-      
       if !predictedLabels.keys.contains(predictorId) {
         predictedLabels[predictorId] = (instances: [instanceId], values: [value])
       } else {
@@ -90,12 +91,34 @@ public struct RTELoader: DataLoader {
       }
     }
 
+    var instanceFeatures: [Tensor<Float>]? = nil
+    if withFeatures {
+      logger.info("Loading the RTE dataset features.")
+      let compressedFeaturesFile = dataDir.appendingPathComponent("rte_features.zip")
+      try maybeDownload(from: featuresURL, to: compressedFeaturesFile)
+      let extractedFeaturesDir = compressedFeaturesFile.deletingPathExtension()
+      if !FileManager.default.fileExists(atPath: extractedFeaturesDir.path) {
+        try FileManager.default.unzipItem(at: compressedFeaturesFile, to: extractedFeaturesDir)
+      }
+      let featuresFile = extractedFeaturesDir.appendingPathComponent("features.txt")
+      let featuresString = try String(contentsOf: featuresFile, encoding: .utf8)
+      var features = [Int: Tensor<Float>]()
+      for line in featuresString.components(separatedBy: .newlines).filter({ !$0.isEmpty }) {
+        let lineParts = line.components(separatedBy: "\t")
+        let instance = Int(lineParts[0])!
+        let values = lineParts[1].components(separatedBy: " ").map { Float($0)! }
+        features[instance] = Tensor(values)
+      }
+      instanceFeatures = instances.map { features[$0]! }
+    }
+
     return Data(
       instances: instances,
       predictors: predictors,
       labels: [0],
       trueLabels: [0: trueLabels],
       predictedLabels: [0: predictedLabels],
-      classCounts: [2])
+      classCounts: [2],
+      instanceFeatures: instanceFeatures)
   }
 }

@@ -18,12 +18,6 @@ import NoisyLabels
 import TensorFlow
 import Utility
 
-// let console: ConsoleDestination = ConsoleDestination()
-// let logger: SwiftyBeaver.Type = {
-//   console.format = "$DHH:mm:ss.SSS$d $L $M"
-//   SwiftyBeaver.addDestination(console)
-//   return SwiftyBeaver.self
-// }()
 let logger = Logger(label: "Noisy Labels Experiment")
 
 let parser = ArgumentParser(

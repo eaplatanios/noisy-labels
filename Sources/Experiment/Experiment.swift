@@ -29,18 +29,12 @@ fileprivate func sample<T>(from a: [T], count k: Int) -> [T] {
 }
 
 fileprivate extension Array where Element == Float {
-  var mean: Float {
-    get {
-      return self.reduce(0, { $0 + $1 }) / Float(self.count)
-    }
-  }
+  var mean: Float { reduce(0, { $0 + $1 }) / Float(count) }
 
   var standardDeviation: Element {
-    get {
-      let mean = self.reduce(0, { $0 + $1 }) / Float(self.count)
-      let variance = self.map { ($0 - mean) * ($0 - mean) }
-      return TensorFlow.sqrt(variance.mean)
-    }
+    let mean = reduce(0, { $0 + $1 }) / Float(count)
+    let variance = map { ($0 - mean) * ($0 - mean) }
+    return TensorFlow.sqrt(variance.mean)
   }
 }
 
@@ -51,7 +45,7 @@ public struct Experiment {
   public let learners: [String: (NoisyLabels.Data<Int, String, Int>) -> Learner]
   public let concurrentTaskCount: Int = 1
 
-  let data: NoisyLabels.Data<Int, String, Int>
+  internal let data: NoisyLabels.Data<Int, String, Int>
 
   public init(
     dataDir: URL,

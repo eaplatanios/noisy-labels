@@ -13,6 +13,9 @@
 // the License.
 
 import Foundation
+import Logging
+
+internal let logger = Logger(label: "Noisy Labels")
 
 public extension Encodable {
   func json(pretty: Bool = true) throws -> String {

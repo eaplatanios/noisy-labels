@@ -12,10 +12,7 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-import Logging
 import TensorFlow
-
-fileprivate let logger = Logger(label: "Noisy Labels Learner")
 
 public protocol Learner {
   mutating func train<Instance, Predictor, Label>(using data: Data<Instance, Predictor, Label>)

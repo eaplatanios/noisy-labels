@@ -13,6 +13,8 @@
 // the License.
 
 import Foundation
+import Logging
+import Progress
 
 /// Contains helpers for dataset loaders.
 ///
@@ -34,7 +36,6 @@ public protocol DataLoader {
 
 public extension DataLoader {
   func maybeDownload(from url: URL, to destination: URL) throws {
-    print(destination.path)
     if !FileManager.default.fileExists(atPath: destination.path) {
       // Create any potentially missing directories.
       try FileManager.default.createDirectory(
@@ -48,7 +49,7 @@ public extension DataLoader {
 
       // Download the data to a temporary file and then copy that file to
       // the destination path.
-      print("Downloading \(url).")
+      logger.info("Downloading \(url).")
       let task = session.downloadTask(with: url)
       task.resume()
 
@@ -64,6 +65,7 @@ internal class DataDownloadDelegate : NSObject, URLSessionDownloadDelegate {
   let numBytesFrequency: Int64 
 
   internal var logCount: Int64 = 0
+  internal var progressBar: ProgressBar? = nil
 
   init(
       destinationFileUrl: URL,
@@ -82,16 +84,16 @@ internal class DataDownloadDelegate : NSObject, URLSessionDownloadDelegate {
       totalBytesWritten: Int64,
       totalBytesExpectedToWrite: Int64
   ) -> Void {
-    if (totalBytesWritten / numBytesFrequency > logCount) {
-      let mBytesWritten = String(format: "%.2f", Float(totalBytesWritten) / (1024 * 1024))
-      if totalBytesExpectedToWrite > 0 {
-        let mBytesExpectedToWrite = String(format: "%.2f", Float(totalBytesExpectedToWrite) / (1024 * 1024))
-        print("Downloaded \(mBytesWritten) MBs out of \(mBytesExpectedToWrite).")
-      } else {
-        print("Downloaded \(mBytesWritten) MBs.")
-      }
-      logCount += 1
+    if progressBar == nil {
+      progressBar = ProgressBar(
+        count: Int(totalBytesExpectedToWrite) / (1024 * 1024),
+        configuration: [
+          ProgressString(string: "Download Progress (MBs):"),
+          ProgressIndex(),
+          ProgressBarLine(),
+          ProgressTimeEstimates()])
     }
+    progressBar!.setValue(Int(totalBytesWritten) / (1024 * 1024))
   }
 
   internal func urlSession(
@@ -99,13 +101,12 @@ internal class DataDownloadDelegate : NSObject, URLSessionDownloadDelegate {
       downloadTask: URLSessionDownloadTask,
       didFinishDownloadingTo location: URL
   ) -> Void {
-    logCount = 0
     do {
       try FileManager.default.moveItem(at: location, to: destinationFileUrl)
     } catch (let writeError) {
-      print("Error writing file \(location.path) : \(writeError)")
+      logger.error("Error writing file \(location.path) : \(writeError)")
     }
-    print("The file was downloaded successfully to \(location.path).")
+    logger.info("Downloaded successfully to \(location.path).")
     semaphore.signal()
   }
 }

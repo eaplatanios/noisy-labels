@@ -54,6 +54,40 @@ internal func _vjpDifferentiableZip<Element1: Differentiable, Element2: Differen
   })
 }
 
+public extension Array where Element: Differentiable {
+  @differentiable(wrt: (self, context), vjp: _vjpDifferentiableContextualMap)
+  func differentiableMap<Context: Differentiable, Result: Differentiable>(
+    _ context: Context,
+    _ body: @differentiable (Context, Element) -> Result
+  ) -> [Result] {
+    map { body(context, $0) }
+  }
+
+  @usableFromInline
+  internal func _vjpDifferentiableContextualMap<Context: Differentiable, Result: Differentiable>(
+    _ context: Context,
+    _ body: @differentiable (Context, Element) -> Result
+  ) -> ([Result], (Array<Result>.TangentVector) -> (Array.TangentVector, Context.TangentVector)) {
+    var values: [Result] = []
+    var pullbacks: [(Result.TangentVector) -> (Element.TangentVector, Context.TangentVector)] = []
+    for x in self {
+      let (y, pb) = Swift.valueWithPullback(at: x, context) { body($1, $0) }
+      values.append(y)
+      pullbacks.append(pb)
+    }
+    return (values, { v in
+      var array = Array.TangentVector()
+      var context = Context.TangentVector.zero
+      for (element, pullback) in zip(v.base, pullbacks) {
+        let (e, c) = pullback(element)
+        array.append(e)
+        context += c
+      }
+      return (array, context)
+    })
+  }
+}
+
 public struct ModelParameters: Differentiable {
   @noDerivative public let labelMask: Tensor<Bool>
   @noDerivative public var eStepAccumulator: Tensor<Float>

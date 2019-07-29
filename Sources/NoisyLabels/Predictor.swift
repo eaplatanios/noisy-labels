@@ -241,13 +241,15 @@ public struct LNLPredictor: MultiLabelPredictor {
     _ predictors: Tensor<Int32>,
     _ labels: Tensor<Int32>
   ) -> MultiLabelPredictions {
-    var instances = instanceFeatures.gathering(atIndices: instances)
-    var predictors = predictorFeatures.gathering(atIndices: predictors)
-    for layer in instanceProcessingLayers { instances = layer(instances) }
-    for layer in predictorProcessingLayers { predictors = layer(predictors) }
-    let labelProbabilities = predictionLayers.differentiableMap { logSoftmax($0(instances)) }
-    let difficulties = difficultyLayers.differentiableMap { $0(instances) }
-    let competences = competenceLayers.differentiableMap { $0(predictors) }
+    let instances = instanceProcessingLayers.differentiableReduce(
+      instanceFeatures.gathering(atIndices: instances),
+      { (instances, layer) in layer(instances) })
+    let predictors = predictorProcessingLayers.differentiableReduce(
+      predictorFeatures.gathering(atIndices: predictors),
+      { (predictors, layer) in layer(predictors) })
+    let labelProbabilities = predictionLayers.differentiableMap(instances) { logSoftmax($1($0)) }
+    let difficulties = difficultyLayers.differentiableMap(instances) { $1($0) }
+    let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     let qualities = differentiableZip(difficulties, competences).differentiableMap {
       logSoftmax($0.first + $0.second).logSumExp(squeezingAxes: -1)
     }
@@ -267,9 +269,10 @@ public struct LNLPredictor: MultiLabelPredictor {
 
   @differentiable
   public func labelProbabilities(_ instances: Tensor<Int32>) -> [Tensor<Float>] {
-    var instances = instanceFeatures.gathering(atIndices: instances)
-    for layer in instanceProcessingLayers { instances = layer(instances) }
-    return predictionLayers.differentiableMap { logSoftmax($0(instances)) }
+    let instances = instanceProcessingLayers.differentiableReduce(
+      instanceFeatures.gathering(atIndices: instances),
+      { (instances, layer) in layer(instances) })
+    return predictionLayers.differentiableMap(instances) { logSoftmax($1($0)) }
   }
 
   @differentiable
@@ -278,12 +281,14 @@ public struct LNLPredictor: MultiLabelPredictor {
     _ predictors: Tensor<Int32>,
     _ labels: Tensor<Int32>
   ) -> [Tensor<Float>] {
-    var instances = instanceFeatures.gathering(atIndices: instances)
-    var predictors = predictorFeatures.gathering(atIndices: predictors)
-    for layer in instanceProcessingLayers { instances = layer(instances) }
-    for layer in predictorProcessingLayers { predictors = layer(predictors) }
-    let difficulties = difficultyLayers.differentiableMap { $0(instances) }
-    let competences = competenceLayers.differentiableMap { $0(predictors) }
+    let instances = instanceProcessingLayers.differentiableReduce(
+      instanceFeatures.gathering(atIndices: instances),
+      { (instances, layer) in layer(instances) })
+    let predictors = predictorProcessingLayers.differentiableReduce(
+      predictorFeatures.gathering(atIndices: predictors),
+      { (predictors, layer) in layer(predictors) })
+    let difficulties = difficultyLayers.differentiableMap(instances) { $1($0) }
+    let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     return differentiableZip(difficulties, competences).differentiableMap {
       logSoftmax($0.first + $0.second).logSumExp(squeezingAxes: -1)
     }

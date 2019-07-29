@@ -66,7 +66,7 @@ public struct Experiment {
     self.data = try dataset.loader(dataDir: dataDir).load(withFeatures: usingFeatures)
   }
 
-  public func run() {
+  public func run() -> [Result] {
     var predictorSamplesCount = 0
     for (predictorCount, repetitionCount) in zip(
       dataset.predictorCounts(),
@@ -131,8 +131,8 @@ public struct Experiment {
       }
     }
 
-    logger.info("Finished all experiment runs. Results:")
-    dump(results)
+    logger.info("Finished all experiments.")
+    return results
   }
 }
 

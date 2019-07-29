@@ -60,7 +60,7 @@ let resultsDir: Foundation.URL = {
 }()
 let dataset = parsedArguments.get(datasetArgument)!
 
-func emLearner(_ data: NoisyLabels.Data<Int, String, Int>) -> Learner {
+func emLearner(_ data: NoisyLabels.Data<Int, String, Int>, gamma: Float) -> Learner {
   let predictor = MultiClassMinimaxConditionalEntropyPredictor(
     instanceCount: data.instances.count,
     predictorCount: data.predictors.count,
@@ -68,8 +68,8 @@ func emLearner(_ data: NoisyLabels.Data<Int, String, Int>) -> Learner {
     classCounts: data.classCounts,
     avgLabelsPerPredictor: data.avgLabelsPerPredictor,
     avgLabelsPerItem: data.avgLabelsPerItem,
-    gamma: 0.00)
-  let optimizer = AMSGrad(
+    gamma: gamma)
+  let optimizer = Adam(
     for: predictor,
     learningRate: 1e-3,
     beta1: 0.9,
@@ -79,18 +79,19 @@ func emLearner(_ data: NoisyLabels.Data<Int, String, Int>) -> Learner {
   let model = MultiClassMultiLabelEMModel(
     predictor: predictor,
     optimizer: optimizer,
-    entropyWeight: 0.0,
+    entropyWeight: 1.0,
     useSoftMajorityVote: true,
     useSoftPredictions: false)
   return EMLearner(
     for: model,
-    randomSeed: 1234567890,
-    batchSize: 1024,
+    randomSeed: 42,
+    batchSize: 128,
     useWarmStarting: true,
     mStepCount: 1000,
     emStepCount: 10,
     marginalStepCount: 0,
-    mStepLogCount: 100)
+    mStepLogCount: 100,
+    verbose: false)
 }
 
 let experiment = try Experiment(
@@ -100,12 +101,13 @@ let experiment = try Experiment(
   learners: [
     "MAJ": { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
     "MAJ-S": { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
-    "MMCE-M (γ=0.00)": emLearner,
+    "MMCE-M (γ=0.00)": { data in emLearner(data, gamma: 0.00) },
+    "MMCE-M (γ=0.25)": { data in emLearner(data, gamma: 0.25) },
   ])
-experiment.run()
+let results = experiment.run()
 
-// let resultsFile = resultsDir.appendingPathComponent("\(dataset.rawValue).csv")
-
-// if !FileManager.default.fileExists(atPath: resultsDir.path) {
-//   try FileManager.default.createDirectory(at: resultsDir)
-// }
+let resultsFile = resultsDir.appendingPathComponent("\(dataset.rawValue).csv")
+if !FileManager.default.fileExists(atPath: resultsDir.path) {
+  try FileManager.default.createDirectory(at: resultsDir, withIntermediateDirectories: true)
+}
+try results.json(pretty: true).write(to: resultsFile, atomically: false, encoding: .utf8)

@@ -14,7 +14,7 @@
 
 import TensorFlow
 
-public protocol MultiLabelPredictor: Differentiable, KeyPathIterable
+public protocol Predictor: Differentiable, KeyPathIterable
 where AllDifferentiableVariables: KeyPathIterable {
   var instanceCount: Int { get }
   var predictorCount: Int { get }
@@ -26,7 +26,7 @@ where AllDifferentiableVariables: KeyPathIterable {
     _ instances: Tensor<Int32>,
     _ predictors: Tensor<Int32>,
     _ labels: Tensor<Int32>
-  ) -> MultiLabelPredictions
+  ) -> Predictions
 
   @differentiable
   func labelProbabilities(_ instances: Tensor<Int32>) -> [Tensor<Float>]
@@ -41,7 +41,7 @@ where AllDifferentiableVariables: KeyPathIterable {
   mutating func reset()
 }
 
-public struct MultiLabelPredictions: Differentiable {
+public struct Predictions: Differentiable {
   @differentiable public var labelProbabilities: [Tensor<Float>]
   @differentiable public var qualities: [Tensor<Float>]
   @differentiable public var regularizationTerm: Tensor<Float>
@@ -65,7 +65,7 @@ public struct MultiLabelPredictions: Differentiable {
 /// Model proposed in "Regularized Minimax Conditional Entropy for Crowdsourcing".
 ///
 /// Source: https://arxiv.org/pdf/1503.07240.pdf.
-public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
+public struct MinimaxConditionalEntropyPredictor: Predictor {
   @noDerivative public let instanceCount: Int
   @noDerivative public let predictorCount: Int
   @noDerivative public let labelCount: Int
@@ -104,7 +104,7 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
     _ instances: Tensor<Int32>,
     _ predictors: Tensor<Int32>,
     _ labels: Tensor<Int32>
-  ) -> MultiLabelPredictions {
+  ) -> Predictions {
     let qI = qInstanceEmbeddings.differentiableMap { $0.gathering(atIndices: instances) }
     let qP = qPredictorEmbeddings.differentiableMap { $0.gathering(atIndices: predictors) }
     let qualities = differentiableZip(qI, qP).differentiableMap {
@@ -117,7 +117,7 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
       qP.differentiableMap{ $0.squared().sum() }
     ).differentiableMap { beta * $0.first + alpha * $0.second }
     let regularizationTerm = regularizationTerms.differentiableReduce(Tensor(0.0), { $0 + $1 })
-    return MultiLabelPredictions(
+    return Predictions(
       labelProbabilities: labelProbabilities(instances),
       qualities: qualities,
       regularizationTerm: regularizationTerm,
@@ -153,7 +153,7 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
   }
 }
 
-public struct LNLPredictor: MultiLabelPredictor {
+public struct LNLPredictor: Predictor {
   @noDerivative public let instanceCount: Int
   @noDerivative public let predictorCount: Int
   @noDerivative public let labelCount: Int
@@ -244,7 +244,7 @@ public struct LNLPredictor: MultiLabelPredictor {
     _ instances: Tensor<Int32>,
     _ predictors: Tensor<Int32>,
     _ labels: Tensor<Int32>
-  ) -> MultiLabelPredictions {
+  ) -> Predictions {
     let instances = instanceProcessingLayers.differentiableReduce(
       instanceFeatures.gathering(atIndices: instances),
       { (instances, layer) in layer(instances) })
@@ -264,7 +264,7 @@ public struct LNLPredictor: MultiLabelPredictor {
       competences.differentiableMap{ $0.squared().sum() }
     ).differentiableMap { beta * $0.first + alpha * $0.second }
     let regularizationTerm = regularizationTerms.differentiableReduce(Tensor(0.0), { $0 + $1 })
-    return MultiLabelPredictions(
+    return Predictions(
       labelProbabilities: labelProbabilities,
       qualities: qualities,
       regularizationTerm: regularizationTerm,

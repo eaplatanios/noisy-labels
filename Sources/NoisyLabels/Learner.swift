@@ -98,8 +98,11 @@ public struct MajorityVoteLearner: Learner {
   }
 }
 
-public struct EMLearner<Model: EMModel>: Learner {
-  public private(set) var model: Model
+public struct EMLearner<
+  Predictor: NoisyLabels.Predictor,
+  Optimizer: TensorFlow.Optimizer
+>: Learner where Optimizer.Model == Predictor {
+  public private(set) var model: EMModel<Predictor, Optimizer>
 
   public let randomSeed: Int64
   public let batchSize: Int
@@ -112,7 +115,7 @@ public struct EMLearner<Model: EMModel>: Learner {
   public let verbose: Bool
 
   public init(
-    for model: Model,
+    for model: EMModel<Predictor, Optimizer>,
     randomSeed: Int64,
     batchSize: Int = 128,
     useWarmStarting: Bool = true,

@@ -14,42 +14,8 @@
 
 import TensorFlow
 
-public protocol EMModel {
-  mutating func prepareForEStep()
-  mutating func executeEStep(using data: TrainingData, majorityVote: Bool)
-  mutating func finalizeEStep(majorityVote: Bool)
-
-  mutating func prepareForMStep()
-
-  /// - Returns: Negative log-likelihood.
-  mutating func executeMStep(using data: TrainingData, majorityVote: Bool) -> Float
-  mutating func finalizeMStep(majorityVote: Bool)
-
-  /// - Returns: Negative log-likelihood.
-  mutating func executeMarginalStep(using data: TrainingData) -> Float
-
-  func negativeLogLikelihood(for data: TrainingData) -> Float
-
-  func labelProbabilities(_ instances: Tensor<Int32>) -> [Tensor<Float>]
-
-  func qualities(
-    _ instances: Tensor<Int32>,
-    _ predictors: Tensor<Int32>,
-    _ labels: Tensor<Int32>
-  ) -> [Tensor<Float>]
-}
-
-public extension EMModel {
-  mutating func prepareForEStep() {}
-  mutating func finalizeEStep(majorityVote: Bool) {}
-  mutating func prepareForMStep() {}
-  mutating func finalizeMStep(majorityVote: Bool) {}
-}
-
-public struct MultiLabelEMModel<
-  Predictor: MultiLabelPredictor,
-  Optimizer: TensorFlow.Optimizer
->: EMModel where Optimizer.Model == Predictor {
+public struct EMModel<Predictor: NoisyLabels.Predictor, Optimizer: TensorFlow.Optimizer>
+where Optimizer.Model == Predictor {
   public let instanceCount: Int
   public let predictorCount: Int
   public let labelCount: Int
@@ -220,7 +186,7 @@ public struct MultiLabelEMModel<
   }
 }
 
-extension MultiLabelEMModel {
+extension EMModel {
   /// Returns an array of one-hot encodings of the label that corresponds to each batch element.
   @inlinable
   internal func labelMasks(for labels: Tensor<Int32>) -> [Tensor<Bool>] {

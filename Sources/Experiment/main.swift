@@ -63,7 +63,7 @@ func mmceLearner(_ data: NoisyLabels.Data<Int, String, Int>, gamma: Float) -> Le
     beta2: 0.99,
     epsilon: 1e-8,
     decay: 0)
-  let model = MultiLabelEMModel(
+  let model = EMModel(
     predictor: predictor,
     optimizer: optimizer,
     entropyWeight: 1.0,
@@ -105,7 +105,7 @@ func lnlLearner(
     beta2: 0.99,
     epsilon: 1e-8,
     decay: 0)
-  let model = MultiLabelEMModel(
+  let model = EMModel(
     predictor: predictor,
     optimizer: optimizer,
     entropyWeight: 1.0,

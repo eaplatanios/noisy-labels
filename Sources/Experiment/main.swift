@@ -128,55 +128,58 @@ let experiment = try Experiment(
   dataset: dataset,
   usingFeatures: false,
   learners: [
-    // "MAJ": { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
-    // "MAJ-S": { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
-    // "MMCE-M (γ=0.00)": { data in mmceLearner(data, gamma: 0.00) },
-    // "MMCE-M (γ=0.25)": { data in mmceLearner(data, gamma: 0.25) },
-    "LNL-4-4-4x16-4x16-1 (γ=0.00)": { data in
-      lnlLearner(
-        data,
-        instanceEmbeddingSize: 4,
-        predictorEmbeddingSize: 4,
-        instanceHiddenUnitCounts: [16, 16, 16, 16],
-        predictorHiddenUnitCounts: [16, 16, 16, 16],
-        confusionLatentSize: 1,
-        gamma: 0.00)
-    },
-    "LNL-4-4-4x16-4x16-1 (γ=0.25)": { data in
-      lnlLearner(
-        data,
-        instanceEmbeddingSize: 4,
-        predictorEmbeddingSize: 4,
-        instanceHiddenUnitCounts: [16, 16, 16, 16],
-        predictorHiddenUnitCounts: [16, 16, 16, 16],
-        confusionLatentSize: 1,
-        gamma: 0.25)
-    },
-    "LNL-IF-4-4x16-4x16-1 (γ=0.00)": { data in
-      lnlLearner(
-        data,
-        instanceEmbeddingSize: nil,
-        predictorEmbeddingSize: 4,
-        instanceHiddenUnitCounts: [16, 16, 16, 16],
-        predictorHiddenUnitCounts: [16, 16, 16, 16],
-        confusionLatentSize: 1,
-        gamma: 0.00)
-    },
-    "LNL-IF-4-4x16-4x16-1 (γ=0.25)": { data in
-      lnlLearner(
-        data,
-        instanceEmbeddingSize: nil,
-        predictorEmbeddingSize: 4,
-        instanceHiddenUnitCounts: [16, 16, 16, 16],
-        predictorHiddenUnitCounts: [16, 16, 16, 16],
-        confusionLatentSize: 1,
-        gamma: 0.25)
-    }
+    "MAJ": { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
+    "MAJ-S": { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
+    "MMCE-M (γ=0.00)": { data in mmceLearner(data, gamma: 0.00) },
+    "MMCE-M (γ=0.25)": { data in mmceLearner(data, gamma: 0.25) },
+    // "LNL-4-4-4x16-4x16-1 (γ=0.00)": { data in
+    //   lnlLearner(
+    //     data,
+    //     instanceEmbeddingSize: 4,
+    //     predictorEmbeddingSize: 4,
+    //     instanceHiddenUnitCounts: [16, 16, 16, 16],
+    //     predictorHiddenUnitCounts: [16, 16, 16, 16],
+    //     confusionLatentSize: 1,
+    //     gamma: 0.00)
+    // },
+    // "LNL-4-4-4x16-4x16-1 (γ=0.25)": { data in
+    //   lnlLearner(
+    //     data,
+    //     instanceEmbeddingSize: 4,
+    //     predictorEmbeddingSize: 4,
+    //     instanceHiddenUnitCounts: [16, 16, 16, 16],
+    //     predictorHiddenUnitCounts: [16, 16, 16, 16],
+    //     confusionLatentSize: 1,
+    //     gamma: 0.25)
+    // },
+    // "LNL-IF-4-4x16-4x16-1 (γ=0.00)": { data in
+    //   lnlLearner(
+    //     data,
+    //     instanceEmbeddingSize: nil,
+    //     predictorEmbeddingSize: 4,
+    //     instanceHiddenUnitCounts: [16, 16, 16, 16],
+    //     predictorHiddenUnitCounts: [16, 16, 16, 16],
+    //     confusionLatentSize: 1,
+    //     gamma: 0.00)
+    // },
+    // "LNL-IF-4-4x16-4x16-1 (γ=0.25)": { data in
+    //   lnlLearner(
+    //     data,
+    //     instanceEmbeddingSize: nil,
+    //     predictorEmbeddingSize: 4,
+    //     instanceHiddenUnitCounts: [16, 16, 16, 16],
+    //     predictorHiddenUnitCounts: [16, 16, 16, 16],
+    //     confusionLatentSize: 1,
+    //     gamma: 0.25)
+    // }
   ])
-let results = experiment.run()
-
-let resultsFile = resultsDir.appendingPathComponent("\(dataset.rawValue).csv")
-if !FileManager.default.fileExists(atPath: resultsDir.path) {
-  try FileManager.default.createDirectory(at: resultsDir, withIntermediateDirectories: true)
-}
-try results.json(pretty: true).write(to: resultsFile, atomically: false, encoding: .utf8)
+let resultsURL = resultsDir.appendingPathComponent("\(dataset.rawValue).tsv")
+let results = experiment.run(
+  callback: ResultsWriter(at: resultsURL),
+  runs: [
+    .simple(predictorCount: 1, repetitionCount: 5),
+    .simple(predictorCount: 10, repetitionCount: 5),
+    .simple(predictorCount: 20, repetitionCount: 5),
+    .simple(predictorCount: 50, repetitionCount: 5),
+    .simple(predictorCount: 100, repetitionCount: 2),
+    .simple(predictorCount: 164, repetitionCount: 1)])

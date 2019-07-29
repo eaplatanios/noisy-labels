@@ -21,17 +21,17 @@ where AllDifferentiableVariables: KeyPathIterable {
   var labelCount: Int { get }
   var classCounts: [Int] { get }
 
-  @differentiable(wrt: self)
+  @differentiable
   func predictions(
     forInstances instances: Tensor<Int32>,
     predictors: Tensor<Int32>,
     labels: Tensor<Int32>
   ) -> MultiLabelPredictions
 
-  @differentiable(wrt: self)
+  @differentiable
   func labelProbabilities(forInstances instances: Tensor<Int32>) -> [Tensor<Float>]
 
-  @differentiable(wrt: self)
+  @differentiable
   func qualities(
     forInstances instances: Tensor<Int32>,
     predictors: Tensor<Int32>,
@@ -102,7 +102,7 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
     qPredictorEmbeddings = classCounts.map { Tensor(glorotUniform: [predictorCount, $0, $0]) }
   }
 
-  @differentiable(wrt: self)
+  @differentiable
   public func predictions(
     forInstances instances: Tensor<Int32>,
     predictors: Tensor<Int32>,
@@ -119,9 +119,7 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
       qI.differentiableMap{ $0.squared().sum() },
       qP.differentiableMap{ $0.squared().sum() }
     ).differentiableMap { beta * $0.first + alpha * $0.second }
-    let regularizationTerm = regularizationTerms.differentiableReduce(
-      Tensor<Float>(zeros: []),
-      { $0 + $1 })
+    let regularizationTerm = regularizationTerms.differentiableReduce(Tensor(0.0), { $0 + $1 })
     return MultiLabelPredictions(
       labelProbabilities: labelProbabilities(forInstances: instances),
       qualities: qualities,
@@ -129,14 +127,14 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
       includePredictionsPrior: false)
   }
 
-  @differentiable(wrt: self)
+  @differentiable
   public func labelProbabilities(forInstances instances: Tensor<Int32>) -> [Tensor<Float>] {
     pInstanceEmbeddings.differentiableMap {
       logSigmoid($0.gathering(atIndices: instances))
     }
   }
 
-  @differentiable(wrt: self)
+  @differentiable
   public func qualities(
     forInstances instances: Tensor<Int32>,
     predictors: Tensor<Int32>,

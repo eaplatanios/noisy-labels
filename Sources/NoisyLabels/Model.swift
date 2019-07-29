@@ -91,35 +91,21 @@ public struct MultiLabelEMModel<
   }
 
   public mutating func executeEStep(using data: TrainingData, majorityVote: Bool) {
-    // Array of one-hot encodings of the label that corresponds to each batch element.
-    let labelsOneHot = Tensor<Int32>(
-      oneHotAtIndices: data.labels,
-      depth: labelCount
-    ).unstacked(alongAxis: 1)
-
-    // Array of tensors (one for each label), where:
-    // qLogs[l].shape == [batchSize, classCounts[l], classCounts[l]].
+    let labelMasks = self.labelMasks(for: data.labels)
     let qLogs = predictor.qualities(
       forInstances: data.instances,
       predictors: data.predictors,
       labels: data.labels)
-
-    // Update the E-step accumulator for each label.
     for l in 0..<labelCount {
-      let labelMask = labelsOneHot[l] .> 0
+      let labelMask = labelMasks[l] .> 0
       let classCount = classCounts[l]
       let instances = data.instances.gathering(where: labelMask)
       let values = data.values.gathering(where: labelMask)
       let qLog = qLogs[l].gathering(where: labelMask)
-      
-      // yHat.shape == [batchSize for l, classCounts[l]].
       let yHat = useSoftMajorityVote ?
         Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
         Tensor<Float>(oneHotAtIndices: Tensor<Int32>(data.values), depth: classCount)
-
-      // qLogYHat.shape == [batchSize for l, classCounts[l]].
       let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
-
       eStepAccumulators[l] = Raw.tensorScatterAdd(
         eStepAccumulators[l],
         indices: instances.expandingShape(at: -1),
@@ -139,17 +125,9 @@ public struct MultiLabelEMModel<
 
   public mutating func executeMStep(using data: TrainingData, majorityVote: Bool) -> Float {
     let majorityVote = Tensor<Float>(majorityVote ? 0 : 1)
-
-    // Array of one-hot encodings of the label that corresponds to each batch element.
-    let labelMasks = Tensor<Int32>(
-      oneHotAtIndices: data.labels,
-      depth: labelCount
-    ).unstacked(alongAxis: 1)
-
+    let labelMasks = self.labelMasks(for: data.labels)
     let (negativeLogLikelihood, gradient) = predictor.valueWithGradient { [
-      eStepAccumulators,
-      useSoftMajorityVote,
-      entropyWeight
+      eStepAccumulators, useSoftMajorityVote, entropyWeight
     ] predictor -> Tensor<Float> in
       let predictions = predictor.predictions(
         forInstances: data.instances,
@@ -165,29 +143,18 @@ public struct MultiLabelEMModel<
         let instances = data.instances.gathering(where: labelMask)
         let values = data.values.gathering(where: labelMask)
         let qLog = parameters.qualities.gathering(where: labelMask)
-
-        // hLog.shape == [batchSize for l, classCounts[l]].
         let hLog = parameters.labelProbabilities.gathering(where: labelMask)
-
-        // yAccumulated.shape == [batchSize for l, classCounts[l]].
         let yAccumulated = parameters.eStepAccumulator.gathering(atIndices: instances)
-        let yAccumulatedHLog = yAccumulated + hLog * majorityVote
-        let yExpected = withoutDerivative(at: yAccumulatedHLog) {
-          exp($0 - $0.logSumExp(alongAxes: -1))
-        }
+        let yAccumulatedHLog = yAccumulated + withoutDerivative(at: hLog) * majorityVote
+        let yExpected = exp(yAccumulatedHLog - yAccumulatedHLog.logSumExp(alongAxes: -1))
         // TODO: Do we need the above? Or should we maybe replace it with the below?
         // let yAccumulatedHLog = predictions.includePredictionsPrior ?
         //   yAccumulated + hLog :
         //   yAccumulated + log(0.5)
-
-        // yHat.shape == [batchSize for l, classCounts[l]].
         let yHat = useSoftMajorityVote ?
           Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
           Tensor<Float>(oneHotAtIndices: Tensor<Int32>(data.values), depth: hLog.shape[1])
-
-        // qLogYHat.shape == [batchSize for l, classCounts[l]].
         let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
-
         return entropyWeight * (exp(hLog) * hLog).sum() - 
           (yExpected * hLog).sum() -
           (yExpected * qLogYHat).sum()
@@ -199,16 +166,9 @@ public struct MultiLabelEMModel<
   }
 
   public mutating func executeMarginalStep(using data: TrainingData) -> Float {
-    // Array of one-hot encodings of the label that corresponds to each batch element.
-    let labelMasks = Tensor<Int32>(
-      oneHotAtIndices: data.labels,
-      depth: labelCount
-    ).unstacked(alongAxis: 1)
-
+    let labelMasks = self.labelMasks(for: data.labels)
     let (negativeLogLikelihood, gradient) = predictor.valueWithGradient { [
-      eStepAccumulators,
-      useSoftMajorityVote,
-      entropyWeight
+      eStepAccumulators, useSoftMajorityVote, entropyWeight
     ] predictor -> Tensor<Float> in
       let predictions = predictor.predictions(
         forInstances: data.instances,
@@ -223,62 +183,41 @@ public struct MultiLabelEMModel<
         let labelMask = parameters.labelMask .> 0
         let values = data.values.gathering(where: labelMask)
         let qLog = parameters.qualities.gathering(where: labelMask)
-
-        // hLog.shape == [batchSize for l, classCounts[l]].
         let hLog = parameters.labelProbabilities.gathering(where: labelMask)
-
-        // yHat.shape == [batchSize for l, classCounts[l]].
         let yHat = useSoftMajorityVote ?
           Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
           Tensor<Float>(oneHotAtIndices: Tensor<Int32>(data.values), depth: hLog.shape[1])
-
-        // qLogYHat.shape == [batchSize for l, classCounts[l]].
-        let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
-
-        return entropyWeight * (exp(hLog) * hLog).sum() - 
-          (qLogYHat.sum(squeezingAxes: -1) + hLog).logSumExp(squeezingAxes: -1).sum()
-      }.differentiableReduce(Tensor<Float>(zeros: []), { $0 + $1 })
+        let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -2, -1)
+        let logLikelihood = (qLogYHat + hLog).logSumExp(squeezingAxes: -1).sum()
+        let entropy = (exp(hLog) * hLog).sum()
+        return entropyWeight * entropy - logLikelihood
+      }.differentiableReduce(Tensor(0.0), { $0 + $1 })
     }
-
     optimizer.update(&predictor, along: gradient)
     return negativeLogLikelihood.scalarized()
   }
 
   public func negativeLogLikelihood(for data: TrainingData) -> Float {
-    // Array of one-hot encodings of the label that corresponds to each batch element.
-    let labelMasks = Tensor<Int32>(
-      oneHotAtIndices: data.labels,
-      depth: labelCount
-    ).unstacked(alongAxis: 1)
-
+    let labelMasks = self.labelMasks(for: data.labels)
     let predictions = predictor.predictions(
       forInstances: data.instances,
       predictors: data.predictors,
       labels: data.labels)
-    let qLogs = predictions.qualities
-
-    // Sum the loss terms contributed by each label.
-    var loss = predictions.regularizationTerm
+    var negativeLogLikelihood = predictions.regularizationTerm
     for l in 0..<labelCount {
       let labelMask = labelMasks[l] .> 0
       let values = data.values.gathering(where: labelMask)
-      let qLog = qLogs[l].gathering(where: labelMask)
-
-      // hLog.shape == [batchSize, classCounts[l]].
+      let qLog = predictions.qualities[l].gathering(where: labelMask)
       let hLog = predictions.labelProbabilities[l].gathering(where: labelMask)
-
-      // yHat.shape == [batchSize, classCounts[l]].
-      let yHat = self.useSoftMajorityVote ?
+      let yHat = useSoftMajorityVote ?
         Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
-        Tensor<Float>(oneHotAtIndices: Tensor<Int32>(data.values), depth: self.classCounts[l])
-
-      // qLogYHat.shape == [batchSize, classCounts[l]].
-      let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
-
-      loss = loss - (qLogYHat.sum(squeezingAxes: -1) + hLog).logSumExp(squeezingAxes: -1).sum()
-      loss = loss + self.entropyWeight * (exp(hLog) * hLog).sum()
+        Tensor<Float>(oneHotAtIndices: Tensor<Int32>(data.values), depth: classCounts[l])
+      let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -2, -1)
+      let logLikelihood = (qLogYHat + hLog).logSumExp(squeezingAxes: -1).sum()
+      let entropy = (exp(hLog) * hLog).sum()
+      negativeLogLikelihood += entropyWeight * entropy - logLikelihood
     }
-    return loss.scalarized()
+    return negativeLogLikelihood.scalarized()
   }
 
   public func labelProbabilities(forInstances instances: Tensor<Int32>) -> [Tensor<Float>] {
@@ -290,24 +229,23 @@ public struct MultiLabelEMModel<
     predictors: Tensor<Int32>,
     labels: Tensor<Int32>
   ) -> [Tensor<Float>] {
-    // Array of one-hot encodings of the label that corresponds to each batch element.
-    let labelMasks = Tensor<Int32>(
-      oneHotAtIndices: labels,
-      depth: labelCount
-    ).unstacked(alongAxis: 1)
-
+    let labelMasks = self.labelMasks(for: labels)
     let predictions = predictor.predictions(
       forInstances: instances,
       predictors: predictors,
       labels: labels)
-    let qLogs = predictions.qualities
-
-    // Compute the qualities for each label separately.
     return (0..<labelCount).map { l -> Tensor<Float> in
       let labelMask = labelMasks[l] .> 0
+      let qLog = predictions.qualities[l].gathering(where: labelMask)
       let hLog = predictions.labelProbabilities[l].gathering(where: labelMask)
-      let qLogHLog = qLogs[l].gathering(where: labelMask) * hLog.expandingShape(at: -1)
+      let qLogHLog = qLog * hLog.expandingShape(at: -1)
       return Raw.matrixDiagPart(qLogHLog).logSumExp(squeezingAxes: -1)
     }
+  }
+
+  /// Returns an array of one-hot encodings of the label that corresponds to each batch element.
+  @inlinable
+  internal func labelMasks(for labels: Tensor<Int32>) -> [Tensor<Int32>] {
+    Tensor<Int32>(oneHotAtIndices: labels, depth: labelCount).unstacked(alongAxis: 1)
   }
 }

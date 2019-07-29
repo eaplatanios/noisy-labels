@@ -55,14 +55,7 @@ let resultsDir: Foundation.URL = {
 let dataset = parsedArguments.get(datasetArgument)!
 
 func emLearner(_ data: NoisyLabels.Data<Int, String, Int>, gamma: Float) -> Learner {
-  let predictor = MinimaxConditionalEntropyPredictor(
-    instanceCount: data.instances.count,
-    predictorCount: data.predictors.count,
-    labelCount: data.labels.count,
-    classCounts: data.classCounts,
-    avgLabelsPerPredictor: data.avgLabelsPerPredictor,
-    avgLabelsPerItem: data.avgLabelsPerItem,
-    gamma: gamma)
+  let predictor = MinimaxConditionalEntropyPredictor(data: data, gamma: gamma)
   let optimizer = Adam(
     for: predictor,
     learningRate: 1e-3,

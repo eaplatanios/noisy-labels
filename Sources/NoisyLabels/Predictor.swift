@@ -82,24 +82,19 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
   /// Predictor embeddings (one for each label) used for the quality prediction function.
   public var qPredictorEmbeddings: [Tensor<Float>]
 
-  public init(
-    instanceCount: Int,
-    predictorCount: Int,
-    labelCount: Int,
-    classCounts: [Int],
-    avgLabelsPerPredictor: Float,
-    avgLabelsPerItem: Float,
+  public init<Instance, Predictor, Label>(
+    data: Data<Instance, Predictor, Label>,
     gamma: Float = 0.25
   ) {
-    self.instanceCount = instanceCount
-    self.predictorCount = predictorCount
-    self.labelCount = labelCount
-    self.classCounts = classCounts
+    self.instanceCount = data.instances.count
+    self.predictorCount = data.predictors.count
+    self.labelCount = data.labels.count
+    self.classCounts = data.classCounts
     self.alpha = 0.5 * gamma * pow(Float(2 * labelCount), 2.0)
-    self.beta = alpha * avgLabelsPerPredictor / avgLabelsPerItem
-    pInstanceEmbeddings = classCounts.map { Tensor(glorotUniform: [instanceCount, $0]) }
-    qInstanceEmbeddings = classCounts.map { Tensor(glorotUniform: [instanceCount, $0, $0]) }
-    qPredictorEmbeddings = classCounts.map { Tensor(glorotUniform: [predictorCount, $0, $0]) }
+    self.beta = alpha * data.avgLabelsPerPredictor / data.avgLabelsPerItem
+    pInstanceEmbeddings = classCounts.map { Tensor(glorotUniform: [data.instances.count, $0]) }
+    qInstanceEmbeddings = classCounts.map { Tensor(glorotUniform: [data.instances.count, $0, $0]) }
+    qPredictorEmbeddings = classCounts.map { Tensor(glorotUniform: [data.predictors.count, $0, $0]) }
   }
 
   @differentiable
@@ -130,7 +125,7 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
   @differentiable
   public func labelProbabilities(_ instances: Tensor<Int32>) -> [Tensor<Float>] {
     pInstanceEmbeddings.differentiableMap {
-      logSigmoid($0.gathering(atIndices: instances))
+      logSoftmax($0.gathering(atIndices: instances))
     }
   }
 
@@ -151,5 +146,193 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
     pInstanceEmbeddings = classCounts.map { Tensor(glorotUniform: [instanceCount, $0]) }
     qInstanceEmbeddings = classCounts.map { Tensor(glorotUniform: [instanceCount, $0, $0]) }
     qPredictorEmbeddings = classCounts.map { Tensor(glorotUniform: [predictorCount, $0, $0]) }
+  }
+}
+
+public struct LNLPredictor: MultiLabelPredictor {
+  @noDerivative public let instanceCount: Int
+  @noDerivative public let predictorCount: Int
+  @noDerivative public let labelCount: Int
+  @noDerivative public let classCounts: [Int]
+  @noDerivative public let alpha: Float
+  @noDerivative public let beta: Float
+  @noDerivative public let instanceEmbeddingSize: Int?
+  @noDerivative public let predictorEmbeddingSize: Int?
+  @noDerivative public let instanceHiddenUnitCounts: [Int]
+  @noDerivative public let predictorHiddenUnitCounts: [Int]
+  @noDerivative public let confusionLatentSize: Int
+
+  public var instanceFeatures: Tensor<Float>
+  public var predictorFeatures: Tensor<Float>
+  public var instanceProcessingLayers: [Dense<Float>]
+  public var predictorProcessingLayers: [Dense<Float>]
+  public var predictionLayers: [Dense<Float>]
+  public var difficultyLayers: [Sequential<Dense<Float>, Reshape<Float>>]
+  public var competenceLayers: [Sequential<Dense<Float>, Reshape<Float>>]
+
+  public init<Instance, Predictor, Label>(
+    data: Data<Instance, Predictor, Label>,
+    instanceEmbeddingSize: Int?,
+    predictorEmbeddingSize: Int?,
+    instanceHiddenUnitCounts: [Int],
+    predictorHiddenUnitCounts: [Int],
+    confusionLatentSize: Int,
+    gamma: Float = 0.25
+  ) {
+    self.instanceCount = data.instances.count
+    self.predictorCount = data.predictors.count
+    self.labelCount = data.labels.count
+    self.classCounts = data.classCounts
+    self.alpha = 0.5 * gamma * pow(Float(2 * labelCount), 2.0)
+    self.beta = alpha * data.avgLabelsPerPredictor / data.avgLabelsPerItem
+    self.instanceEmbeddingSize = instanceEmbeddingSize
+    self.predictorEmbeddingSize = predictorEmbeddingSize
+    self.instanceHiddenUnitCounts = instanceHiddenUnitCounts
+    self.predictorHiddenUnitCounts = predictorHiddenUnitCounts
+    self.confusionLatentSize = confusionLatentSize
+    self.instanceFeatures = instanceEmbeddingSize == nil ?
+      Tensor(stacking: data.instanceFeatures!, alongAxis: 0) :
+      Tensor(glorotUniform: [instanceCount, instanceEmbeddingSize!])
+    self.predictorFeatures = predictorEmbeddingSize == nil ?
+      Tensor(stacking: data.predictorFeatures!, alongAxis: 0) :
+      Tensor(glorotUniform: [predictorCount, predictorEmbeddingSize!])
+    
+    // Create the instance processing layers.
+    var inputSize = instanceFeatures.shape[1]
+    self.instanceProcessingLayers = [Dense<Float>]()
+    for hiddenUnitCount in instanceHiddenUnitCounts {
+      self.instanceProcessingLayers.append(Dense<Float>(
+        inputSize: inputSize,
+        outputSize: hiddenUnitCount,
+        activation: relu))
+      inputSize = hiddenUnitCount
+    }
+    self.predictionLayers = classCounts.map { Dense<Float>(inputSize: inputSize, outputSize: $0) }
+    self.difficultyLayers = classCounts.map { count in
+      let resultShape = Tensor<Int32>([-1, Int32(count), Int32(count), Int32(confusionLatentSize)])
+      return Sequential {
+        Dense<Float>(inputSize: inputSize, outputSize: count * count * confusionLatentSize)
+        Reshape<Float>(shape: resultShape)
+      }
+    }
+
+    // Create the predictor processing layers.
+    inputSize = predictorFeatures.shape[1]
+    self.predictorProcessingLayers = [Dense<Float>]()
+    for hiddenUnitCount in predictorHiddenUnitCounts {
+      self.predictorProcessingLayers.append(Dense<Float>(
+        inputSize: inputSize,
+        outputSize: hiddenUnitCount,
+        activation: relu))
+      inputSize = hiddenUnitCount
+    }
+    self.competenceLayers = classCounts.map { count in
+      let resultShape = Tensor<Int32>([-1, Int32(count), Int32(count), Int32(confusionLatentSize)])
+      return Sequential {
+        Dense<Float>(inputSize: inputSize, outputSize: count * count * confusionLatentSize)
+        Reshape<Float>(shape: resultShape)
+      }
+    }
+  }
+
+  @differentiable
+  public func callAsFunction(
+    _ instances: Tensor<Int32>,
+    _ predictors: Tensor<Int32>,
+    _ labels: Tensor<Int32>
+  ) -> MultiLabelPredictions {
+    var instances = instanceFeatures.gathering(atIndices: instances)
+    var predictors = predictorFeatures.gathering(atIndices: predictors)
+    for layer in instanceProcessingLayers { instances = layer(instances) }
+    for layer in predictorProcessingLayers { predictors = layer(predictors) }
+    let labelProbabilities = predictionLayers.differentiableMap { logSoftmax($0(instances)) }
+    let difficulties = difficultyLayers.differentiableMap { $0(instances) }
+    let competences = competenceLayers.differentiableMap { $0(predictors) }
+    let qualities = differentiableZip(difficulties, competences).differentiableMap {
+      logSoftmax($0.first + $0.second).logSumExp(squeezingAxes: -1)
+    }
+    let alpha = self.alpha
+    let beta = self.beta
+    let regularizationTerms = differentiableZip(
+      difficulties.differentiableMap{ $0.squared().sum() },
+      competences.differentiableMap{ $0.squared().sum() }
+    ).differentiableMap { beta * $0.first + alpha * $0.second }
+    let regularizationTerm = regularizationTerms.differentiableReduce(Tensor(0.0), { $0 + $1 })
+    return MultiLabelPredictions(
+      labelProbabilities: labelProbabilities,
+      qualities: qualities,
+      regularizationTerm: regularizationTerm,
+      includePredictionsPrior: false)
+  }
+
+  @differentiable
+  public func labelProbabilities(_ instances: Tensor<Int32>) -> [Tensor<Float>] {
+    var instances = instanceFeatures.gathering(atIndices: instances)
+    for layer in instanceProcessingLayers { instances = layer(instances) }
+    return predictionLayers.differentiableMap { logSoftmax($0(instances)) }
+  }
+
+  @differentiable
+  public func qualities(
+    _ instances: Tensor<Int32>,
+    _ predictors: Tensor<Int32>,
+    _ labels: Tensor<Int32>
+  ) -> [Tensor<Float>] {
+    var instances = instanceFeatures.gathering(atIndices: instances)
+    var predictors = predictorFeatures.gathering(atIndices: predictors)
+    for layer in instanceProcessingLayers { instances = layer(instances) }
+    for layer in predictorProcessingLayers { predictors = layer(predictors) }
+    let difficulties = difficultyLayers.differentiableMap { $0(instances) }
+    let competences = competenceLayers.differentiableMap { $0(predictors) }
+    return differentiableZip(difficulties, competences).differentiableMap {
+      logSoftmax($0.first + $0.second).logSumExp(squeezingAxes: -1)
+    }
+  }
+
+  public mutating func reset() {
+    if let embeddingSize = instanceEmbeddingSize {
+      instanceFeatures = Tensor(glorotUniform: [instanceCount, embeddingSize])
+    }
+
+    if let embeddingSize = predictorEmbeddingSize {
+      predictorFeatures = Tensor(glorotUniform: [predictorCount, embeddingSize])
+    }
+
+    // Create the instance processing layers.
+    var inputSize = instanceFeatures.shape[1]
+    instanceProcessingLayers = [Dense<Float>]()
+    for hiddenUnitCount in instanceHiddenUnitCounts {
+      instanceProcessingLayers.append(Dense<Float>(
+        inputSize: inputSize,
+        outputSize: hiddenUnitCount,
+        activation: relu))
+      inputSize = hiddenUnitCount
+    }
+    predictionLayers = classCounts.map { Dense<Float>(inputSize: inputSize, outputSize: $0) }
+    difficultyLayers = classCounts.map { count in
+      let resultShape = Tensor<Int32>([-1, Int32(count), Int32(count), Int32(confusionLatentSize)])
+      return Sequential {
+        Dense<Float>(inputSize: inputSize, outputSize: count * count * confusionLatentSize)
+        Reshape<Float>(shape: resultShape)
+      }
+    }
+
+    // Create the predictor processing layers.
+    inputSize = predictorFeatures.shape[1]
+    predictorProcessingLayers = [Dense<Float>]()
+    for hiddenUnitCount in predictorHiddenUnitCounts {
+      predictorProcessingLayers.append(Dense<Float>(
+        inputSize: inputSize,
+        outputSize: hiddenUnitCount,
+        activation: relu))
+      inputSize = hiddenUnitCount
+    }
+    competenceLayers = classCounts.map { count in
+      let resultShape = Tensor<Int32>([-1, Int32(count), Int32(count), Int32(confusionLatentSize)])
+      return Sequential {
+        Dense<Float>(inputSize: inputSize, outputSize: count * count * confusionLatentSize)
+        Reshape<Float>(shape: resultShape)
+      }
+    }
   }
 }

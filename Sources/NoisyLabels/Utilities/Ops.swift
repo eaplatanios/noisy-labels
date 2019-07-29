@@ -76,14 +76,14 @@ public extension Array where Element: Differentiable {
       pullbacks.append(pb)
     }
     return (values, { v in
-      var array = Array.TangentVector()
+      var array = [Element.TangentVector]()
       var context = Context.TangentVector.zero
       for (element, pullback) in zip(v.base, pullbacks) {
         let (e, c) = pullback(element)
         array.append(e)
         context += c
       }
-      return (array, context)
+      return (Array.TangentVector(array), context)
     })
   }
 }

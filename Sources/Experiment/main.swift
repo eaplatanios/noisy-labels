@@ -54,7 +54,7 @@ let resultsDir: Foundation.URL = {
 }()
 let dataset = parsedArguments.get(datasetArgument)!
 
-func emLearner(_ data: NoisyLabels.Data<Int, String, Int>, gamma: Float) -> Learner {
+func mmceLearner(_ data: NoisyLabels.Data<Int, String, Int>, gamma: Float) -> Learner {
   let predictor = MinimaxConditionalEntropyPredictor(data: data, gamma: gamma)
   let optimizer = Adam(
     for: predictor,
@@ -81,15 +81,97 @@ func emLearner(_ data: NoisyLabels.Data<Int, String, Int>, gamma: Float) -> Lear
     verbose: false)
 }
 
+func lnlLearner(
+  _ data: NoisyLabels.Data<Int, String, Int>,
+  instanceEmbeddingSize: Int?,
+  predictorEmbeddingSize: Int?,
+  instanceHiddenUnitCounts: [Int],
+  predictorHiddenUnitCounts: [Int],
+  confusionLatentSize: Int,
+  gamma: Float
+) -> Learner {
+  let predictor = LNLPredictor(
+    data: data,
+    instanceEmbeddingSize: instanceEmbeddingSize,
+    predictorEmbeddingSize: predictorEmbeddingSize,
+    instanceHiddenUnitCounts: instanceHiddenUnitCounts,
+    predictorHiddenUnitCounts: predictorHiddenUnitCounts,
+    confusionLatentSize: confusionLatentSize,
+    gamma: gamma)
+  let optimizer = Adam(
+    for: predictor,
+    learningRate: 1e-3,
+    beta1: 0.9,
+    beta2: 0.99,
+    epsilon: 1e-8,
+    decay: 0)
+  let model = MultiLabelEMModel(
+    predictor: predictor,
+    optimizer: optimizer,
+    entropyWeight: 1.0,
+    useSoftMajorityVote: true,
+    useSoftPredictions: false)
+  return EMLearner(
+    for: model,
+    randomSeed: 42,
+    batchSize: 128,
+    useWarmStarting: true,
+    mStepCount: 1000,
+    emStepCount: 10,
+    marginalStepCount: 0,
+    mStepLogCount: 100,
+    verbose: true)
+}
+
 let experiment = try Experiment(
   dataDir: dataDir,
   dataset: dataset,
   usingFeatures: false,
   learners: [
-    "MAJ": { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
-    "MAJ-S": { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
-    "MMCE-M (γ=0.00)": { data in emLearner(data, gamma: 0.00) },
-    "MMCE-M (γ=0.25)": { data in emLearner(data, gamma: 0.25) },
+    // "MAJ": { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
+    // "MAJ-S": { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
+    // "MMCE-M (γ=0.00)": { data in mmceLearner(data, gamma: 0.00) },
+    // "MMCE-M (γ=0.25)": { data in mmceLearner(data, gamma: 0.25) },
+    "LNL-4-4-4x16-4x16-1 (γ=0.00)": { data in
+      lnlLearner(
+        data,
+        instanceEmbeddingSize: 4,
+        predictorEmbeddingSize: 4,
+        instanceHiddenUnitCounts: [16, 16, 16, 16],
+        predictorHiddenUnitCounts: [16, 16, 16, 16],
+        confusionLatentSize: 1,
+        gamma: 0.00)
+    },
+    "LNL-4-4-4x16-4x16-1 (γ=0.25)": { data in
+      lnlLearner(
+        data,
+        instanceEmbeddingSize: 4,
+        predictorEmbeddingSize: 4,
+        instanceHiddenUnitCounts: [16, 16, 16, 16],
+        predictorHiddenUnitCounts: [16, 16, 16, 16],
+        confusionLatentSize: 1,
+        gamma: 0.25)
+    },
+    "LNL-IF-4-4x16-4x16-1 (γ=0.00)": { data in
+      lnlLearner(
+        data,
+        instanceEmbeddingSize: nil,
+        predictorEmbeddingSize: 4,
+        instanceHiddenUnitCounts: [16, 16, 16, 16],
+        predictorHiddenUnitCounts: [16, 16, 16, 16],
+        confusionLatentSize: 1,
+        gamma: 0.00)
+    },
+    "LNL-IF-4-4x16-4x16-1 (γ=0.25)": { data in
+      lnlLearner(
+        data,
+        instanceEmbeddingSize: nil,
+        predictorEmbeddingSize: 4,
+        instanceHiddenUnitCounts: [16, 16, 16, 16],
+        predictorHiddenUnitCounts: [16, 16, 16, 16],
+        confusionLatentSize: 1,
+        gamma: 0.25)
+    }
   ])
 let results = experiment.run()
 

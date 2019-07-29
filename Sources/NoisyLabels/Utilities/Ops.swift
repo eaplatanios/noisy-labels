@@ -14,6 +14,16 @@
 
 import TensorFlow
 
+/// Returns the log-softmax of the specified tensor element-wise.
+@inlinable
+@differentiable
+public func logSoftmax<T: TensorFlowFloatingPoint>(
+  _ x: Tensor<T>,
+  alongAxis axis: Int
+) -> Tensor<T> {
+  x - x.logSumExp(alongAxes: Tensor<Int32>(Int32(axis)))
+}
+
 public struct Pair<Element1: Differentiable, Element2: Differentiable>: Differentiable {
   @differentiable public var first: Element1
   @differentiable public var second: Element2

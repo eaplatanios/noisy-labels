@@ -149,7 +149,6 @@ public struct MultiLabelEMModel<
           (yExpected * qLogYHat).sum()
       }.differentiableReduce(predictions.regularizationTerm, { $0 + $1 })
     }
-
     optimizer.update(&predictor, along: gradient)
     return negativeLogLikelihood.scalarized()
   }

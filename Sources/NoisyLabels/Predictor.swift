@@ -92,11 +92,14 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
     self.classCounts = data.classCounts
     self.alpha = 0.5 * gamma * pow(Float(2 * labelCount), 2.0)
     self.beta = alpha * data.avgLabelsPerPredictor / data.avgLabelsPerItem
-    pInstanceEmbeddings = classCounts.map { Tensor(glorotUniform: [data.instances.count, $0]) }
-    qInstanceEmbeddings = classCounts.map { Tensor(glorotUniform: [data.instances.count, $0, $0]) }
-    qPredictorEmbeddings = classCounts.map { Tensor(glorotUniform: [data.predictors.count, $0, $0]) }
+    let instanceCount = data.instances.count
+    let predictorCount = data.predictors.count
+    pInstanceEmbeddings = classCounts.map { Tensor(glorotUniform: [instanceCount, $0]) }
+    qInstanceEmbeddings = classCounts.map { Tensor(glorotUniform: [instanceCount, $0, $0]) }
+    qPredictorEmbeddings = classCounts.map { Tensor(glorotUniform: [predictorCount, $0, $0]) }
   }
 
+  @inlinable
   @differentiable
   public func callAsFunction(
     _ instances: Tensor<Int32>,
@@ -122,6 +125,7 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
       includePredictionsPrior: false)
   }
 
+  @inlinable
   @differentiable
   public func labelProbabilities(_ instances: Tensor<Int32>) -> [Tensor<Float>] {
     pInstanceEmbeddings.differentiableMap {
@@ -129,6 +133,7 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
     }
   }
 
+  @inlinable
   @differentiable
   public func qualities(
     _ instances: Tensor<Int32>,
@@ -235,6 +240,7 @@ public struct LNLPredictor: MultiLabelPredictor {
     }
   }
 
+  @inlinable
   @differentiable
   public func callAsFunction(
     _ instances: Tensor<Int32>,
@@ -251,7 +257,7 @@ public struct LNLPredictor: MultiLabelPredictor {
     let difficulties = difficultyLayers.differentiableMap(instances) { $1($0) }
     let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     let qualities = differentiableZip(difficulties, competences).differentiableMap {
-      logSoftmax($0.first + $0.second).logSumExp(squeezingAxes: -1)
+      logSoftmax($0.first + $0.second, alongAxis: -2).logSumExp(squeezingAxes: -1)
     }
     let alpha = self.alpha
     let beta = self.beta
@@ -264,9 +270,10 @@ public struct LNLPredictor: MultiLabelPredictor {
       labelProbabilities: labelProbabilities,
       qualities: qualities,
       regularizationTerm: regularizationTerm,
-      includePredictionsPrior: false)
+      includePredictionsPrior: true)
   }
 
+  @inlinable
   @differentiable
   public func labelProbabilities(_ instances: Tensor<Int32>) -> [Tensor<Float>] {
     let instances = instanceProcessingLayers.differentiableReduce(
@@ -275,6 +282,7 @@ public struct LNLPredictor: MultiLabelPredictor {
     return predictionLayers.differentiableMap(instances) { logSoftmax($1($0)) }
   }
 
+  @inlinable
   @differentiable
   public func qualities(
     _ instances: Tensor<Int32>,

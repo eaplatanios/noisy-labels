@@ -148,10 +148,24 @@ where AllDifferentiableVariables: KeyPathIterable {
 }
 
 public struct MultiClassMultiLabelPredictions: Differentiable {
-  public var labelProbabilities: [Tensor<Float>]
-  public var qualities: [Tensor<Float>]
-  public var regularizationTerm: Tensor<Float>
+  @differentiable public var labelProbabilities: [Tensor<Float>]
+  @differentiable public var qualities: [Tensor<Float>]
+  @differentiable public var regularizationTerm: Tensor<Float>
   @noDerivative public let includePredictionsPrior: Bool
+
+  @inlinable
+  @differentiable
+  public init(
+    labelProbabilities: [Tensor<Float>],
+    qualities: [Tensor<Float>],
+    regularizationTerm: Tensor<Float>,
+    includePredictionsPrior: Bool
+  ) {
+    self.labelProbabilities = labelProbabilities
+    self.qualities = qualities
+    self.regularizationTerm = regularizationTerm
+    self.includePredictionsPrior = includePredictionsPrior
+  }
 }
 
 public struct MultiClassMinimaxConditionalEntropyPredictor: MultiClassMultiLabelPredictor {
@@ -186,9 +200,9 @@ public struct MultiClassMinimaxConditionalEntropyPredictor: MultiClassMultiLabel
     self.classCounts = classCounts
     self.alpha = 0.5 * gamma * pow(Float(2 * labelCount), 2.0)
     self.beta = alpha * avgLabelsPerPredictor / avgLabelsPerItem
-    pInstanceEmbeddings = classCounts.map { Tensor<Float>(glorotUniform: [instanceCount, $0]) }
-    qInstanceEmbeddings = classCounts.map { Tensor<Float>(glorotUniform: [instanceCount, $0, $0]) }
-    qPredictorEmbeddings = classCounts.map { Tensor<Float>(glorotUniform: [predictorCount, $0, $0]) }
+    pInstanceEmbeddings = classCounts.map { Tensor(glorotUniform: [instanceCount, $0]) }
+    qInstanceEmbeddings = classCounts.map { Tensor(glorotUniform: [instanceCount, $0, $0]) }
+    qPredictorEmbeddings = classCounts.map { Tensor(glorotUniform: [predictorCount, $0, $0]) }
   }
 
   @differentiable(wrt: self)
@@ -202,11 +216,15 @@ public struct MultiClassMinimaxConditionalEntropyPredictor: MultiClassMultiLabel
     let qualities = differentiableZip(qI, qP).differentiableMap {
       logSoftmax($0.first + $0.second)
     }
-    var regularizationTerm = Tensor<Float>(zeros: [])
-    for l in classCounts.indices {
-      regularizationTerm = regularizationTerm + beta * (qI[l] * qI[l]).sum()
-      regularizationTerm = regularizationTerm + alpha * (qP[l] * qP[l]).sum()
-    }
+    let alpha = self.alpha
+    let beta = self.beta
+    let regularizationTerms = differentiableZip(
+      qI.differentiableMap{ $0.squared().sum() },
+      qP.differentiableMap{ $0.squared().sum() }
+    ).differentiableMap { beta * $0.first + alpha * $0.second }
+    let regularizationTerm = regularizationTerms.differentiableReduce(
+      Tensor<Float>(zeros: []),
+      { $0 + $1 })
     return MultiClassMultiLabelPredictions(
       labelProbabilities: labelProbabilities(forInstances: instances),
       qualities: qualities,
@@ -235,8 +253,8 @@ public struct MultiClassMinimaxConditionalEntropyPredictor: MultiClassMultiLabel
   }
 
   public mutating func reset() {
-    pInstanceEmbeddings = classCounts.map { Tensor<Float>(glorotUniform: [instanceCount, $0]) }
-    qInstanceEmbeddings = classCounts.map { Tensor<Float>(glorotUniform: [instanceCount, $0, $0]) }
-    qPredictorEmbeddings = classCounts.map { Tensor<Float>(glorotUniform: [predictorCount, $0, $0]) }
+    pInstanceEmbeddings = classCounts.map { Tensor(glorotUniform: [instanceCount, $0]) }
+    qInstanceEmbeddings = classCounts.map { Tensor(glorotUniform: [instanceCount, $0, $0]) }
+    qPredictorEmbeddings = classCounts.map { Tensor(glorotUniform: [predictorCount, $0, $0]) }
   }
 }

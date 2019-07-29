@@ -282,8 +282,8 @@ public struct Data<Instance, Predictor, Label> {
   }
 }
 
-public extension Data {
-  func computeBinaryQualities() -> Tensor<Float> {
+extension Data {
+  public func computeBinaryQualities() -> Tensor<Float> {
     var numCorrect = [Float](repeating: 0.0, count: labels.count * predictors.count)
     var numTotal = [Float](repeating: 0.0, count: labels.count * predictors.count)
     for l in labels.indices {
@@ -303,7 +303,7 @@ public extension Data {
     return numCorrectTensor / numTotalTensor
   }
 
-  func computeBinaryQualitiesFullConfusion() -> Tensor<Float> {
+  public func computeBinaryQualitiesFullConfusion() -> Tensor<Float> {
     var numConfused = [Float](repeating: 0.0, count: labels.count * predictors.count * 4)
     var numTotal = [Float](repeating: 0.0, count: labels.count * predictors.count)
     for l in labels.indices {
@@ -337,8 +337,8 @@ public extension Data {
   }
 }
 
-public extension Data where Label: Equatable {
-  func filtered(labels: [Label]) -> Data {
+extension Data where Label: Equatable {
+  public func filtered(labels: [Label]) -> Data {
     var iIndices = [Int: Int]()
     var pIndices = [Int: Int]()
 
@@ -420,8 +420,8 @@ public extension Data where Label: Equatable {
   }
 }
 
-public extension Data where Predictor: Equatable {
-  func filtered(predictors: [Predictor], keepInstances: Bool = true) -> Data {
+extension Data where Predictor: Equatable {
+  public func filtered(predictors: [Predictor], keepInstances: Bool = true) -> Data {
     var iIndices = [Int: Int]()
     var pIndices = [Int: Int]()
 
@@ -508,6 +508,76 @@ public extension Data where Predictor: Equatable {
 
     return Data(
       instances: newInstances,
+      predictors: newPredictors,
+      labels: labels,
+      trueLabels: trueLabels,
+      predictedLabels: predictedLabels,
+      classCounts: classCounts,
+      instanceFeatures: instanceFeatures,
+      predictorFeatures: predictorFeatures,
+      labelFeatures: labelFeatures)
+  }
+}
+
+extension Data {
+  public func withMaxRedundancy(_ maxRedundancy: Int) -> Data {
+    var pIndices = [Int: Int]()
+    var newPredictors = [Predictor]()
+    var predictedLabels = [Int: [Int: (instances: [Int], values: [Float])]]()
+
+    let hasPF = predictorFeatures != nil
+    var predictorFeatures = hasPF ? [Tensor<Float>]() : nil
+
+    // Create dictionary mapping from labels to dictionaries from instances to their annotations.
+    var instanceAnnotations = [Int: [Int: [(predictor: Int, value: Float)]]]()
+    for (l, _) in labels.enumerated() {
+      instanceAnnotations[l] = [Int: [(predictor: Int, value: Float)]]()
+      for i in self.instances.indices {
+        instanceAnnotations[l]![i] = [(predictor: Int, value: Float)]()
+      }
+      for (pOld, predictions) in self.predictedLabels[l]! {
+        for (i, value) in zip(predictions.instances, predictions.values) {
+          instanceAnnotations[l]![i]!.append((predictor: pOld, value: value))
+        }
+        // Discard some annotations to enforce the requested redundancy limit.
+        for (i, annotations) in instanceAnnotations[l]! {
+          if annotations.count > maxRedundancy {
+            var a = annotations
+            for i in 0..<maxRedundancy {
+              // TODO: !!!! Set the random seed.
+              let r = Int.random(in: i..<a.count)
+              if i != r { a.swapAt(i, r) }
+            }
+            instanceAnnotations[l]![i] = Array(a[0..<maxRedundancy])
+          }
+        }
+      }
+
+      // Filter the predicted labels.
+      predictedLabels[l] = [Int: (instances: [Int], values: [Float])]()
+      for (i, annotations) in instanceAnnotations[l]! {
+        for (pOld, value) in annotations {
+          let predictor = self.predictors[pOld]
+          let p = pIndices[pOld] ?? {
+            let value = newPredictors.count
+            newPredictors.append(predictor)
+            pIndices[pOld] = value
+            if hasPF {
+              predictorFeatures!.append(self.predictorFeatures![pOld])
+            }
+            return value
+          }()
+          if !predictedLabels[l]!.keys.contains(p) {
+            predictedLabels[l]![p] = (instances: [Int](), values: [Float]())
+          }
+          predictedLabels[l]![p]!.instances.append(i)
+          predictedLabels[l]![p]!.values.append(value)
+        }
+      }
+    }
+
+    return Data(
+      instances: instances,
       predictors: newPredictors,
       labels: labels,
       trueLabels: trueLabels,

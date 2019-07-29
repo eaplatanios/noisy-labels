@@ -120,7 +120,7 @@ func lnlLearner(
     emStepCount: 10,
     marginalStepCount: 0,
     mStepLogCount: 100,
-    verbose: true)
+    verbose: false)
 }
 
 let experiment = try Experiment(

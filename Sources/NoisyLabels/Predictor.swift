@@ -99,7 +99,6 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
     qPredictorEmbeddings = classCounts.map { Tensor(glorotUniform: [predictorCount, $0, $0]) }
   }
 
-  @inlinable
   @differentiable
   public func callAsFunction(
     _ instances: Tensor<Int32>,
@@ -240,7 +239,6 @@ public struct LNLPredictor: MultiLabelPredictor {
     }
   }
 
-  @inlinable
   @differentiable
   public func callAsFunction(
     _ instances: Tensor<Int32>,

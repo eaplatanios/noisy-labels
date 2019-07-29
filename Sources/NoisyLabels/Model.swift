@@ -30,12 +30,12 @@ public protocol EMModel {
 
   func negativeLogLikelihood(for data: TrainingData) -> Float
 
-  func labelProbabilities(forInstances instances: Tensor<Int32>) -> [Tensor<Float>]
+  func labelProbabilities(_ instances: Tensor<Int32>) -> [Tensor<Float>]
 
   func qualities(
-    forInstances instances: Tensor<Int32>,
-    predictors: Tensor<Int32>,
-    labels: Tensor<Int32>
+    _ instances: Tensor<Int32>,
+    _ predictors: Tensor<Int32>,
+    _ labels: Tensor<Int32>
   ) -> [Tensor<Float>]
 }
 
@@ -92,23 +92,17 @@ public struct MultiLabelEMModel<
 
   public mutating func executeEStep(using data: TrainingData, majorityVote: Bool) {
     let labelMasks = self.labelMasks(for: data.labels)
-    let qLogs = predictor.qualities(
-      forInstances: data.instances,
-      predictors: data.predictors,
-      labels: data.labels)
+    let qLogs = predictor.qualities(data.instances, data.predictors, data.labels)
     for l in 0..<labelCount {
-      let labelMask = labelMasks[l] .> 0
-      let classCount = classCounts[l]
-      let instances = data.instances.gathering(where: labelMask)
-      let values = data.values.gathering(where: labelMask)
-      let qLog = qLogs[l].gathering(where: labelMask)
+      let qLog = qLogs[l].gathering(where: labelMasks[l])
+      let values = data.values.gathering(where: labelMasks[l])
       let yHat = useSoftMajorityVote ?
         Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
-        Tensor<Float>(oneHotAtIndices: Tensor<Int32>(data.values), depth: classCount)
+        Tensor<Float>(oneHotAtIndices: Tensor<Int32>(values), depth: classCounts[l])
       let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
       eStepAccumulators[l] = Raw.tensorScatterAdd(
         eStepAccumulators[l],
-        indices: instances.expandingShape(at: -1),
+        indices: data.instances.gathering(where: labelMasks[l]).expandingShape(at: -1),
         updates: majorityVote ? yHat : qLogYHat)
     }
   }
@@ -129,32 +123,27 @@ public struct MultiLabelEMModel<
     let (negativeLogLikelihood, gradient) = predictor.valueWithGradient { [
       eStepAccumulators, useSoftMajorityVote, entropyWeight
     ] predictor -> Tensor<Float> in
-      let predictions = predictor.predictions(
-        forInstances: data.instances,
-        predictors: data.predictors,
-        labels: data.labels)
+      let predictions = predictor(data.instances, data.predictors, data.labels)
+      let includePredictionsPrior = withoutDerivative(at: predictions.includePredictionsPrior)
       return modelZip(
         labelMasks: labelMasks,
         eStepAccumulators: eStepAccumulators,
         labelProbabilities: predictions.labelProbabilities,
         qualities: predictions.qualities
       ).differentiableMap { parameters -> Tensor<Float> in
-        let labelMask = parameters.labelMask .> 0
-        let instances = data.instances.gathering(where: labelMask)
-        let values = data.values.gathering(where: labelMask)
-        let qLog = parameters.qualities.gathering(where: labelMask)
-        let hLog = parameters.labelProbabilities.gathering(where: labelMask)
-        let yAccumulated = parameters.eStepAccumulator.gathering(atIndices: instances)
-        let yAccumulatedHLog = yAccumulated + withoutDerivative(at: hLog) * majorityVote
-        let yExpected = exp(yAccumulatedHLog - yAccumulatedHLog.logSumExp(alongAxes: -1))
-        // TODO: Do we need the above? Or should we maybe replace it with the below?
-        // let yAccumulatedHLog = predictions.includePredictionsPrior ?
-        //   yAccumulated + hLog :
-        //   yAccumulated + log(0.5)
+        let hLog = parameters.labelProbabilities.gathering(where: parameters.labelMask)
+        let qLog = parameters.qualities.gathering(where: parameters.labelMask)
+        let values = data.values.gathering(where: parameters.labelMask)
         let yHat = useSoftMajorityVote ?
           Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
-          Tensor<Float>(oneHotAtIndices: Tensor<Int32>(data.values), depth: hLog.shape[1])
+          Tensor<Float>(oneHotAtIndices: Tensor<Int32>(values), depth: hLog.shape[1])
         let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
+        let yAccumulated = parameters.eStepAccumulator.gathering(
+          atIndices: data.instances.gathering(where: parameters.labelMask))
+        let yAccumulatedHLog = includePredictionsPrior ?
+          yAccumulated + withoutDerivative(at: hLog) * majorityVote :
+          yAccumulated + log(0.5) * majorityVote
+        let yExpected = exp(yAccumulatedHLog - yAccumulatedHLog.logSumExp(alongAxes: -1))
         return entropyWeight * (exp(hLog) * hLog).sum() - 
           (yExpected * hLog).sum() -
           (yExpected * qLogYHat).sum()
@@ -170,23 +159,19 @@ public struct MultiLabelEMModel<
     let (negativeLogLikelihood, gradient) = predictor.valueWithGradient { [
       eStepAccumulators, useSoftMajorityVote, entropyWeight
     ] predictor -> Tensor<Float> in
-      let predictions = predictor.predictions(
-        forInstances: data.instances,
-        predictors: data.predictors,
-        labels: data.labels)
+      let predictions = predictor(data.instances, data.predictors, data.labels)
       return modelZip(
         labelMasks: labelMasks,
         eStepAccumulators: eStepAccumulators,
         labelProbabilities: predictions.labelProbabilities,
         qualities: predictions.qualities
       ).differentiableMap { parameters -> Tensor<Float> in
-        let labelMask = parameters.labelMask .> 0
-        let values = data.values.gathering(where: labelMask)
-        let qLog = parameters.qualities.gathering(where: labelMask)
-        let hLog = parameters.labelProbabilities.gathering(where: labelMask)
+        let hLog = parameters.labelProbabilities.gathering(where: parameters.labelMask)
+        let qLog = parameters.qualities.gathering(where: parameters.labelMask)
+        let values = data.values.gathering(where: parameters.labelMask)
         let yHat = useSoftMajorityVote ?
           Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
-          Tensor<Float>(oneHotAtIndices: Tensor<Int32>(data.values), depth: hLog.shape[1])
+          Tensor<Float>(oneHotAtIndices: Tensor<Int32>(values), depth: hLog.shape[1])
         let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -2, -1)
         let logLikelihood = (qLogYHat + hLog).logSumExp(squeezingAxes: -1).sum()
         let entropy = (exp(hLog) * hLog).sum()
@@ -199,19 +184,15 @@ public struct MultiLabelEMModel<
 
   public func negativeLogLikelihood(for data: TrainingData) -> Float {
     let labelMasks = self.labelMasks(for: data.labels)
-    let predictions = predictor.predictions(
-      forInstances: data.instances,
-      predictors: data.predictors,
-      labels: data.labels)
+    let predictions = predictor(data.instances, data.predictors, data.labels)
     var negativeLogLikelihood = predictions.regularizationTerm
     for l in 0..<labelCount {
-      let labelMask = labelMasks[l] .> 0
-      let values = data.values.gathering(where: labelMask)
-      let qLog = predictions.qualities[l].gathering(where: labelMask)
-      let hLog = predictions.labelProbabilities[l].gathering(where: labelMask)
+      let hLog = predictions.labelProbabilities[l].gathering(where: labelMasks[l])
+      let qLog = predictions.qualities[l].gathering(where: labelMasks[l])
+      let values = data.values.gathering(where: labelMasks[l])
       let yHat = useSoftMajorityVote ?
         Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
-        Tensor<Float>(oneHotAtIndices: Tensor<Int32>(data.values), depth: classCounts[l])
+        Tensor<Float>(oneHotAtIndices: Tensor<Int32>(values), depth: classCounts[l])
       let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -2, -1)
       let logLikelihood = (qLogYHat + hLog).logSumExp(squeezingAxes: -1).sum()
       let entropy = (exp(hLog) * hLog).sum()
@@ -220,32 +201,30 @@ public struct MultiLabelEMModel<
     return negativeLogLikelihood.scalarized()
   }
 
-  public func labelProbabilities(forInstances instances: Tensor<Int32>) -> [Tensor<Float>] {
-    predictor.labelProbabilities(forInstances: instances).map(exp)
+  public func labelProbabilities(_ instances: Tensor<Int32>) -> [Tensor<Float>] {
+    predictor.labelProbabilities(instances).map(exp)
   }
 
   public func qualities(
-    forInstances instances: Tensor<Int32>,
-    predictors: Tensor<Int32>,
-    labels: Tensor<Int32>
+    _ instances: Tensor<Int32>,
+    _ predictors: Tensor<Int32>,
+    _ labels: Tensor<Int32>
   ) -> [Tensor<Float>] {
     let labelMasks = self.labelMasks(for: labels)
-    let predictions = predictor.predictions(
-      forInstances: instances,
-      predictors: predictors,
-      labels: labels)
+    let predictions = predictor(instances, predictors, labels)
     return (0..<labelCount).map { l -> Tensor<Float> in
-      let labelMask = labelMasks[l] .> 0
-      let qLog = predictions.qualities[l].gathering(where: labelMask)
-      let hLog = predictions.labelProbabilities[l].gathering(where: labelMask)
+      let hLog = predictions.labelProbabilities[l].gathering(where: labelMasks[l])
+      let qLog = predictions.qualities[l].gathering(where: labelMasks[l])
       let qLogHLog = qLog * hLog.expandingShape(at: -1)
       return Raw.matrixDiagPart(qLogHLog).logSumExp(squeezingAxes: -1)
     }
   }
+}
 
+extension MultiLabelEMModel {
   /// Returns an array of one-hot encodings of the label that corresponds to each batch element.
   @inlinable
-  internal func labelMasks(for labels: Tensor<Int32>) -> [Tensor<Int32>] {
-    Tensor<Int32>(oneHotAtIndices: labels, depth: labelCount).unstacked(alongAxis: 1)
+  internal func labelMasks(for labels: Tensor<Int32>) -> [Tensor<Bool>] {
+    (Tensor<Int32>(oneHotAtIndices: labels, depth: labelCount) .> 0).unstacked(alongAxis: 1)
   }
 }

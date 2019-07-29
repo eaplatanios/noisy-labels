@@ -19,8 +19,8 @@ fileprivate let logger = Logger(label: "Noisy Labels Learner")
 
 public protocol Learner {
   mutating func train<Instance, Predictor, Label>(using data: Data<Instance, Predictor, Label>)
-  func labelProbabilities(forInstances instances: [Int]) -> [Tensor<Float>]
-  func qualities(forInstances instances: [Int], predictors: [Int], labels: [Int]) -> Tensor<Float>
+  func labelProbabilities(_ instances: [Int]) -> [Tensor<Float>]
+  func qualities(_ instances: [Int], _ predictors: [Int], _ labels: [Int]) -> Tensor<Float>
 }
 
 public struct MajorityVoteLearner: Learner {
@@ -82,18 +82,18 @@ public struct MajorityVoteLearner: Learner {
     if verbose { logger.info("Finished counting the \"votes\".") }
   }
 
-  public func labelProbabilities(forInstances instances: [Int]) -> [Tensor<Float>] {
-    return estimatedLabelProbabilities.map { p in
+  public func labelProbabilities(_ instances: [Int]) -> [Tensor<Float>] {
+    estimatedLabelProbabilities.map { p in
       Tensor<Float>(instances.map { p[$0] })
     }
   }
 
   public func qualities(
-    forInstances instances: [Int],
-    predictors: [Int],
-    labels: [Int]
+    _ instances: [Int],
+    _ predictors: [Int],
+    _ labels: [Int]
   ) -> Tensor<Float> {
-    return Tensor<Float>(instances.map { i in
+    Tensor<Float>(instances.map { i in
       Tensor<Float>(labels.map { l in
         Tensor<Float>(predictors.map { p in estimatedQualities[i][l][p] })
       })
@@ -216,11 +216,11 @@ public struct EMLearner<Model: EMModel>: Learner {
     return nll
   }
 
-  public func labelProbabilities(forInstances instances: [Int]) -> [Tensor<Float>] {
+  public func labelProbabilities(_ instances: [Int]) -> [Tensor<Float>] {
     let instances = Tensor<Int32>(instances.map(Int32.init))
     var labelProbabilities = [[Tensor<Float>]]()
     for batch in Dataset(elements: instances).batched(batchSize) {
-      let predictions = model.labelProbabilities(forInstances: batch)
+      let predictions = model.labelProbabilities(batch)
       if labelProbabilities.isEmpty {
         for p in predictions {
           labelProbabilities.append([p])
@@ -237,9 +237,9 @@ public struct EMLearner<Model: EMModel>: Learner {
   }
 
   public func qualities(
-    forInstances instances: [Int],
-    predictors: [Int],
-    labels: [Int]
+    _ instances: [Int],
+    _ predictors: [Int],
+    _ labels: [Int]
   ) -> Tensor<Float> {
     // TODO: Make the following batched and lazy.
     // Compute the Cartesian product of instances, predictors, and labels.
@@ -268,10 +268,7 @@ public struct EMLearner<Model: EMModel>: Learner {
     // Collect the qualities for each batch.
     var qualities = [[Tensor<Float>]]()
     for batch in dataset.batched(batchSize) {
-      let predictions = model.qualities(
-        forInstances: batch.instances,
-        predictors: batch.predictors,
-        labels: batch.labels)
+      let predictions = model.qualities(batch.instances, batch.predictors, batch.labels)
       if qualities.isEmpty {
         for p in predictions {
           qualities.append([p])

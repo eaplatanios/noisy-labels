@@ -112,12 +112,11 @@ public extension Learner {
     // predictedLabelProbabilities is an array of tensors with shape: [BatchSize, ClassCount]
     // predictedQualities shape: [LabelCount, PredictorCount]
     // trueQualities shape: [LabelCount, PredictorCount]
-    let predictedLabelProbabilities = labelProbabilities(
-      forInstances: data.instanceIndices)
+    let predictedLabelProbabilities = labelProbabilities(data.instanceIndices)
     let predictedQualities = qualities(
-      forInstances: data.instanceIndices,
-      predictors: data.predictorIndices,
-      labels: data.labelIndices)
+      data.instanceIndices,
+      data.predictorIndices,
+      data.labelIndices)
     // We need to handle missing entries in the predicted qualities, which are marked as -1.0.
     let predictedQualitiesMask = Tensor<Float>(predictedQualities .!= -1.0)
     let predictedQualitiesMean = (

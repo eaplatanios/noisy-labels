@@ -22,20 +22,20 @@ where AllDifferentiableVariables: KeyPathIterable {
   var classCounts: [Int] { get }
 
   @differentiable
-  func predictions(
-    forInstances instances: Tensor<Int32>,
-    predictors: Tensor<Int32>,
-    labels: Tensor<Int32>
+  func callAsFunction(
+    _ instances: Tensor<Int32>,
+    _ predictors: Tensor<Int32>,
+    _ labels: Tensor<Int32>
   ) -> MultiLabelPredictions
 
   @differentiable
-  func labelProbabilities(forInstances instances: Tensor<Int32>) -> [Tensor<Float>]
+  func labelProbabilities(_ instances: Tensor<Int32>) -> [Tensor<Float>]
 
   @differentiable
   func qualities(
-    forInstances instances: Tensor<Int32>,
-    predictors: Tensor<Int32>,
-    labels: Tensor<Int32>
+    _ instances: Tensor<Int32>,
+    _ predictors: Tensor<Int32>,
+    _ labels: Tensor<Int32>
   ) -> [Tensor<Float>]
 
   mutating func reset()
@@ -103,10 +103,10 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
   }
 
   @differentiable
-  public func predictions(
-    forInstances instances: Tensor<Int32>,
-    predictors: Tensor<Int32>,
-    labels: Tensor<Int32>
+  public func callAsFunction(
+    _ instances: Tensor<Int32>,
+    _ predictors: Tensor<Int32>,
+    _ labels: Tensor<Int32>
   ) -> MultiLabelPredictions {
     let qI = qInstanceEmbeddings.differentiableMap { $0.gathering(atIndices: instances) }
     let qP = qPredictorEmbeddings.differentiableMap { $0.gathering(atIndices: predictors) }
@@ -121,14 +121,14 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
     ).differentiableMap { beta * $0.first + alpha * $0.second }
     let regularizationTerm = regularizationTerms.differentiableReduce(Tensor(0.0), { $0 + $1 })
     return MultiLabelPredictions(
-      labelProbabilities: labelProbabilities(forInstances: instances),
+      labelProbabilities: labelProbabilities(instances),
       qualities: qualities,
       regularizationTerm: regularizationTerm,
       includePredictionsPrior: false)
   }
 
   @differentiable
-  public func labelProbabilities(forInstances instances: Tensor<Int32>) -> [Tensor<Float>] {
+  public func labelProbabilities(_ instances: Tensor<Int32>) -> [Tensor<Float>] {
     pInstanceEmbeddings.differentiableMap {
       logSigmoid($0.gathering(atIndices: instances))
     }
@@ -136,9 +136,9 @@ public struct MinimaxConditionalEntropyPredictor: MultiLabelPredictor {
 
   @differentiable
   public func qualities(
-    forInstances instances: Tensor<Int32>,
-    predictors: Tensor<Int32>,
-    labels: Tensor<Int32>
+    _ instances: Tensor<Int32>,
+    _ predictors: Tensor<Int32>,
+    _ labels: Tensor<Int32>
   ) -> [Tensor<Float>] {
     differentiableZip(qInstanceEmbeddings, qPredictorEmbeddings).differentiableMap {
       logSoftmax(

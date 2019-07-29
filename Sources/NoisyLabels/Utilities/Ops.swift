@@ -55,15 +55,15 @@ internal func _vjpDifferentiableZip<Element1: Differentiable, Element2: Differen
 }
 
 public struct ModelParameters: Differentiable {
-  @noDerivative public let labelMask: Tensor<Int32>
-  @differentiable public var eStepAccumulator: Tensor<Float>
+  @noDerivative public let labelMask: Tensor<Bool>
+  @noDerivative public var eStepAccumulator: Tensor<Float>
   @differentiable public var labelProbabilities: Tensor<Float>
   @differentiable public var qualities: Tensor<Float>
 
   @inlinable
-  @differentiable
+  @differentiable(wrt: (labelProbabilities, qualities))
   public init(
-    labelMask: Tensor<Int32>,
+    labelMask: Tensor<Bool>,
     eStepAccumulator: Tensor<Float>,
     labelProbabilities: Tensor<Float>,
     qualities: Tensor<Float>
@@ -76,9 +76,9 @@ public struct ModelParameters: Differentiable {
 }
 
 @inlinable
-@differentiable(vjp: _vjpModelZip)
+@differentiable(wrt: (labelProbabilities, qualities), vjp: _vjpModelZip)
 internal func modelZip(
-  labelMasks: [Tensor<Int32>],
+  labelMasks: [Tensor<Bool>],
   eStepAccumulators: [Tensor<Float>],
   labelProbabilities: [Tensor<Float>],
   qualities: [Tensor<Float>]
@@ -97,12 +97,11 @@ internal func modelZip(
 
 @inlinable
 internal func _vjpModelZip(
-  labelMasks: [Tensor<Int32>],
+  labelMasks: [Tensor<Bool>],
   eStepAccumulators: [Tensor<Float>],
   labelProbabilities: [Tensor<Float>],
   qualities: [Tensor<Float>]
 ) -> ([ModelParameters], (Array<ModelParameters>.TangentVector) -> (
-  Array<Tensor<Float>>.TangentVector,
   Array<Tensor<Float>>.TangentVector,
   Array<Tensor<Float>>.TangentVector
 )) {
@@ -113,18 +112,13 @@ internal func _vjpModelZip(
       labelProbabilities: labelProbabilities,
       qualities: qualities),
     { v in
-      var g1 = [Tensor<Float>](repeating: Tensor<Float>.zero, count: eStepAccumulators.count)
-      var g2 = [Tensor<Float>](repeating: Tensor<Float>.zero, count: labelProbabilities.count)
-      var g3 = [Tensor<Float>](repeating: Tensor<Float>.zero, count: qualities.count)
+      var p = [Tensor<Float>](repeating: Tensor<Float>.zero, count: labelProbabilities.count)
+      var q = [Tensor<Float>](repeating: Tensor<Float>.zero, count: qualities.count)
       for i in v.base.indices {
-        if i < eStepAccumulators.count { g1[i] = v[i].eStepAccumulator }
-        if i < labelProbabilities.count { g2[i] = v[i].labelProbabilities }
-        if i < qualities.count { g3[i] = v[i].qualities }
+        if i < labelProbabilities.count { p[i] = v[i].labelProbabilities }
+        if i < qualities.count { q[i] = v[i].qualities }
       }
-      return (
-        Array<Tensor<Float>>.TangentVector(g1),
-        Array<Tensor<Float>>.TangentVector(g2),
-        Array<Tensor<Float>>.TangentVector(g3))
+      return (Array<Tensor<Float>>.TangentVector(p), Array<Tensor<Float>>.TangentVector(q))
     })
 }
 

@@ -34,3 +34,13 @@ public extension Decodable {
     self = try jsonDecoder.decode(Self.self, from: json.data(using: .utf8)!)
   }
 }
+
+public func sample<T>(from array: [T], count: Int) -> [T] {
+  var a = array
+  for i in 0..<count {
+    // TODO: !!!! Set the random seed.
+    let r = Int.random(in: i..<a.count)
+    if i != r { a.swapAt(i, r) }
+  }
+  return Array(a[0..<count])
+}

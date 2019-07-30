@@ -17,24 +17,8 @@ import NoisyLabels
 import Progress
 import TensorFlow
 
-public enum ExperimentError: Error {
-  case datasetNotProvided, invalidDataset
-}
-
-fileprivate func sample<T>(from a: [T], count k: Int) -> [T] {
-  var a = a
-  for i in 0..<k {
-    let r = i + Int(arc4random_uniform(UInt32(a.count - i)))
-    if i != r {
-      a.swapAt(i, r)
-    }
-  }
-  return Array(a[0..<k])
-}
-
-fileprivate extension Array where Element == Float {
+internal extension Array where Element == Float {
   var mean: Float { reduce(0, { $0 + $1 }) / Float(count) }
-
   var standardDeviation: Element {
     let mean = reduce(0, { $0 + $1 }) / Float(count)
     let variance = map { ($0 - mean) * ($0 - mean) }

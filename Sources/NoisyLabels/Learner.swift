@@ -343,8 +343,8 @@ public struct SnorkelLearner: Learner {
       }
       for (predictor, predictions) in data.predictedLabels[label]! {
         for (instance, value) in zip(predictions.instances, predictions.values) {
-          predictedLabels[String(instance)]!.append(
-            Python.tuple([predictor, Int(value)]))
+          let value = data.classCounts[label] == 2 ? 2 * Int(value) - 1 : Int(value) + 1
+          predictedLabels[String(instance)]!.append(Python.tuple([predictor, value]))
         }
       }
 

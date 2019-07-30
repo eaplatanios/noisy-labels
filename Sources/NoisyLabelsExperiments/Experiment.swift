@@ -35,30 +35,27 @@ where Dataset.Loader.Predictor: Equatable {
   public let dataDir: URL
   public let dataset: Dataset
   public let learners: [String: Learner]
-  public let concurrentTaskCount: Int = 1
 
   internal let data: NoisyLabels.Data<Instance, Predictor, Label>
-  internal let runsDispatchQueue: DispatchQueue = DispatchQueue(
-    label: "Experiment",
-    attributes: .concurrent)
-  internal let runsDispatchGroup: DispatchGroup = DispatchGroup()
-  internal let callbackSemaphore = DispatchSemaphore(value: 1)
+  internal let runsDispatchQueue: DispatchQueue
+  internal let runsDispatchGroup: DispatchGroup
+  internal let callbackDispatchSemaphore: DispatchSemaphore
 
-  public init(
-    dataDir: URL,
-    dataset: Dataset,
-    learners: [String: Learner]
-  ) throws {
+  public init(dataDir: URL, dataset: Dataset, learners: [String: Learner]) throws {
     self.dataDir = dataDir
     self.dataset = dataset
     self.learners = learners
     self.data = try dataset.loader(dataDir).load(
       withFeatures: learners.contains(where: { $0.value.requiresFeatures }))
+    self.runsDispatchQueue = DispatchQueue(label: "Experiment", attributes: .concurrent)
+    self.runsDispatchGroup = DispatchGroup()
+    self.callbackDispatchSemaphore = DispatchSemaphore(value: 1)
   }
 
   public func run(
     callback: ((ExperimentResult) -> ())? = nil,
-    runs: [ExperimentRun]? = nil
+    runs: [ExperimentRun]? = nil,
+    parallelismLimit: Int? = nil
   ) {
     let runs = runs ?? dataset.runs
     let totalRunCount = runs.map { run in
@@ -77,6 +74,13 @@ where Dataset.Loader.Predictor: Equatable {
         ProgressIndex(),
         ProgressBarLine(),
         ProgressTimeEstimates()])
+    let runsDispatchSemaphore: DispatchSemaphore? = {
+      if let limit = parallelismLimit {
+        return DispatchSemaphore(value: limit)
+      } else {
+        return nil
+      }
+    }()
     for (learnerName, learner) in learners {
       for run in runs {
         switch run {
@@ -88,6 +92,8 @@ where Dataset.Loader.Predictor: Equatable {
           for repetition in 0..<predictorSamples.count {
             if learner.supportsMultiThreading {
               runsDispatchQueue.async(group: runsDispatchGroup) { [data] () in
+                runsDispatchSemaphore?.wait()
+                defer { runsDispatchSemaphore?.signal() }
                 progressBarDispatchQueue.sync { progressBar.next() }
                 self.runPredictorSubsamplingExperiment(
                   predictorSamples: predictorSamples[repetition],
@@ -111,6 +117,8 @@ where Dataset.Loader.Predictor: Equatable {
           for _ in 0..<actualRepetitionCount {
             if learner.supportsMultiThreading {
               runsDispatchQueue.async(group: runsDispatchGroup) { [data] () in
+                runsDispatchSemaphore?.wait()
+                defer { runsDispatchSemaphore?.signal() }
                 progressBarDispatchQueue.sync { progressBar.next() }
                 self.runRedundancyExperiment(
                   maxRedundancy: maxRedundancy,
@@ -160,7 +168,7 @@ where Dataset.Loader.Predictor: Equatable {
       ("accuracy", result.accuracy),
       ("auc", result.auc)
     ] {
-      callbackSemaphore.wait()
+      callbackDispatchSemaphore.wait()
       callback?(ExperimentResult(
         timeStamp: timeStamp,
         learner: learnerName,
@@ -168,7 +176,7 @@ where Dataset.Loader.Predictor: Equatable {
         parameter: predictorSamples.count,
         metric: metric,
         value: value))
-      callbackSemaphore.signal()
+      callbackDispatchSemaphore.signal()
     }
   }
 
@@ -195,7 +203,7 @@ where Dataset.Loader.Predictor: Equatable {
       ("accuracy", result.accuracy),
       ("auc", result.auc)
     ] {
-      callbackSemaphore.wait()
+      callbackDispatchSemaphore.wait()
       callback?(ExperimentResult(
         timeStamp: timeStamp,
         learner: learnerName,
@@ -203,7 +211,7 @@ where Dataset.Loader.Predictor: Equatable {
         parameter: maxRedundancy,
         metric: metric,
         value: value))
-      callbackSemaphore.signal()
+      callbackDispatchSemaphore.signal()
     }
   }
 }

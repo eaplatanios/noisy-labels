@@ -60,6 +60,10 @@ let datasetArgument: OptionArgument<String> = parser.add(
   option: "--dataset",
   kind: String.self,
   usage: "Dataset to use for this experiment.")
+let parallelismArgument: OptionArgument<Int> = parser.add(
+  option: "--parallelism",
+  kind: Int.self,
+  usage: "Parallelism limit to enforce while running experiments.")
 
 // The first argument is always the executable, and so we drop it.
 let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
@@ -77,6 +81,7 @@ let resultsDir: Foundation.URL = {
   }
   return currentDir.appendingPathComponent("temp/results")
 }()
+let parallelismLimit = parsedArguments.get(parallelismArgument)
 
 switch parsedArguments.get(commandArgument) {
 case .plot:
@@ -260,7 +265,8 @@ where Dataset.Loader.Predictor: Equatable {
       .redundancy(maxRedundancy: 1, repetitionCount: 5),
       .redundancy(maxRedundancy: 2, repetitionCount: 5),
       .redundancy(maxRedundancy: 5, repetitionCount: 5),
-      .redundancy(maxRedundancy: 10, repetitionCount: 5)])
+      .redundancy(maxRedundancy: 10, repetitionCount: 5)],
+    parallelismLimit: parallelismLimit)
 }
 
 switch datasetName {

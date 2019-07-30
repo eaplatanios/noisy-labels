@@ -41,7 +41,6 @@ fileprivate extension Array where Element == Float {
 public struct Experiment {
   public let dataDir: URL
   public let dataset: Dataset
-  public let usingFeatures: Bool
   public let learners: [String: ExperimentLearner]
   public let concurrentTaskCount: Int = 1
 
@@ -51,17 +50,12 @@ public struct Experiment {
     attributes: .concurrent)
   internal let dispatchGroup: DispatchGroup = DispatchGroup()
 
-  public init(
-    dataDir: URL,
-    dataset: Dataset,
-    usingFeatures: Bool,
-    learners: [String: ExperimentLearner]
-  ) throws {
+  public init(dataDir: URL, dataset: Dataset, learners: [String: ExperimentLearner]) throws {
     self.dataDir = dataDir
     self.dataset = dataset
-    self.usingFeatures = usingFeatures
     self.learners = learners
-    self.data = try dataset.loader(dataDir).load(withFeatures: usingFeatures)
+    self.data = try dataset.loader(dataDir).load(
+      withFeatures: learners.contains(where: { $0.value.requiresFeatures }))
   }
 
   public func run(
@@ -181,6 +175,7 @@ public struct Experiment {
 
 public struct ExperimentLearner {
   public let createFn: (NoisyLabels.Data<Int, String, Int>) -> Learner
+  public let requiresFeatures: Bool
   public let supportsMultiThreading: Bool
 }
 

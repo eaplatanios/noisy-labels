@@ -126,15 +126,19 @@ func lnlLearner(
 var learners: [String: ExperimentLearner] = [
   "MAJ": ExperimentLearner(
     createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
+    requiresFeatures: false,
     supportsMultiThreading: true),
   "MAJ-S": ExperimentLearner(
     createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
+    requiresFeatures: false,
     supportsMultiThreading: true),
   // "MMCE-M (γ=0.00)": ExperimentLearner(
   //   createFn: { data in mmceLearner(data, gamma: 0.00) },
+  //   requiresFeatures: false,
   //   supportsMultiThreading: true),
   // "MMCE-M (γ=0.25)": ExperimentLearner(
   //   createFn: { data in mmceLearner(data, gamma: 0.25) },
+  //   requiresFeatures: false,
   //   supportsMultiThreading: true),
   // "LNL-16-16-4x16-I-1 (γ=0.00)": ExperimentLearner(
   //   createFn: { data in
@@ -147,6 +151,7 @@ var learners: [String: ExperimentLearner] = [
   //       confusionLatentSize: 1,
   //       gamma: 0.00)
   //   },
+  //   requiresFeatures: false,
   //   supportsMultiThreading: true),
   // "LNL-16-16-4x16-I-1 (γ=0.25)": ExperimentLearner(
   //   createFn: { data in
@@ -159,19 +164,21 @@ var learners: [String: ExperimentLearner] = [
   //       confusionLatentSize: 1,
   //       gamma: 0.25)
   //   },
+  //   requiresFeatures: false,
   //   supportsMultiThreading: true),
-  // "LNL-F-16-4x16-I-1 (γ=0.00)": ExperimentLearner(
-  //   createFn: { data in
-  //   lnlLearner(
-  //     data,
-  //     instanceEmbeddingSize: nil,
-  //     predictorEmbeddingSize: 16,
-  //     instanceHiddenUnitCounts: [16, 16, 16, 16],
-  //     predictorHiddenUnitCounts: [],
-  //     confusionLatentSize: 1,
-  //     gamma: 0.00)
-  //   },
-  //   supportsMultiThreading: true),
+  "LNL-F-16-4x16-I-1 (γ=0.00)": ExperimentLearner(
+    createFn: { data in
+    lnlLearner(
+      data,
+      instanceEmbeddingSize: nil,
+      predictorEmbeddingSize: 16,
+      instanceHiddenUnitCounts: [16, 16, 16, 16],
+      predictorHiddenUnitCounts: [],
+      confusionLatentSize: 1,
+      gamma: 0.00)
+    },
+    requiresFeatures: true,
+    supportsMultiThreading: true),
   // "LNL-F-16-4x16-I-1 (γ=0.25)": ExperimentLearner(
   //   createFn: { data in
   //   lnlLearner(
@@ -183,6 +190,7 @@ var learners: [String: ExperimentLearner] = [
   //     confusionLatentSize: 1,
   //     gamma: 0.25)
   //   },
+  //   requiresFeatures: true,
   //   supportsMultiThreading: true)
 ]
 
@@ -191,14 +199,11 @@ import Python
 PythonLibrary.useVersion(3, 7)
 learners["Snorkel"] = ExperimentLearner(
   createFn: { _ in SnorkelLearner() },
+  requiresFeatures: false,
   supportsMultiThreading: false)
 #endif
 
-let experiment = try Experiment(
-  dataDir: dataDir,
-  dataset: dataset,
-  usingFeatures: false,
-  learners: learners)
+let experiment = try Experiment(dataDir: dataDir, dataset: dataset, learners: learners)
 let resultsURL = resultsDir.appendingPathComponent("\(dataset.rawValue).tsv")
 let results = experiment.run(
   callback: ResultsWriter(at: resultsURL),

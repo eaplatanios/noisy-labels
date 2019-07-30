@@ -310,6 +310,8 @@ public struct SnorkelLearner: Learner {
   public mutating func train<Instance, Predictor, Label>(
     using data: Data<Instance, Predictor, Label>
   ) {
+    pythonSemaphore.wait()
+    defer { pythonSemaphore.signal() }
     let snorkel = Python.import("snorkel")
     let snorkelModels = Python.import("snorkel.models")
     let snorkelText = Python.import("snorkel.contrib.models.text")
@@ -365,6 +367,9 @@ public struct SnorkelLearner: Learner {
       let model = snorkelGenLearning.GenerativeModel(lf_propensity: true)
       model.train(labels, reg_type: 2, reg_param: 0.1, epochs: 30)
       let marginals = [Float](model.marginals(labels))!
+
+      // Close the Snorkel session.
+      session.close()
 
       // Estimate the qualities
       for (predictor, predictions) in data.predictedLabels[label]! {

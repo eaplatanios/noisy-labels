@@ -16,25 +16,20 @@ import Foundation
 import Python
 import TensorFlow
 
-// TODO: The Python interface is not thread-safe.
-let serialQueue = DispatchQueue(label: "PythonQueue")
-
-let metrics = Python.import("sklearn.metrics")
-let np = Python.import("numpy")
+fileprivate let metrics = Python.import("sklearn.metrics")
+fileprivate let np = Python.import("numpy")
 
 public func computeMADErrorRank(
   estimatedQualities: Tensor<Float>,
   trueQualities: Tensor<Float>
 ) -> Float {
-  var result: Float? = nil
-  serialQueue.sync {
-    let estimatedQualities = estimatedQualities.makeNumpyArray()
-    let trueQualities = trueQualities.makeNumpyArray()
-    let p = np.argsort(estimatedQualities, axis: -1)
-    let t = np.argsort(trueQualities, axis: -1)
-    result = Float(np.mean(np.abs(p - t)))!
-  }
-  return result!
+  pythonSemaphore.wait()
+  defer { pythonSemaphore.signal() }
+  let estimatedQualities = estimatedQualities.makeNumpyArray()
+  let trueQualities = trueQualities.makeNumpyArray()
+  let p = np.argsort(estimatedQualities, axis: -1)
+  let t = np.argsort(trueQualities, axis: -1)
+  return Float(np.mean(np.abs(p - t)))!
 }
 
 public func computeMADError(
@@ -58,19 +53,21 @@ public func computeAUC(
   estimatedLabelProbabilities: Tensor<Float>,
   trueLabels: Tensor<Int32>
 ) -> Float {
-  var result: Float? = nil
-  serialQueue.sync {
-    var trueLabels = trueLabels.makeNumpyArray()
-    if estimatedLabelProbabilities.rank > 1 {
-      let trueLabelsOneHot = np.zeros(estimatedLabelProbabilities.shape)
-      trueLabelsOneHot[np.arange(trueLabels.shape[0]), trueLabels] = 1
-      trueLabels = trueLabelsOneHot
-    }
-    result = Float(metrics.average_precision_score(
-      y_true: trueLabels,
-      y_score: estimatedLabelProbabilities.makeNumpyArray()))!
+  pythonSemaphore.wait()
+  defer { pythonSemaphore.signal() }
+  var trueLabels = trueLabels.makeNumpyArray()
+  if estimatedLabelProbabilities.rank > 1 {
+    let trueLabelsOneHot = np.zeros(estimatedLabelProbabilities.shape)
+    trueLabelsOneHot[np.arange(trueLabels.shape[0]), trueLabels] = 1
+    trueLabels = trueLabelsOneHot
   }
-  return result!
+  return Float(metrics.average_precision_score(
+    y_true: trueLabels,
+    y_score: estimatedLabelProbabilities.makeNumpyArray()))!
+}
+
+public enum Metric: String {
+  case madError, madErrorRank, accuracy, auc
 }
 
 public struct EvaluationResult {

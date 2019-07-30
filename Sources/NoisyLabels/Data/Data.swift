@@ -540,17 +540,12 @@ extension Data {
         for (i, value) in zip(predictions.instances, predictions.values) {
           instanceAnnotations[l]![i]!.append((predictor: pOld, value: value))
         }
-        // Discard some annotations to enforce the requested redundancy limit.
-        for (i, annotations) in instanceAnnotations[l]! {
-          if annotations.count > maxRedundancy {
-            var a = annotations
-            for i in 0..<maxRedundancy {
-              // TODO: !!!! Set the random seed.
-              let r = Int.random(in: i..<a.count)
-              if i != r { a.swapAt(i, r) }
-            }
-            instanceAnnotations[l]![i] = Array(a[0..<maxRedundancy])
-          }
+      }
+
+      // Discard some annotations to enforce the requested redundancy limit.
+      for (i, annotations) in instanceAnnotations[l]! {
+        if annotations.count > maxRedundancy {
+          instanceAnnotations[l]![i] = sample(from: annotations, count: maxRedundancy)
         }
       }
 

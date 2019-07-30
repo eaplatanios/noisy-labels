@@ -14,8 +14,9 @@
 
 import TensorFlow
 
+// TODO: !!!! Remove `Optimizer.Scalar == Float` once formal support for learning rate decay lands.
 public struct EMModel<Predictor: NoisyLabels.Predictor, Optimizer: TensorFlow.Optimizer>
-where Optimizer.Model == Predictor {
+where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
   public let instanceCount: Int
   public let predictorCount: Int
   public let labelCount: Int
@@ -116,6 +117,8 @@ where Optimizer.Model == Predictor {
       }.differentiableReduce(predictions.regularizationTerm, { $0 + $1 })
     }
     optimizer.update(&predictor, along: gradient)
+    // TODO: !!!! More formal support for learning rate decay.
+    optimizer.learningRate *= 0.995
     return negativeLogLikelihood.scalarized()
   }
 
@@ -137,13 +140,15 @@ where Optimizer.Model == Predictor {
         let yHat = useSoftMajorityVote ?
           Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
           Tensor<Float>(oneHotAtIndices: Tensor<Int32>(values), depth: hLog.shape[1])
-        let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -2, -1)
+        let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
         let logLikelihood = (qLogYHat + hLog).logSumExp(squeezingAxes: -1).sum()
         let entropy = (exp(hLog) * hLog).sum()
         return entropyWeight * entropy - logLikelihood
+    // TODO: !!!! More formal support for learning rate decay.
       }.differentiableReduce(Tensor(0.0), { $0 + $1 })
     }
     optimizer.update(&predictor, along: gradient)
+    optimizer.learningRate *= 0.995
     return negativeLogLikelihood.scalarized()
   }
 

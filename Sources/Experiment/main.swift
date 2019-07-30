@@ -66,7 +66,7 @@ func mmceLearner(_ data: NoisyLabels.Data<Int, String, Int>, gamma: Float) -> Le
   let model = EMModel(
     predictor: predictor,
     optimizer: optimizer,
-    entropyWeight: 1.0,
+    entropyWeight: 0.0,
     useSoftMajorityVote: true,
     useSoftPredictions: false)
   return EMLearner(
@@ -74,8 +74,8 @@ func mmceLearner(_ data: NoisyLabels.Data<Int, String, Int>, gamma: Float) -> Le
     randomSeed: 42,
     batchSize: 128,
     useWarmStarting: true,
-    mStepCount: 1000,
-    emStepCount: 10,
+    mStepCount: 2000,
+    emStepCount: 2,
     marginalStepCount: 0,
     mStepLogCount: 100,
     verbose: false)
@@ -108,7 +108,7 @@ func lnlLearner(
   let model = EMModel(
     predictor: predictor,
     optimizer: optimizer,
-    entropyWeight: 1.0,
+    entropyWeight: 0.0,
     useSoftMajorityVote: true,
     useSoftPredictions: false)
   return EMLearner(
@@ -116,70 +116,78 @@ func lnlLearner(
     randomSeed: 42,
     batchSize: 128,
     useWarmStarting: true,
-    mStepCount: 1000,
-    emStepCount: 10,
-    marginalStepCount: 0,
+    mStepCount: 2000,
+    emStepCount: 2,
+    marginalStepCount: 2000,
     mStepLogCount: 100,
     verbose: false)
 }
+
+var learners: [String: (NoisyLabels.Data<Int, String, Int>) -> Learner] = [
+  "MAJ": { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
+  "MAJ-S": { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
+  // "MMCE-M (γ=0.00)": { data in mmceLearner(data, gamma: 0.00) },
+  // "MMCE-M (γ=0.25)": { data in mmceLearner(data, gamma: 0.25) },
+  // "LNL-16-16-4x16-I-1 (γ=0.00)": { data in
+  //   lnlLearner(
+  //     data,
+  //     instanceEmbeddingSize: 16,
+  //     predictorEmbeddingSize: 16,
+  //     instanceHiddenUnitCounts: [16, 16, 16, 16],
+  //     predictorHiddenUnitCounts: [],
+  //     confusionLatentSize: 1,
+  //     gamma: 0.00)
+  // },
+  // "LNL-16-16-4x16-I-1 (γ=0.25)": { data in
+  //   lnlLearner(
+  //     data,
+  //     instanceEmbeddingSize: 16,
+  //     predictorEmbeddingSize: 16,
+  //     instanceHiddenUnitCounts: [16, 16, 16, 16],
+  //     predictorHiddenUnitCounts: [],
+  //     confusionLatentSize: 1,
+  //     gamma: 0.25)
+  // },
+  // "LNL-F-16-4x16-I-1 (γ=0.00)": { data in
+  //   lnlLearner(
+  //     data,
+  //     instanceEmbeddingSize: nil,
+  //     predictorEmbeddingSize: 16,
+  //     instanceHiddenUnitCounts: [16, 16, 16, 16],
+  //     predictorHiddenUnitCounts: [],
+  //     confusionLatentSize: 1,
+  //     gamma: 0.00)
+  // },
+  // "LNL-F-16-4x16-I-1 (γ=0.25)": { data in
+  //   lnlLearner(
+  //     data,
+  //     instanceEmbeddingSize: nil,
+  //     predictorEmbeddingSize: 16,
+  //     instanceHiddenUnitCounts: [16, 16, 16, 16],
+  //     predictorHiddenUnitCounts: [],
+  //     confusionLatentSize: 1,
+  //     gamma: 0.25)
+  // }
+]
+
+#if SNORKEL
+import Python
+PythonLibrary.useVersion(3, 7)
+learners["Snorkel"] = { _ in SnorkelLearner() }
+#endif
 
 let experiment = try Experiment(
   dataDir: dataDir,
   dataset: dataset,
   usingFeatures: false,
-  learners: [
-    "MAJ": { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
-    "MAJ-S": { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
-    "MMCE-M (γ=0.00)": { data in mmceLearner(data, gamma: 0.00) },
-    "MMCE-M (γ=0.25)": { data in mmceLearner(data, gamma: 0.25) },
-    // "LNL-4-4-4x16-4x16-1 (γ=0.00)": { data in
-    //   lnlLearner(
-    //     data,
-    //     instanceEmbeddingSize: 4,
-    //     predictorEmbeddingSize: 4,
-    //     instanceHiddenUnitCounts: [16, 16, 16, 16],
-    //     predictorHiddenUnitCounts: [16, 16, 16, 16],
-    //     confusionLatentSize: 1,
-    //     gamma: 0.00)
-    // },
-    // "LNL-4-4-4x16-4x16-1 (γ=0.25)": { data in
-    //   lnlLearner(
-    //     data,
-    //     instanceEmbeddingSize: 4,
-    //     predictorEmbeddingSize: 4,
-    //     instanceHiddenUnitCounts: [16, 16, 16, 16],
-    //     predictorHiddenUnitCounts: [16, 16, 16, 16],
-    //     confusionLatentSize: 1,
-    //     gamma: 0.25)
-    // },
-    // "LNL-IF-4-4x16-4x16-1 (γ=0.00)": { data in
-    //   lnlLearner(
-    //     data,
-    //     instanceEmbeddingSize: nil,
-    //     predictorEmbeddingSize: 4,
-    //     instanceHiddenUnitCounts: [16, 16, 16, 16],
-    //     predictorHiddenUnitCounts: [16, 16, 16, 16],
-    //     confusionLatentSize: 1,
-    //     gamma: 0.00)
-    // },
-    // "LNL-IF-4-4x16-4x16-1 (γ=0.25)": { data in
-    //   lnlLearner(
-    //     data,
-    //     instanceEmbeddingSize: nil,
-    //     predictorEmbeddingSize: 4,
-    //     instanceHiddenUnitCounts: [16, 16, 16, 16],
-    //     predictorHiddenUnitCounts: [16, 16, 16, 16],
-    //     confusionLatentSize: 1,
-    //     gamma: 0.25)
-    // }
-  ])
+  learners: learners)
 let resultsURL = resultsDir.appendingPathComponent("\(dataset.rawValue).tsv")
 let results = experiment.run(
   callback: ResultsWriter(at: resultsURL),
   runs: [
-    .simple(predictorCount: 1, repetitionCount: 5),
-    .simple(predictorCount: 10, repetitionCount: 5),
-    .simple(predictorCount: 20, repetitionCount: 5),
-    .simple(predictorCount: 50, repetitionCount: 5),
-    .simple(predictorCount: 100, repetitionCount: 2),
-    .simple(predictorCount: 164, repetitionCount: 1)])
+    // .simple(predictorCount: 1, repetitionCount: 5),
+    .simple(predictorCount: 10, repetitionCount: 5)])
+    // .simple(predictorCount: 20, repetitionCount: 5),
+    // .simple(predictorCount: 50, repetitionCount: 5),
+    // .simple(predictorCount: 100, repetitionCount: 2),
+    //.simple(predictorCount: 164, repetitionCount: 1)])

@@ -15,12 +15,16 @@
 import TensorFlow
 
 public protocol Learner {
+  var supportsMultiThreading: Bool { get }
+
   mutating func train<Instance, Predictor, Label>(using data: Data<Instance, Predictor, Label>)
   func labelProbabilities(_ instances: [Int]) -> [Tensor<Float>]
   func qualities(_ instances: [Int], _ predictors: [Int], _ labels: [Int]) -> Tensor<Float>
 }
 
 public struct MajorityVoteLearner: Learner {
+  public let supportsMultiThreading: Bool = true
+
   public let useSoftMajorityVote: Bool
   public let verbose: Bool
 
@@ -98,10 +102,13 @@ public struct MajorityVoteLearner: Learner {
   }
 }
 
+// TODO: !!!! Remove `Optimizer.Scalar == Float` once formal support for learning rate decay lands.
 public struct EMLearner<
   Predictor: NoisyLabels.Predictor,
   Optimizer: TensorFlow.Optimizer
->: Learner where Optimizer.Model == Predictor {
+>: Learner where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
+  public let supportsMultiThreading: Bool = true
+
   public private(set) var model: EMModel<Predictor, Optimizer>
 
   public let randomSeed: Int64
@@ -226,8 +233,8 @@ public struct EMLearner<
           labelProbabilities.append([p])
         }
       } else {
-        for (i, p) in predictions.enumerated() {
-          labelProbabilities[i].append(p)
+        for (l, p) in predictions.enumerated() {
+          labelProbabilities[l].append(p)
         }
       }
     }
@@ -295,3 +302,136 @@ public struct EMLearner<
       .transposed(withPermutations: 1, 0, 2)
   }
 }
+
+#if SNORKEL
+
+import Python
+
+public struct SnorkelLearner: Learner {
+  public let supportsMultiThreading: Bool = false
+
+  private var snorkelMarginals: [[Float]]!
+  private var snorkelQualities: [QualitiesKey: Float]!
+
+  public init() {}
+
+  public mutating func train<Instance, Predictor, Label>(
+    using data: Data<Instance, Predictor, Label>
+  ) {
+    let snorkel = Python.import("snorkel")
+    let snorkelModels = Python.import("snorkel.models")
+    let snorkelText = Python.import("snorkel.contrib.models.text")
+    let snorkelGenLearning = Python.import("snorkel.learning.gen_learning")
+    snorkelQualities = [QualitiesKey: Float]()
+    snorkelMarginals = data.labels.indices.map { label in
+      let session = snorkel.SnorkelSession()
+      let snorkelLabel = snorkelModels.candidate_subclass(
+        "NoisyLabelsLabel\(data.labels)",
+        ["index"],
+        cardinality: data.classCounts[label])
+
+      // Make sure the database is empty.
+      session.query(snorkelModels.Candidate).delete()
+      session.query(snorkelModels.Context).delete()
+
+      // Add all the candidates.
+      for instance in data.instances.indices {
+        let instanceIndex = snorkelText.RawText(
+          stable_id: String(instance),
+          name: String(instance),
+          text: String(instance))
+        session.add(snorkelLabel(index: instanceIndex))
+      }
+      session.commit()
+
+      // Dictionary mapping from instance to `(predictor, value)` pairs.
+      var predictedLabels = [String: [PythonObject]]()
+      for instance in data.instances.indices {
+        predictedLabels[String(instance)] = [PythonObject]()
+      }
+      for (predictor, predictions) in data.predictedLabels[label]! {
+        for (instance, value) in zip(predictions.instances, predictions.values) {
+          predictedLabels[String(instance)]!.append(
+            Python.tuple([predictor, Int(value)]))
+        }
+      }
+
+      // Create a Snorkel label annotator.
+      let labeler = Python.import("__main__").__dict__
+      Python.exec("""
+        from snorkel.annotations import LabelAnnotator
+        def labeler(predicted_labels):
+          def worker_label_generator(t):
+            for worker_id, label in predicted_labels[t.index.name]:
+              yield worker_id, label
+          return LabelAnnotator(label_generator=worker_label_generator)
+        """, labeler, labeler)
+      let labelAnnotator = labeler["labeler"](predictedLabels)
+      let labels = labelAnnotator.apply()
+
+      // Train a generative model on the labels.
+      let model = snorkelGenLearning.GenerativeModel(lf_propensity: true)
+      model.train(labels, reg_type: 2, reg_param: 0.1, epochs: 30)
+      let marginals = [Float](model.marginals(labels))!
+
+      // Estimate the qualities
+      for (predictor, predictions) in data.predictedLabels[label]! {
+        for (instance, value) in zip(predictions.instances, predictions.values) {
+          // We use a heuristic way to estimate predictor qualities because Snorkel does not
+          // provide an explicit way to do so.
+          let quality = abs(value - marginals[instance])
+          snorkelQualities[QualitiesKey(instance, label, predictor)] = quality
+        }
+      }
+
+      return marginals
+    }
+  }
+
+  public func labelProbabilities(_ instances: [Int]) -> [Tensor<Float>] {
+    snorkelMarginals.map { marginals in
+      Tensor<Float>(
+        stacking: instances.map { instance in
+          let marginal = marginals[instance]
+          return Tensor<Float>([1.0 - marginal, marginal])
+        })
+    }
+  }
+
+  public func qualities(
+    _ instances: [Int],
+    _ predictors: [Int],
+    _ labels: [Int]
+  ) -> Tensor<Float> {
+    var qualities = [Float]()
+    qualities.reserveCapacity(instances.count * labels.count * predictors.count)
+    var i = 0
+    for instance in instances {
+      for label in labels {
+        for predictor in predictors {
+          qualities.append(snorkelQualities[QualitiesKey(instance, label, predictor)] ?? -1)
+          i += 1
+        }
+      }
+    }
+    return Tensor<Float>(
+      shape: [instances.count, labels.count, predictors.count],
+      scalars: qualities)
+  }
+}
+
+extension SnorkelLearner {
+  internal struct QualitiesKey: Hashable {
+    internal let instance: Int
+    internal let label: Int
+    internal let predictor: Int
+
+    internal init(_ instance: Int, _ label: Int, _ predictor: Int) {
+      self.instance = instance
+      self.label = label
+      self.predictor = predictor
+    }
+  }
+}
+
+#endif

@@ -96,12 +96,20 @@ public struct Experiment {
             [data.predictors] :
             (0..<repetitionCount).map { _ in sample(from: data.predictors, count: predictorCount) }
           for repetition in 0..<predictorSamples.count {
-            dispatchQueue.async(group: dispatchGroup) { [data] () in
-              progressBarQueue.sync { progressBar.next() }
-              let filteredData = data.filtered(
-                predictors: predictorSamples[repetition],
-                keepInstances: true)
-              var learner = learner(filteredData)
+            let filteredData = data.filtered(
+              predictors: predictorSamples[repetition],
+              keepInstances: true)
+            var learner = learner(filteredData)
+            let invoke = learner.supportsMultiThreading ?
+              { [dispatchQueue, dispatchGroup] body -> () in
+                dispatchQueue.async(group: dispatchGroup, execute: body)
+              } : { $0() }
+            invoke { () in
+              if learner.supportsMultiThreading {
+                progressBarQueue.sync { progressBar.next() }
+              } else {
+                progressBar.next()
+              }
               learner.train(using: filteredData)
               let result = EvaluationResult(merging: learner.evaluatePerLabel(using: filteredData))
               let dateFormatter = DateFormatter()

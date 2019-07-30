@@ -41,7 +41,7 @@ public func computeMADError(
   estimatedQualities: Tensor<Float>,
   trueQualities: Tensor<Float>
 ) -> Float {
-  return abs(estimatedQualities - trueQualities).mean().scalarized()
+  abs(estimatedQualities - trueQualities).mean().scalarized()
 }
 
 public func computeAccuracy(
@@ -96,7 +96,7 @@ public struct EvaluationResult {
 
 extension EvaluationResult: CustomStringConvertible {
   public var description: String {
-    return """
+    """
     MAD Error Rank = \(String(format: "%7.4f", madErrorRank)), \
     MAD Error = \(String(format: "%6.4f", madError)), \
     Accuracy = \(String(format: "%6.4f", accuracy)), \

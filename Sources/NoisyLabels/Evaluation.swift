@@ -13,23 +13,21 @@
 // the License.
 
 import Foundation
-import Python
 import TensorFlow
-
-fileprivate let metrics = Python.import("sklearn.metrics")
-fileprivate let np = Python.import("numpy")
 
 public func computeMADErrorRank(
   estimatedQualities: Tensor<Float>,
   trueQualities: Tensor<Float>
 ) -> Float {
-  pythonSemaphore.wait()
-  defer { pythonSemaphore.signal() }
-  let estimatedQualities = estimatedQualities.makeNumpyArray()
-  let trueQualities = trueQualities.makeNumpyArray()
-  let p = np.argsort(estimatedQualities, axis: -1)
-  let t = np.argsort(trueQualities, axis: -1)
-  return Float(np.mean(np.abs(p - t)))!
+  let e = estimatedQualities.scalars
+  let t = trueQualities.scalars
+  let eRanks = e.indices.sorted(by: { e[$0] > e[$1] })
+  let tRanks = t.indices.sorted(by: { t[$0] > t[$1] })
+  var madErrorRank: Float = 0.0
+  for (eRank, tRank) in zip(eRanks, tRanks) {
+    madErrorRank += Float(abs(eRank - tRank))
+  }
+  return madErrorRank / Float(eRanks.count)
 }
 
 public func computeMADError(
@@ -53,17 +51,58 @@ public func computeAUC(
   estimatedLabelProbabilities: Tensor<Float>,
   trueLabels: Tensor<Int32>
 ) -> Float {
-  pythonSemaphore.wait()
-  defer { pythonSemaphore.signal() }
-  var trueLabels = trueLabels.makeNumpyArray()
-  if estimatedLabelProbabilities.rank > 1 {
-    let trueLabelsOneHot = np.zeros(estimatedLabelProbabilities.shape)
-    trueLabelsOneHot[np.arange(trueLabels.shape[0]), trueLabels] = 1
-    trueLabels = trueLabelsOneHot
+  let perLabel = estimatedLabelProbabilities.rank > 1 ?
+    estimatedLabelProbabilities.unstacked(alongAxis: 1) :
+    [estimatedLabelProbabilities]
+  let perLabelScalars = perLabel.map { $0.scalars }
+  let trueLabelScalars = trueLabels.scalars
+  var auc: Float = 0.0
+  for l in perLabelScalars.indices {
+    let predictions = perLabelScalars[l]
+    var scores = [Float]()
+    var i = 0
+    while i < predictions.count {
+      var tiesCount = 0
+      var positiveTiesCount = 0
+      repeat {
+        tiesCount += 1
+        if trueLabelScalars[i] == l {
+          positiveTiesCount += 1
+        }
+        i += 1
+      } while i < predictions.count && predictions[i - 1] == predictions[i]
+      for _ in 0..<(i - scores.count) {
+        scores.append(Float(positiveTiesCount) / Float(tiesCount))
+      }
+    }
+    var tp: Float = 0.0 // True positives.
+    var fp: Float = 0.0 // False positives.
+    var fn: Float = 0.0 // False negatives.
+    var previousPrecision: Float = 0.0
+    var previousRecall: Float = 1.0
+    var currentPrecision: Float = 0.0
+    var currentRecall: Float = 0.0
+    for i in predictions.indices {
+      if trueLabelScalars[i] == l {
+        fn += scores[i]
+      }
+    }
+    for i in predictions.indices {
+      let score = scores[i]
+      if trueLabelScalars[i] == l {
+        fn -= score
+        tp += score
+      } else {
+        fp += score
+      }
+      currentPrecision = tp + fn > 0 ? tp / (tp + fn) : 1.0
+      currentRecall = tp + fp > 0 ? tp / (tp + fp) : 1.0
+      auc += 0.5 * (currentPrecision - previousPrecision) * (currentRecall + previousRecall)
+      previousPrecision = currentPrecision
+      previousRecall = currentRecall
+    }
   }
-  return Float(metrics.average_precision_score(
-    y_true: trueLabels,
-    y_score: estimatedLabelProbabilities.makeNumpyArray()))!
+  return min(auc / Float(perLabelScalars.count), 1.0)
 }
 
 public enum Metric: String {

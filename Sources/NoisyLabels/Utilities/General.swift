@@ -17,9 +17,6 @@ import Logging
 
 internal let logger = Logger(label: "Noisy Labels")
 
-// TODO: The Python interface is not thread-safe.
-internal let pythonSemaphore = DispatchSemaphore(value: 1)
-
 public extension Encodable {
   func json(pretty: Bool = true) throws -> String {
     let encoder = JSONEncoder()

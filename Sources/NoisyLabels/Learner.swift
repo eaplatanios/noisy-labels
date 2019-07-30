@@ -299,7 +299,11 @@ public struct EMLearner<
 
 #if SNORKEL
 
+import Foundation
 import Python
+
+// TODO: The Python interface is not thread-safe.
+internal let pythonDispatchSemaphore = DispatchSemaphore(value: 1)
 
 public struct SnorkelLearner: Learner {
   private var snorkelMarginals: [[Float]]!
@@ -310,8 +314,8 @@ public struct SnorkelLearner: Learner {
   public mutating func train<Instance, Predictor, Label>(
     using data: Data<Instance, Predictor, Label>
   ) {
-    pythonSemaphore.wait()
-    defer { pythonSemaphore.signal() }
+    pythonDispatchSemaphore.wait()
+    defer { pythonDispatchSemaphore.signal() }
     let snorkel = Python.import("snorkel")
     let snorkelModels = Python.import("snorkel.models")
     let snorkelText = Python.import("snorkel.contrib.models.text")

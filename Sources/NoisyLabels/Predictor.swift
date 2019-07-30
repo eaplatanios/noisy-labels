@@ -160,6 +160,7 @@ public struct LNLPredictor: Predictor {
   @noDerivative public let classCounts: [Int]
   @noDerivative public let alpha: Float
   @noDerivative public let beta: Float
+  @noDerivative public let adjustFeaturesMagnitude: Bool
   @noDerivative public let instanceEmbeddingSize: Int?
   @noDerivative public let predictorEmbeddingSize: Int?
   @noDerivative public let instanceHiddenUnitCounts: [Int]
@@ -181,6 +182,7 @@ public struct LNLPredictor: Predictor {
     instanceHiddenUnitCounts: [Int],
     predictorHiddenUnitCounts: [Int],
     confusionLatentSize: Int,
+    adjustFeaturesMagnitude: Bool = true,
     gamma: Float = 0.25
   ) {
     self.instanceCount = data.instances.count
@@ -189,6 +191,7 @@ public struct LNLPredictor: Predictor {
     self.classCounts = data.classCounts
     self.alpha = 0.5 * gamma * pow(Float(2 * labelCount), 2.0)
     self.beta = alpha * data.avgLabelsPerPredictor / data.avgLabelsPerItem
+    self.adjustFeaturesMagnitude = adjustFeaturesMagnitude
     self.instanceEmbeddingSize = instanceEmbeddingSize
     self.predictorEmbeddingSize = predictorEmbeddingSize
     self.instanceHiddenUnitCounts = instanceHiddenUnitCounts
@@ -200,7 +203,12 @@ public struct LNLPredictor: Predictor {
     self.predictorFeatures = predictorEmbeddingSize == nil ?
       Tensor(stacking: data.predictorFeatures!, alongAxis: 0) :
       Tensor(glorotUniform: [predictorCount, predictorEmbeddingSize!])
-    
+
+    if adjustFeaturesMagnitude {
+      instanceFeatures /= abs(instanceFeatures).max()
+      predictorFeatures /= abs(predictorFeatures).max()
+    }
+
     // Create the instance processing layers.
     var inputSize = instanceFeatures.shape[1]
     self.instanceProcessingLayers = [Dense<Float>]()

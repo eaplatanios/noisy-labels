@@ -8,7 +8,7 @@ let package = Package(
   platforms: [.macOS(.v10_12)],
   products: [
     .library(name: "NoisyLabels", targets: ["NoisyLabels"]),
-    .executable(name: "Experiment", targets: ["Experiment"])
+    .executable(name: "NoisyLabelsExperiments", targets: ["NoisyLabelsExperiments"])
   ],
   dependencies: [
     .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0"),
@@ -18,6 +18,6 @@ let package = Package(
   ],
   targets: [
     .target(name: "NoisyLabels", dependencies: ["Logging", "ZIPFoundation"]),
-    .target(name: "Experiment", dependencies: ["NoisyLabels", "Progress", "Utility"]),
+    .target(name: "NoisyLabelsExperiments", dependencies: ["NoisyLabels", "Progress", "Utility"]),
   ]
 )

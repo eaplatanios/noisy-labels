@@ -21,6 +21,10 @@ import Progress
 /// - Author: Emmanouil Antonios Platanios
 ///
 public protocol DataLoader {
+  associatedtype Instance
+  associatedtype Predictor
+  associatedtype Label
+
   /// Downloads the file at `url` to `path`, if `path` does not exist.
   ///
   /// - Parameters:
@@ -31,7 +35,7 @@ public protocol DataLoader {
   ///     performed (as opposed to not needed).
   func maybeDownload(from url: URL, to destination: URL) throws
 
-  func load(withFeatures: Bool) throws -> Data<Int, String, Int>
+  func load(withFeatures: Bool) throws -> Data<Instance, Predictor, Label>
 }
 
 public extension DataLoader {

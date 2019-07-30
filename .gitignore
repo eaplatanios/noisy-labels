@@ -90,3 +90,4 @@ target/
 
 # Snorkel
 snorkel.db
+snorkel.db-journal

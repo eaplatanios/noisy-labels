@@ -37,9 +37,6 @@ where Dataset.Loader.Predictor: Equatable {
   public let learners: [String: Learner]
 
   internal let data: NoisyLabels.Data<Instance, Predictor, Label>
-  internal let runsDispatchQueue: DispatchQueue
-  internal let runsDispatchGroup: DispatchGroup
-  internal let callbackDispatchSemaphore: DispatchSemaphore
 
   public init(dataDir: URL, dataset: Dataset, learners: [String: Learner]) throws {
     self.dataDir = dataDir
@@ -47,9 +44,6 @@ where Dataset.Loader.Predictor: Equatable {
     self.learners = learners
     self.data = try dataset.loader(dataDir).load(
       withFeatures: learners.contains(where: { $0.value.requiresFeatures }))
-    self.runsDispatchQueue = DispatchQueue(label: "Experiment", attributes: .concurrent)
-    self.runsDispatchGroup = DispatchGroup()
-    self.callbackDispatchSemaphore = DispatchSemaphore(value: 1)
   }
 
   public func run(
@@ -74,14 +68,18 @@ where Dataset.Loader.Predictor: Equatable {
         ProgressIndex(),
         ProgressBarLine(),
         ProgressTimeEstimates()])
-    let runsDispatchSemaphore: DispatchSemaphore? = {
+    let dispatchSemaphore: DispatchSemaphore? = {
       if let limit = parallelismLimit {
         return DispatchSemaphore(value: limit)
       } else {
         return nil
       }
     }()
+    let concurrentQueue = DispatchQueue(label: "Noisy Labels Concurrent", attributes: .concurrent)
+    let serialQueue = DispatchQueue(label: "Noisy Labels Serial")
+    let dispatchGroup = DispatchGroup()
     for (learnerName, learner) in learners {
+      let queue = learner.supportsMultiThreading ? concurrentQueue : serialQueue
       for run in runs {
         switch run {
         case let .predictorSubsampling(predictorCount, repetitionCount):
@@ -90,129 +88,75 @@ where Dataset.Loader.Predictor: Equatable {
             [data.predictors] :
             (0..<repetitionCount).map { _ in sample(from: data.predictors, count: predictorCount) }
           for repetition in 0..<predictorSamples.count {
-            if learner.supportsMultiThreading {
-              runsDispatchQueue.async(group: runsDispatchGroup) { [data] () in
-                runsDispatchSemaphore?.wait()
-                defer { runsDispatchSemaphore?.signal() }
-                progressBarDispatchQueue.sync { progressBar.next() }
-                self.runPredictorSubsamplingExperiment(
-                  predictorSamples: predictorSamples[repetition],
-                  learnerName: learnerName,
-                  learner: learner,
-                  data: data,
-                  callback: callback)
+            queue.async(group: dispatchGroup) { [data] () in
+              dispatchSemaphore?.wait()
+              defer { dispatchSemaphore?.signal() }
+              progressBarDispatchQueue.sync { progressBar.next() }
+              let filteredData = data.filtered(
+                predictors: predictorSamples[repetition],
+                keepInstances: true)
+              var learner = learner.createFn(filteredData)
+              learner.train(using: filteredData)
+              let result = EvaluationResult(merging: learner.evaluatePerLabel(using: filteredData))
+              let dateFormatter = DateFormatter()
+              dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+              dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZZZZZ"
+              dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+              let timeStamp = dateFormatter.string(from: Date())
+              for (metric, value) in [
+                ("madErrorRank", result.madErrorRank),
+                ("madError", result.madError),
+                ("accuracy", result.accuracy),
+                ("auc", result.auc)
+              ] {
+                callback?(ExperimentResult(
+                  timeStamp: timeStamp,
+                  learner: learnerName,
+                  parameterType: .predictorCount,
+                  parameter: predictorSamples.count,
+                  metric: metric,
+                  value: value))
               }
-            } else {
-              progressBar.next()
-              runPredictorSubsamplingExperiment(
-                predictorSamples: predictorSamples[repetition],
-                learnerName: learnerName,
-                learner: learner,
-                data: data,
-                callback: callback)
             }
           }
         case let .redundancy(maxRedundancy, repetitionCount):
           let actualRepetitionCount = data.predictors.count <= maxRedundancy ? 1 : repetitionCount
           for _ in 0..<actualRepetitionCount {
-            if learner.supportsMultiThreading {
-              runsDispatchQueue.async(group: runsDispatchGroup) { [data] () in
-                runsDispatchSemaphore?.wait()
-                defer { runsDispatchSemaphore?.signal() }
-                progressBarDispatchQueue.sync { progressBar.next() }
-                self.runRedundancyExperiment(
-                  maxRedundancy: maxRedundancy,
-                  learnerName: learnerName,
-                  learner: learner,
-                  data: data,
-                  callback: callback)
+            queue.async(group: dispatchGroup) { [data] () in
+              dispatchSemaphore?.wait()
+              defer { dispatchSemaphore?.signal() }
+              progressBarDispatchQueue.sync { progressBar.next() }
+              // TODO: resetSeed()
+              let filteredData = data.withMaxRedundancy(maxRedundancy)
+              var learner = learner.createFn(filteredData)
+              learner.train(using: filteredData)
+              let result = EvaluationResult(merging: learner.evaluatePerLabel(using: filteredData))
+              let dateFormatter = DateFormatter()
+              dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+              dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZZZZZ"
+              dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+              let timeStamp = dateFormatter.string(from: Date())
+              for (metric, value) in [
+                ("madErrorRank", result.madErrorRank),
+                ("madError", result.madError),
+                ("accuracy", result.accuracy),
+                ("auc", result.auc)
+              ] {
+                callback?(ExperimentResult(
+                  timeStamp: timeStamp,
+                  learner: learnerName,
+                  parameterType: .redundancy,
+                  parameter: maxRedundancy,
+                  metric: metric,
+                  value: value))
               }
-            } else {
-              progressBar.next()
-              runRedundancyExperiment(
-                maxRedundancy: maxRedundancy,
-                learnerName: learnerName,
-                learner: learner,
-                data: data,
-                callback: callback)
             }
           }
         }
       }
     }
-    runsDispatchGroup.wait()
+    dispatchGroup.wait()
     logger.info("Finished all experiments.")
-  }
-
-  private func runPredictorSubsamplingExperiment(
-    predictorSamples: [Predictor],
-    learnerName: String,
-    learner: Learner,
-    data: NoisyLabels.Data<Instance, Predictor, Label>,
-    callback: ((ExperimentResult) -> ())?
-  ) {
-    let filteredData = data.filtered(
-      predictors: predictorSamples,
-      keepInstances: true)
-    var learner = learner.createFn(filteredData)
-    learner.train(using: filteredData)
-    let result = EvaluationResult(merging: learner.evaluatePerLabel(using: filteredData))
-    let dateFormatter = DateFormatter()
-    dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-    dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZZZZZ"
-    dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-    let timeStamp = dateFormatter.string(from: Date())
-    for (metric, value) in [
-      ("madErrorRank", result.madErrorRank),
-      ("madError", result.madError),
-      ("accuracy", result.accuracy),
-      ("auc", result.auc)
-    ] {
-      callbackDispatchSemaphore.wait()
-      callback?(ExperimentResult(
-        timeStamp: timeStamp,
-        learner: learnerName,
-        parameterType: .predictorCount,
-        parameter: predictorSamples.count,
-        metric: metric,
-        value: value))
-      callbackDispatchSemaphore.signal()
-    }
-  }
-
-  private func runRedundancyExperiment(
-    maxRedundancy: Int,
-    learnerName: String,
-    learner: Learner,
-    data: NoisyLabels.Data<Instance, Predictor, Label>,
-    callback: ((ExperimentResult) -> ())?
-  ) {
-    // TODO: resetSeed()
-    let filteredData = data.withMaxRedundancy(maxRedundancy)
-    var learner = learner.createFn(filteredData)
-    learner.train(using: filteredData)
-    let result = EvaluationResult(merging: learner.evaluatePerLabel(using: filteredData))
-    let dateFormatter = DateFormatter()
-    dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-    dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZZZZZ"
-    dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-    let timeStamp = dateFormatter.string(from: Date())
-    for (metric, value) in [
-      ("madErrorRank", result.madErrorRank),
-      ("madError", result.madError),
-      ("accuracy", result.accuracy),
-      ("auc", result.auc)
-    ] {
-      callbackDispatchSemaphore.wait()
-      callback?(ExperimentResult(
-        timeStamp: timeStamp,
-        learner: learnerName,
-        parameterType: .redundancy,
-        parameter: maxRedundancy,
-        metric: metric,
-        value: value))
-      callbackDispatchSemaphore.signal()
-    }
   }
 }
 
@@ -232,7 +176,8 @@ public func resultsWriter(at fileURL: URL) throws -> (ExperimentResult) -> () {
     let header = "timeStamp\tlearner\tparameterType\tparameter\tmetric\tvalue\n"
     FileManager.default.createFile(atPath: fileURL.path, contents: header.data(using: .utf8))
   }
-  return { [fileURL] result in
+  let semaphore = DispatchSemaphore(value: 1)
+  return { [fileURL, semaphore] result in
     let resultParts = [
       "\(result.timeStamp)",
       "\(result.learner)",
@@ -241,6 +186,8 @@ public func resultsWriter(at fileURL: URL) throws -> (ExperimentResult) -> () {
       "\(result.metric)",
       "\(result.value)"]
     let result = resultParts.joined(separator: "\t") + "\n"
+    semaphore.wait()
+    defer { semaphore.signal() }
     let fileHandle = try! FileHandle(forWritingTo: fileURL)
     fileHandle.seekToEndOfFile()
     fileHandle.write(result.data(using: .utf8)!)

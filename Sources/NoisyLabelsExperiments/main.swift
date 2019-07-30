@@ -18,10 +18,6 @@ import NoisyLabels
 import TensorFlow
 import Utility
 
-#if SNORKEL
-import Python
-#endif
-
 let logger = Logger(label: "Noisy Labels Experiment")
 
 enum Error: Swift.Error {
@@ -244,12 +240,12 @@ where Dataset.Loader.Predictor: Equatable {
     //   supportsMultiThreading: true)
   ]
 
-// #if SNORKEL
-//   learners["Snorkel"] = Experiment<Dataset>.Learner(
-//     createFn: { _ in SnorkelLearner() },
-//     requiresFeatures: false,
-//     supportsMultiThreading: false)
-// #endif
+#if SNORKEL
+  learners["Snorkel"] = Experiment<Dataset>.Learner(
+    createFn: { _ in SnorkelLearner() },
+    requiresFeatures: false,
+    supportsMultiThreading: false)
+#endif
 
   return learners
 }

@@ -186,12 +186,12 @@ where Dataset.Loader.Predictor: Equatable {
       createFn: { data in mmceLearner(data, gamma: 0.25) },
       requiresFeatures: false,
       supportsMultiThreading: true),
-    "LNL-4-4-I-I-1 (γ=0.00)": Experiment<Dataset>.Learner(
+    "LNL-16-16-4x16-I-1 (γ=0.00)": Experiment<Dataset>.Learner(
       createFn: { data in
         lnlLearner(
           data,
-          instanceEmbeddingSize: 4,
-          predictorEmbeddingSize: 4,
+          instanceEmbeddingSize: 16,
+          predictorEmbeddingSize: 16,
           instanceHiddenUnitCounts: [16, 16, 16, 16],
           predictorHiddenUnitCounts: [],
           confusionLatentSize: 1,
@@ -199,45 +199,45 @@ where Dataset.Loader.Predictor: Equatable {
       },
       requiresFeatures: false,
       supportsMultiThreading: true),
-    // "LNL-16-16-4x16-I-1 (γ=0.25)": Experiment<Dataset>.Learner(
-    //   createFn: { data in
-    //     lnlLearner(
-    //       data,
-    //       instanceEmbeddingSize: 16,
-    //       predictorEmbeddingSize: 16,
-    //       instanceHiddenUnitCounts: [16, 16, 16, 16],
-    //       predictorHiddenUnitCounts: [],
-    //       confusionLatentSize: 1,
-    //       gamma: 0.25)
-    //   },
-    //   requiresFeatures: false,
-    //   supportsMultiThreading: true),
-    // "LNL-F-16-4x16-I-1 (γ=0.00)": Experiment<Dataset>.Learner(
-    //   createFn: { data in
-    //   lnlLearner(
-    //     data,
-    //     instanceEmbeddingSize: nil,
-    //     predictorEmbeddingSize: 16,
-    //     instanceHiddenUnitCounts: [16, 16, 16, 16],
-    //     predictorHiddenUnitCounts: [],
-    //     confusionLatentSize: 1,
-    //     gamma: 0.00)
-    //   },
-    //   requiresFeatures: true,
-    //   supportsMultiThreading: true),
-    // "LNL-F-16-4x16-I-1 (γ=0.25)": Experiment<Dataset>.Learner(
-    //   createFn: { data in
-    //   lnlLearner(
-    //     data,
-    //     instanceEmbeddingSize: nil,
-    //     predictorEmbeddingSize: 16,
-    //     instanceHiddenUnitCounts: [16, 16, 16, 16],
-    //     predictorHiddenUnitCounts: [],
-    //     confusionLatentSize: 1,
-    //     gamma: 0.25)
-    //   },
-    //   requiresFeatures: true,
-    //   supportsMultiThreading: true)
+    "LNL-16-16-4x16-I-1 (γ=0.25)": Experiment<Dataset>.Learner(
+      createFn: { data in
+        lnlLearner(
+          data,
+          instanceEmbeddingSize: 16,
+          predictorEmbeddingSize: 16,
+          instanceHiddenUnitCounts: [16, 16, 16, 16],
+          predictorHiddenUnitCounts: [],
+          confusionLatentSize: 1,
+          gamma: 0.25)
+      },
+      requiresFeatures: false,
+      supportsMultiThreading: true),
+    "LNL-F-16-4x16-I-1 (γ=0.00)": Experiment<Dataset>.Learner(
+      createFn: { data in
+      lnlLearner(
+        data,
+        instanceEmbeddingSize: nil,
+        predictorEmbeddingSize: 16,
+        instanceHiddenUnitCounts: [16, 16, 16, 16],
+        predictorHiddenUnitCounts: [],
+        confusionLatentSize: 1,
+        gamma: 0.00)
+      },
+      requiresFeatures: true,
+      supportsMultiThreading: true),
+    "LNL-F-16-4x16-I-1 (γ=0.25)": Experiment<Dataset>.Learner(
+      createFn: { data in
+      lnlLearner(
+        data,
+        instanceEmbeddingSize: nil,
+        predictorEmbeddingSize: 16,
+        instanceHiddenUnitCounts: [16, 16, 16, 16],
+        predictorHiddenUnitCounts: [],
+        confusionLatentSize: 1,
+        gamma: 0.25)
+      },
+      requiresFeatures: true,
+      supportsMultiThreading: true)
   ]
 
 #if SNORKEL

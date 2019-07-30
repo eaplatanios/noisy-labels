@@ -15,16 +15,12 @@
 import TensorFlow
 
 public protocol Learner {
-  var supportsMultiThreading: Bool { get }
-
   mutating func train<Instance, Predictor, Label>(using data: Data<Instance, Predictor, Label>)
   func labelProbabilities(_ instances: [Int]) -> [Tensor<Float>]
   func qualities(_ instances: [Int], _ predictors: [Int], _ labels: [Int]) -> Tensor<Float>
 }
 
 public struct MajorityVoteLearner: Learner {
-  public let supportsMultiThreading: Bool = true
-
   public let useSoftMajorityVote: Bool
   public let verbose: Bool
 
@@ -107,8 +103,6 @@ public struct EMLearner<
   Predictor: NoisyLabels.Predictor,
   Optimizer: TensorFlow.Optimizer
 >: Learner where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
-  public let supportsMultiThreading: Bool = true
-
   public private(set) var model: EMModel<Predictor, Optimizer>
 
   public let randomSeed: Int64
@@ -308,8 +302,6 @@ public struct EMLearner<
 import Python
 
 public struct SnorkelLearner: Learner {
-  public let supportsMultiThreading: Bool = false
-
   private var snorkelMarginals: [[Float]]!
   private var snorkelQualities: [QualitiesKey: Float]!
 

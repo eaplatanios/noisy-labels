@@ -123,32 +123,45 @@ func lnlLearner(
     verbose: false)
 }
 
-var learners: [String: (NoisyLabels.Data<Int, String, Int>) -> Learner] = [
-  "MAJ": { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
-  "MAJ-S": { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
-  // "MMCE-M (γ=0.00)": { data in mmceLearner(data, gamma: 0.00) },
-  // "MMCE-M (γ=0.25)": { data in mmceLearner(data, gamma: 0.25) },
-  // "LNL-16-16-4x16-I-1 (γ=0.00)": { data in
-  //   lnlLearner(
-  //     data,
-  //     instanceEmbeddingSize: 16,
-  //     predictorEmbeddingSize: 16,
-  //     instanceHiddenUnitCounts: [16, 16, 16, 16],
-  //     predictorHiddenUnitCounts: [],
-  //     confusionLatentSize: 1,
-  //     gamma: 0.00)
-  // },
-  // "LNL-16-16-4x16-I-1 (γ=0.25)": { data in
-  //   lnlLearner(
-  //     data,
-  //     instanceEmbeddingSize: 16,
-  //     predictorEmbeddingSize: 16,
-  //     instanceHiddenUnitCounts: [16, 16, 16, 16],
-  //     predictorHiddenUnitCounts: [],
-  //     confusionLatentSize: 1,
-  //     gamma: 0.25)
-  // },
-  // "LNL-F-16-4x16-I-1 (γ=0.00)": { data in
+var learners: [String: ExperimentLearner] = [
+  "MAJ": ExperimentLearner(
+    createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
+    supportsMultiThreading: true),
+  "MAJ-S": ExperimentLearner(
+    createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
+    supportsMultiThreading: true),
+  // "MMCE-M (γ=0.00)": ExperimentLearner(
+  //   createFn: { data in mmceLearner(data, gamma: 0.00) },
+  //   supportsMultiThreading: true),
+  // "MMCE-M (γ=0.25)": ExperimentLearner(
+  //   createFn: { data in mmceLearner(data, gamma: 0.25) },
+  //   supportsMultiThreading: true),
+  // "LNL-16-16-4x16-I-1 (γ=0.00)": ExperimentLearner(
+  //   createFn: { data in
+  //     lnlLearner(
+  //       data,
+  //       instanceEmbeddingSize: 16,
+  //       predictorEmbeddingSize: 16,
+  //       instanceHiddenUnitCounts: [16, 16, 16, 16],
+  //       predictorHiddenUnitCounts: [],
+  //       confusionLatentSize: 1,
+  //       gamma: 0.00)
+  //   },
+  //   supportsMultiThreading: true),
+  // "LNL-16-16-4x16-I-1 (γ=0.25)": ExperimentLearner(
+  //   createFn: { data in
+  //     lnlLearner(
+  //       data,
+  //       instanceEmbeddingSize: 16,
+  //       predictorEmbeddingSize: 16,
+  //       instanceHiddenUnitCounts: [16, 16, 16, 16],
+  //       predictorHiddenUnitCounts: [],
+  //       confusionLatentSize: 1,
+  //       gamma: 0.25)
+  //   },
+  //   supportsMultiThreading: true),
+  // "LNL-F-16-4x16-I-1 (γ=0.00)": ExperimentLearner(
+  //   createFn: { data in
   //   lnlLearner(
   //     data,
   //     instanceEmbeddingSize: nil,
@@ -157,8 +170,10 @@ var learners: [String: (NoisyLabels.Data<Int, String, Int>) -> Learner] = [
   //     predictorHiddenUnitCounts: [],
   //     confusionLatentSize: 1,
   //     gamma: 0.00)
-  // },
-  // "LNL-F-16-4x16-I-1 (γ=0.25)": { data in
+  //   },
+  //   supportsMultiThreading: true),
+  // "LNL-F-16-4x16-I-1 (γ=0.25)": ExperimentLearner(
+  //   createFn: { data in
   //   lnlLearner(
   //     data,
   //     instanceEmbeddingSize: nil,
@@ -167,13 +182,16 @@ var learners: [String: (NoisyLabels.Data<Int, String, Int>) -> Learner] = [
   //     predictorHiddenUnitCounts: [],
   //     confusionLatentSize: 1,
   //     gamma: 0.25)
-  // }
+  //   },
+  //   supportsMultiThreading: true)
 ]
 
 #if SNORKEL
 import Python
 PythonLibrary.useVersion(3, 7)
-learners["Snorkel"] = { _ in SnorkelLearner() }
+learners["Snorkel"] = ExperimentLearner(
+  createFn: { _ in SnorkelLearner() },
+  supportsMultiThreading: false)
 #endif
 
 let experiment = try Experiment(
@@ -186,7 +204,7 @@ let results = experiment.run(
   callback: ResultsWriter(at: resultsURL),
   runs: [
     // .simple(predictorCount: 1, repetitionCount: 5),
-    .simple(predictorCount: 10, repetitionCount: 5)])
+    .redundancy(max: 10, repetitionCount: 5)])
     // .simple(predictorCount: 20, repetitionCount: 5),
     // .simple(predictorCount: 50, repetitionCount: 5),
     // .simple(predictorCount: 100, repetitionCount: 2),

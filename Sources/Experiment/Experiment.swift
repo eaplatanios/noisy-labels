@@ -42,7 +42,7 @@ public struct Experiment {
   public let dataDir: URL
   public let dataset: Dataset
   public let usingFeatures: Bool
-  public let learners: [String: (NoisyLabels.Data<Int, String, Int>) -> Learner]
+  public let learners: [String: ExperimentLearner]
   public let concurrentTaskCount: Int = 1
 
   internal let data: NoisyLabels.Data<Int, String, Int>
@@ -55,7 +55,7 @@ public struct Experiment {
     dataDir: URL,
     dataset: Dataset,
     usingFeatures: Bool,
-    learners: [String: (NoisyLabels.Data<Int, String, Int>) -> Learner]
+    learners: [String: ExperimentLearner]
   ) throws {
     self.dataDir = dataDir
     self.dataset = dataset
@@ -86,6 +86,7 @@ public struct Experiment {
         ProgressBarLine(),
         ProgressTimeEstimates()])
     let progressBarQueue = DispatchQueue(label: "Noisy Labels Experiment Progress Bar")
+    let callbackSemaphore = DispatchSemaphore(value: 1)
 
     for (learnerName, learner) in learners {
       for run in runs {
@@ -96,20 +97,16 @@ public struct Experiment {
             [data.predictors] :
             (0..<repetitionCount).map { _ in sample(from: data.predictors, count: predictorCount) }
           for repetition in 0..<predictorSamples.count {
-            let filteredData = data.filtered(
-              predictors: predictorSamples[repetition],
-              keepInstances: true)
-            var learner = learner(filteredData)
             let invoke = learner.supportsMultiThreading ?
               { [dispatchQueue, dispatchGroup] body -> () in
                 dispatchQueue.async(group: dispatchGroup, execute: body)
               } : { $0() }
-            invoke { () in
-              if learner.supportsMultiThreading {
-                progressBarQueue.sync { progressBar.next() }
-              } else {
-                progressBar.next()
-              }
+            invoke { [data] () in
+              progressBarQueue.sync { progressBar.next() }
+              let filteredData = data.filtered(
+                predictors: predictorSamples[repetition],
+                keepInstances: true)
+              var learner = learner.createFn(filteredData)
               learner.train(using: filteredData)
               let result = EvaluationResult(merging: learner.evaluatePerLabel(using: filteredData))
               let dateFormatter = DateFormatter()
@@ -123,6 +120,7 @@ public struct Experiment {
                 ("accuracy", result.accuracy),
                 ("auc", result.auc)
               ] {
+                callbackSemaphore.wait()
                 callback?(Result(
                   timeStamp: timeStamp,
                   learner: learnerName,
@@ -130,11 +128,47 @@ public struct Experiment {
                   parameter: predictorCount,
                   metric: metric,
                   value: value))
+                callbackSemaphore.signal()
               }
             }
           }
         case let .redundancy(max, repetitionCount):
-          fatalError("Redundancy experiments have not been implemented yet.")
+          let actualRepetitionCount = data.predictors.count <= max ? 1 : repetitionCount
+          for _ in 0..<actualRepetitionCount {
+            let invoke = learner.supportsMultiThreading ?
+              { [dispatchQueue, dispatchGroup] body -> () in
+                dispatchQueue.async(group: dispatchGroup, execute: body)
+              } : { $0() }
+            invoke { [data] () in
+              progressBarQueue.sync { progressBar.next() }
+              // TODO: resetSeed()
+              let filteredData = data.withMaxRedundancy(max)
+              var learner = learner.createFn(filteredData)
+              learner.train(using: filteredData)
+              let result = EvaluationResult(merging: learner.evaluatePerLabel(using: filteredData))
+              let dateFormatter = DateFormatter()
+              dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+              dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZZZZZ"
+              dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+              let timeStamp = dateFormatter.string(from: Date())
+              for (metric, value) in [
+                ("madErrorRank", result.madErrorRank),
+                ("madError", result.madError),
+                ("accuracy", result.accuracy),
+                ("auc", result.auc)
+              ] {
+                callbackSemaphore.wait()
+                callback?(Result(
+                  timeStamp: timeStamp,
+                  learner: learnerName,
+                  parameterType: .redundancy,
+                  parameter: max,
+                  metric: metric,
+                  value: value))
+                callbackSemaphore.signal()
+              }
+            }
+          }
         }
       }
     }
@@ -145,14 +179,17 @@ public struct Experiment {
   }
 }
 
+public struct ExperimentLearner {
+  public let createFn: (NoisyLabels.Data<Int, String, Int>) -> Learner
+  public let supportsMultiThreading: Bool
+}
+
 public protocol ExperimentCallback {
   func callAsFunction(_ result: Experiment.Result)
 }
 
 public struct ResultsWriter: ExperimentCallback {
   public let fileURL: URL
-
-  private let dispatchQueue: DispatchQueue = DispatchQueue(label: "Results Writer")
 
   public init(at fileURL: URL) {
     self.fileURL = fileURL
@@ -171,12 +208,10 @@ public struct ResultsWriter: ExperimentCallback {
       "\(result.metric)",
       "\(result.value)"]
     let result = resultParts.joined(separator: "\t") + "\n"
-    dispatchQueue.sync {
-      let fileHandle = try! FileHandle(forWritingTo: fileURL)
-      fileHandle.seekToEndOfFile()
-      fileHandle.write(result.data(using: .utf8)!)
-      fileHandle.closeFile()
-    }
+    let fileHandle = try! FileHandle(forWritingTo: fileURL)
+    fileHandle.seekToEndOfFile()
+    fileHandle.write(result.data(using: .utf8)!)
+    fileHandle.closeFile()
   }
 }
 

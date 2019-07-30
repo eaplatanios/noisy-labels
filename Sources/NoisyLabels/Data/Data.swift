@@ -520,6 +520,7 @@ extension Data where Predictor: Equatable {
 }
 
 extension Data {
+  // TODO: !!!! Random seed.
   public func withMaxRedundancy(_ maxRedundancy: Int) -> Data {
     var pIndices = [Int: Int]()
     var newPredictors = [Predictor]()

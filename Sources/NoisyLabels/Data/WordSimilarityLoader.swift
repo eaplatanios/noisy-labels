@@ -66,7 +66,7 @@ public struct WordSimilarityLoader: DataLoader {
       let instance = String(parts[2])
       let predictor = String(parts[1])
       let value = Float(parts[3])! / 10.0
-      let trueLabel = Float(parts[4])! > 5.0 ? 1 : 0
+      let trueLabel = Float(parts[4])! > 2.5 ? 1 : 0
       
       let instanceId = instanceIds[instance] ?? {
         let id = instances.count

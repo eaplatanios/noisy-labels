@@ -81,7 +81,7 @@ let resultsDir: Foundation.URL = {
 switch parsedArguments.get(commandArgument) {
 case .plot:
   try FileManager.default.contentsOfDirectory(at: resultsDir, includingPropertiesForKeys: nil)
-    .filter { !$0.hasDirectoryPath }
+    .filter { !$0.hasDirectoryPath && $0.pathExtension == "tsv" }
     .forEach { try ResultsPlotter(forFile: $0).plot() }
   exit(0)
 case .run: ()
@@ -116,7 +116,7 @@ func mmceLearner<Instance, Predictor, Label>(
     batchSize: 128,
     useWarmStarting: true,
     mStepCount: 2000,
-    emStepCount: 2,
+    emStepCount: 3,
     marginalStepCount: 0,
     mStepLogCount: 100,
     verbose: false)
@@ -159,8 +159,8 @@ func lnlLearner<Instance, Predictor, Label>(
     batchSize: 128,
     useWarmStarting: true,
     mStepCount: 2000,
-    emStepCount: 2,
-    marginalStepCount: 2000,
+    emStepCount: 3,
+    marginalStepCount: 0,
     mStepLogCount: 100,
     verbose: false)
 }
@@ -169,29 +169,29 @@ func learners<Dataset: NoisyLabelsExperiments.Dataset>()
 -> [String: Experiment<Dataset>.Learner]
 where Dataset.Loader.Predictor: Equatable {
   var learners: [String: Experiment<Dataset>.Learner] = [
-    // "MAJ": Experiment<Dataset>.Learner(
-    //   createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
-    //   requiresFeatures: false,
-    //   supportsMultiThreading: true),
-    // "MAJ-S": Experiment<Dataset>.Learner(
-    //   createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
-    //   requiresFeatures: false,
-    //   supportsMultiThreading: true),
-    // "MMCE-M (γ=0.00)": Experiment<Dataset>.Learner(
-    //   createFn: { data in mmceLearner(data, gamma: 0.00) },
-    //   requiresFeatures: false,
-    //   supportsMultiThreading: true),
-    // "MMCE-M (γ=0.25)": Experiment<Dataset>.Learner(
-    //   createFn: { data in mmceLearner(data, gamma: 0.25) },
-    //   requiresFeatures: false,
-    //   supportsMultiThreading: true),
-    "LNL-16-16-I-I-1 (γ=0.00)": Experiment<Dataset>.Learner(
+    "MAJ": Experiment<Dataset>.Learner(
+      createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
+      requiresFeatures: false,
+      supportsMultiThreading: true),
+    "MAJ-S": Experiment<Dataset>.Learner(
+      createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
+      requiresFeatures: false,
+      supportsMultiThreading: true),
+    "MMCE-M (γ=0.00)": Experiment<Dataset>.Learner(
+      createFn: { data in mmceLearner(data, gamma: 0.00) },
+      requiresFeatures: false,
+      supportsMultiThreading: true),
+    "MMCE-M (γ=0.25)": Experiment<Dataset>.Learner(
+      createFn: { data in mmceLearner(data, gamma: 0.25) },
+      requiresFeatures: false,
+      supportsMultiThreading: true),
+    "LNL-4-4-I-I-1 (γ=0.00)": Experiment<Dataset>.Learner(
       createFn: { data in
         lnlLearner(
           data,
-          instanceEmbeddingSize: 16,
-          predictorEmbeddingSize: 16,
-          instanceHiddenUnitCounts: [],
+          instanceEmbeddingSize: 4,
+          predictorEmbeddingSize: 4,
+          instanceHiddenUnitCounts: [16, 16, 16, 16],
           predictorHiddenUnitCounts: [],
           confusionLatentSize: 1,
           gamma: 0.00)
@@ -264,6 +264,7 @@ where Dataset.Loader.Predictor: Equatable {
 }
 
 switch datasetName {
+case "word-similarity": try runExperiment(dataset: WordSimilarityDataset(features: .glove))
 case "rte": try runExperiment(dataset: RTEDataset())
 case _: throw Error.invalidDataset
 }

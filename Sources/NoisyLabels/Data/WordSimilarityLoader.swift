@@ -36,7 +36,7 @@ public struct WordSimilarityLoader: DataLoader {
     self.features = features
   }
 
-  public func load(withFeatures: Bool = true) throws -> Data<Int, String, Int> {
+  public func load(withFeatures: Bool = true) throws -> Data<String, String, Int> {
     logger.info("Loading the word similarity dataset.")
 
     let dataDir = self.dataDir.appendingPathComponent("wordsim")
@@ -52,21 +52,21 @@ public struct WordSimilarityLoader: DataLoader {
     }
 
     // Read the original data file.
-    var instances = [Int]()
+    var instances = [String]()
     var predictors = [String]()
     var trueLabels = [Int: Int]()
     var predictedLabels = [Int: (instances: [Int], values: [Float])]()
-    var instanceIds = [Int: Int]()
+    var instanceIds = [String: Int]()
     var predictorIds = [String: Int]()
 
     let originalFile = extractedDir.appendingPathComponent("original.tsv")
     let originalContents = try String(contentsOfFile: originalFile.path, encoding: .utf8)
     for line in originalContents.split(separator: "\n").dropFirst() {
       let parts = line.split(separator: "\t")
-      let instance = Int(parts[2])!
+      let instance = String(parts[2])
       let predictor = String(parts[1])
       let value = Float(parts[3])! / 10.0
-      let trueLabel = Int(parts[4])!
+      let trueLabel = Float(parts[4])! > 5.0 ? 1 : 0
       
       let instanceId = instanceIds[instance] ?? {
         let id = instances.count
@@ -110,10 +110,10 @@ public struct WordSimilarityLoader: DataLoader {
       let featuresFile = extractedFeaturesDir.appendingPathComponent(
         "\(features.rawValue)_features.txt")
       let featuresString = try String(contentsOf: featuresFile, encoding: .utf8)
-      var features = [Int: Tensor<Float>]()
+      var features = [String: Tensor<Float>]()
       for line in featuresString.components(separatedBy: .newlines).filter({ !$0.isEmpty }) {
         let lineParts = line.components(separatedBy: "\t")
-        let instance = Int(lineParts[0])!
+        let instance = String(lineParts[0])
         let values = lineParts[1].components(separatedBy: " ").map { Float($0)! }
         features[instance] = Tensor(values)
       }

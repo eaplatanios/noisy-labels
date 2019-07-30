@@ -205,8 +205,8 @@ public struct LNLPredictor: Predictor {
       Tensor(glorotUniform: [predictorCount, predictorEmbeddingSize!])
 
     if adjustFeaturesMagnitude {
-      instanceFeatures /= abs(instanceFeatures).max()
-      predictorFeatures /= abs(predictorFeatures).max()
+      if instanceEmbeddingSize == nil { instanceFeatures /= abs(instanceFeatures).max() }
+      if predictorEmbeddingSize == nil { predictorFeatures /= abs(predictorFeatures).max() }
     }
 
     // Create the instance processing layers.

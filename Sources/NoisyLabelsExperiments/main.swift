@@ -107,8 +107,9 @@ func mmceLearner<Instance, Predictor, Label>(
     predictor: predictor,
     optimizer: optimizer,
     entropyWeight: 0.0,
-    useSoftMajorityVote: true,
-    useSoftPredictions: false)
+    useSoftMajorityVote: false,
+    useSoftPredictions: false,
+    learningRateDecayFactor: 1.0)
   return EMLearner(
     for: model,
     randomSeed: 42,
@@ -150,7 +151,8 @@ func lnlLearner<Instance, Predictor, Label>(
     optimizer: optimizer,
     entropyWeight: 0.0,
     useSoftMajorityVote: true,
-    useSoftPredictions: false)
+    useSoftPredictions: true,
+    learningRateDecayFactor: 0.995)
   return EMLearner(
     for: model,
     randomSeed: 42,
@@ -167,14 +169,14 @@ func learners<Dataset: NoisyLabelsExperiments.Dataset>()
 -> [String: Experiment<Dataset>.Learner]
 where Dataset.Loader.Predictor: Equatable {
   var learners: [String: Experiment<Dataset>.Learner] = [
-    "MAJ": Experiment<Dataset>.Learner(
-      createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
-      requiresFeatures: false,
-      supportsMultiThreading: true),
-    "MAJ-S": Experiment<Dataset>.Learner(
-      createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
-      requiresFeatures: false,
-      supportsMultiThreading: true),
+    // "MAJ": Experiment<Dataset>.Learner(
+    //   createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
+    //   requiresFeatures: false,
+    //   supportsMultiThreading: true),
+    // "MAJ-S": Experiment<Dataset>.Learner(
+    //   createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
+    //   requiresFeatures: false,
+    //   supportsMultiThreading: true),
     // "MMCE-M (γ=0.00)": Experiment<Dataset>.Learner(
     //   createFn: { data in mmceLearner(data, gamma: 0.00) },
     //   requiresFeatures: false,
@@ -183,19 +185,19 @@ where Dataset.Loader.Predictor: Equatable {
     //   createFn: { data in mmceLearner(data, gamma: 0.25) },
     //   requiresFeatures: false,
     //   supportsMultiThreading: true),
-    // "LNL-16-16-4x16-I-1 (γ=0.00)": Experiment<Dataset>.Learner(
-    //   createFn: { data in
-    //     lnlLearner(
-    //       data,
-    //       instanceEmbeddingSize: 16,
-    //       predictorEmbeddingSize: 16,
-    //       instanceHiddenUnitCounts: [16, 16, 16, 16],
-    //       predictorHiddenUnitCounts: [],
-    //       confusionLatentSize: 1,
-    //       gamma: 0.00)
-    //   },
-    //   requiresFeatures: false,
-    //   supportsMultiThreading: true),
+    "LNL-16-16-I-I-1 (γ=0.00)": Experiment<Dataset>.Learner(
+      createFn: { data in
+        lnlLearner(
+          data,
+          instanceEmbeddingSize: 16,
+          predictorEmbeddingSize: 16,
+          instanceHiddenUnitCounts: [],
+          predictorHiddenUnitCounts: [],
+          confusionLatentSize: 1,
+          gamma: 0.00)
+      },
+      requiresFeatures: false,
+      supportsMultiThreading: true),
     // "LNL-16-16-4x16-I-1 (γ=0.25)": Experiment<Dataset>.Learner(
     //   createFn: { data in
     //     lnlLearner(

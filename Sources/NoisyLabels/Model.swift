@@ -24,6 +24,8 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
   public let entropyWeight: Float
   public let useSoftMajorityVote: Bool
   public let useSoftPredictions: Bool
+  public let initialLearningRate: Float
+  public let learningRateDecayFactor: Float
 
   public private(set) var predictor: Predictor
   public private(set) var optimizer: Optimizer
@@ -35,7 +37,8 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
     optimizer: Optimizer,
     entropyWeight: Float = 0.0,
     useSoftMajorityVote: Bool = true,
-    useSoftPredictions: Bool = true
+    useSoftPredictions: Bool = true,
+    learningRateDecayFactor: Float = 1.0
   ) {
     self.predictor = predictor
     self.optimizer = optimizer
@@ -46,6 +49,8 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
     self.entropyWeight = entropyWeight
     self.useSoftMajorityVote = useSoftMajorityVote
     self.useSoftPredictions = useSoftPredictions
+    self.initialLearningRate = optimizer.learningRate
+    self.learningRateDecayFactor = learningRateDecayFactor
     self.eStepAccumulators = predictor.classCounts.map {
       Tensor<Float>(zeros: [predictor.instanceCount, $0])
     }
@@ -82,6 +87,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
 
   public mutating func prepareForMStep() {
     predictor.reset()
+    optimizer.learningRate = initialLearningRate
   }
 
   public mutating func executeMStep(using data: TrainingData, majorityVote: Bool) -> Float {
@@ -117,8 +123,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
       }.differentiableReduce(predictions.regularizationTerm, { $0 + $1 })
     }
     optimizer.update(&predictor, along: gradient)
-    // TODO: !!!! More formal support for learning rate decay.
-    optimizer.learningRate *= 0.995
+    optimizer.learningRate *= learningRateDecayFactor
     return negativeLogLikelihood.scalarized()
   }
 
@@ -144,11 +149,10 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
         let logLikelihood = (qLogYHat + hLog).logSumExp(squeezingAxes: -1).sum()
         let entropy = (exp(hLog) * hLog).sum()
         return entropyWeight * entropy - logLikelihood
-    // TODO: !!!! More formal support for learning rate decay.
       }.differentiableReduce(Tensor(0.0), { $0 + $1 })
     }
     optimizer.update(&predictor, along: gradient)
-    optimizer.learningRate *= 0.995
+    optimizer.learningRate *= learningRateDecayFactor
     return negativeLogLikelihood.scalarized()
   }
 

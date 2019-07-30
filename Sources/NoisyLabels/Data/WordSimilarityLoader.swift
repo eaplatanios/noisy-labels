@@ -16,28 +16,31 @@ import Foundation
 import TensorFlow
 import ZIPFoundation
 
-/// PASCAL RTE Amazon Mechanical Turk dataset loader.
+/// Word similarity Amazon Mechanical Turk dataset loader.
 ///
-/// Sources:
+/// Source:
 /// - https://sites.google.com/site/nlpannotations
-/// - https://www.kaggle.com/nltkdata/rte-corpus
-public struct RTELoader: DataLoader {
+public struct WordSimilarityLoader: DataLoader {
   private let url: URL = URL(
-    string: "https://dl.dropboxusercontent.com/s/ebkpj9a5ndy7gh5/rte.zip")!
-  private let featuresURL: URL = URL(
-    string: "https://dl.dropboxusercontent.com/s/bc5dr440k6olt79/rte_features.zip")!
+    string: "https://dl.dropboxusercontent.com/s/wbgaob9t42cas37/wordsim.zip")!
+  private let gloveFeaturesURL: URL = URL(
+    string: "https://dl.dropboxusercontent.com/s/tnyr4hsaf5q4va9/wordsim_glove_features.zip")!
+  private let bertFeaturesURL: URL = URL(
+    string: "https://dl.dropboxusercontent.com/s/wuuwmzghm75wrov/wordsim_bert_features.zip")!
 
   public let dataDir: URL
+  public let features: Features
 
-  public init(dataDir: URL) {
+  public init(dataDir: URL, features: Features = .glove) {
     self.dataDir = dataDir
+    self.features = features
   }
 
   public func load(withFeatures: Bool = true) throws -> Data<Int, String, Int> {
-    logger.info("Loading the RTE dataset.")
+    logger.info("Loading the word similarity dataset.")
 
-    let dataDir = self.dataDir.appendingPathComponent("rte")
-    let compressedFile = dataDir.appendingPathComponent("rte.zip")
+    let dataDir = self.dataDir.appendingPathComponent("wordsim")
+    let compressedFile = dataDir.appendingPathComponent("wordsim.zip")
 
     // Download the data, if necessary.
     try maybeDownload(from: url, to: compressedFile)
@@ -62,7 +65,7 @@ public struct RTELoader: DataLoader {
       let parts = line.split(separator: "\t")
       let instance = Int(parts[2])!
       let predictor = String(parts[1])
-      let value = Float(parts[3])!
+      let value = Float(parts[3])! / 10.0
       let trueLabel = Int(parts[4])!
       
       let instanceId = instanceIds[instance] ?? {
@@ -90,14 +93,22 @@ public struct RTELoader: DataLoader {
 
     var instanceFeatures: [Tensor<Float>]? = nil
     if withFeatures {
-      logger.info("Loading the RTE dataset features.")
-      let compressedFeaturesFile = dataDir.appendingPathComponent("rte_features.zip")
+      logger.info("Loading the word similarity dataset features.")
+      let compressedFeaturesFile = dataDir.appendingPathComponent(
+        "wordsim_\(features.rawValue)_features.zip")
+      let featuresURL = { () -> URL in
+        switch self.features {
+        case .glove: return gloveFeaturesURL
+        case .bert: return bertFeaturesURL
+        }
+      }()
       try maybeDownload(from: featuresURL, to: compressedFeaturesFile)
       let extractedFeaturesDir = compressedFeaturesFile.deletingPathExtension()
       if !FileManager.default.fileExists(atPath: extractedFeaturesDir.path) {
         try FileManager.default.unzipItem(at: compressedFeaturesFile, to: extractedFeaturesDir)
       }
-      let featuresFile = extractedFeaturesDir.appendingPathComponent("features.txt")
+      let featuresFile = extractedFeaturesDir.appendingPathComponent(
+        "\(features.rawValue)_features.txt")
       let featuresString = try String(contentsOf: featuresFile, encoding: .utf8)
       var features = [Int: Tensor<Float>]()
       for line in featuresString.components(separatedBy: .newlines).filter({ !$0.isEmpty }) {
@@ -117,5 +128,11 @@ public struct RTELoader: DataLoader {
       predictedLabels: [0: predictedLabels],
       classCounts: [2],
       instanceFeatures: instanceFeatures)
+  }
+}
+
+extension WordSimilarityLoader {
+  public enum Features: String {
+    case glove, bert
   }
 }

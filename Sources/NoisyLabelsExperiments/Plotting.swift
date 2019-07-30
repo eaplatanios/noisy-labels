@@ -177,6 +177,7 @@ extension Metric {
 fileprivate func figureTitle(for dataset: String) -> String {
   switch dataset {
   case "rte": return "RTE"
+  case "word-similarity": return "Word Similarity"
   case _: return "Unknown"
   }
 }

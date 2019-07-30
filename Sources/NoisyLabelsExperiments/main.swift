@@ -237,12 +237,12 @@ where Dataset.Loader.Predictor: Equatable {
     //   supportsMultiThreading: true)
   ]
 
-#if SNORKEL
-  learners["Snorkel"] = Experiment<Dataset>.Learner(
-    createFn: { _ in SnorkelLearner() },
-    requiresFeatures: false,
-    supportsMultiThreading: false)
-#endif
+// #if SNORKEL
+//   learners["Snorkel"] = Experiment<Dataset>.Learner(
+//     createFn: { _ in SnorkelLearner() },
+//     requiresFeatures: false,
+//     supportsMultiThreading: false)
+// #endif
 
   return learners
 }
@@ -251,13 +251,14 @@ func runExperiment<Dataset: NoisyLabelsExperiments.Dataset>(dataset: Dataset) th
 where Dataset.Loader.Predictor: Equatable {
   let experiment = try Experiment(dataDir: dataDir, dataset: dataset, learners: learners())
   let resultsURL = resultsDir.appendingPathComponent("\(dataset.description).tsv")
+  let callback = try resultsWriter(at: resultsURL)
   experiment.run(
-    callback: resultsWriter(at: resultsURL),
+    callback: callback,
     runs: [
-      .redundancy(maxRedundancy: 1, repetitionCount: 10),
-      .redundancy(maxRedundancy: 2, repetitionCount: 10),
-      .redundancy(maxRedundancy: 5, repetitionCount: 10),
-      .redundancy(maxRedundancy: 10, repetitionCount: 10)])
+      .redundancy(maxRedundancy: 1, repetitionCount: 5),
+      .redundancy(maxRedundancy: 2, repetitionCount: 5),
+      .redundancy(maxRedundancy: 5, repetitionCount: 5),
+      .redundancy(maxRedundancy: 10, repetitionCount: 5)])
 }
 
 switch datasetName {

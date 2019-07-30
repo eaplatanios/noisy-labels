@@ -35,6 +35,7 @@ public extension Decodable {
   }
 }
 
+@inlinable
 public func sample<T>(from array: [T], count: Int) -> [T] {
   var a = array
   for i in 0..<count {

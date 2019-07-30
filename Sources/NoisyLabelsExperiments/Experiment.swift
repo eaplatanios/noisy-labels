@@ -214,8 +214,11 @@ extension Experiment {
   }
 }
 
-public func resultsWriter(at fileURL: URL) -> (ExperimentResult) -> () {
+public func resultsWriter(at fileURL: URL) throws -> (ExperimentResult) -> () {
   if !FileManager.default.fileExists(atPath: fileURL.path) {
+    try FileManager.default.createDirectory(
+      at: fileURL.deletingLastPathComponent(), 
+      withIntermediateDirectories: true)
     let header = "timeStamp\tlearner\tparameterType\tparameter\tmetric\tvalue\n"
     FileManager.default.createFile(atPath: fileURL.path, contents: header.data(using: .utf8))
   }

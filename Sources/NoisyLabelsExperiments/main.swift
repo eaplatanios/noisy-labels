@@ -24,9 +24,30 @@ import Python
 
 let logger = Logger(label: "Noisy Labels Experiment")
 
+enum Error: Swift.Error {
+  case invalidCommand, datasetNotProvided, invalidDataset
+}
+
+enum Command: String {
+  case run, plot
+}
+
+extension Command: StringEnumArgument {
+  public static var completion: ShellCompletion {
+    return .values([
+      (Command.run.rawValue, "Runs an experiment."),
+      (Command.plot.rawValue, "Generates plots with the results of an experiment.")
+    ])
+  }
+}
+
 let parser = ArgumentParser(
   usage: "<options>",
-  overview: "This executable can be used to run 'NoisyLabels' experiments.")
+  overview: "This executable can be used to perform 'NoisyLabels' experiments.")
+let commandArgument: PositionalArgument<Command> = parser.add(
+  positional: "command",
+  kind: Command.self,
+  usage: "Experiment command to invoke. Can be either `run` or `plot`.")
 let dataDirArgument: OptionArgument<PathArgument> = parser.add(
   option: "--data-dir",
   kind: PathArgument.self,
@@ -57,8 +78,18 @@ let resultsDir: Foundation.URL = {
   return currentDir.appendingPathComponent("temp/results")
 }()
 
+switch parsedArguments.get(commandArgument) {
+case .plot:
+  try FileManager.default.contentsOfDirectory(at: resultsDir, includingPropertiesForKeys: nil)
+    .filter { !$0.hasDirectoryPath }
+    .forEach { try ResultsPlotter(forFile: $0).plot() }
+  exit(0)
+case .run: ()
+case _: throw Error.invalidCommand
+}
+
 let datasetName: String! = parsedArguments.get(datasetArgument)
-if datasetName == nil { throw ExperimentError.datasetNotProvided }
+if datasetName == nil { throw Error.datasetNotProvided }
 
 func mmceLearner<Instance, Predictor, Label>(
   _ data: NoisyLabels.Data<Instance, Predictor, Label>,
@@ -231,5 +262,5 @@ where Dataset.Loader.Predictor: Equatable {
 
 switch datasetName {
 case "rte": try runExperiment(dataset: RTEDataset())
-case _: throw ExperimentError.invalidDataset
+case _: throw Error.invalidDataset
 }

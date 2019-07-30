@@ -38,7 +38,9 @@ where Dataset.Loader.Predictor: Equatable {
   public let concurrentTaskCount: Int = 1
 
   internal let data: NoisyLabels.Data<Instance, Predictor, Label>
-  internal let runsDispatchQueue: DispatchQueue = DispatchQueue(label: "Experiment")
+  internal let runsDispatchQueue: DispatchQueue = DispatchQueue(
+    label: "Experiment",
+    attributes: .concurrent)
   internal let runsDispatchGroup: DispatchGroup = DispatchGroup()
   internal let callbackSemaphore = DispatchSemaphore(value: 1)
 

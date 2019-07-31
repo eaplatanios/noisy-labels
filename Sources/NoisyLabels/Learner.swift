@@ -392,7 +392,7 @@ public struct SnorkelLearner: Learner {
       // Close the Snorkel session.
       session.close()
 
-      // Estimate the qualities
+      // Estimate the qualities.
       for (predictor, predictions) in data.predictedLabels[label]! {
         for (instance, value) in zip(predictions.instances, predictions.values) {
           // We use a heuristic way to estimate predictor qualities because Snorkel does not
@@ -445,6 +445,113 @@ public struct SnorkelLearner: Learner {
 }
 
 extension SnorkelLearner {
+  internal struct QualitiesKey: Hashable {
+    internal let instance: Int
+    internal let label: Int
+    internal let predictor: Int
+
+    internal init(_ instance: Int, _ label: Int, _ predictor: Int) {
+      self.instance = instance
+      self.label = label
+      self.predictor = predictor
+    }
+  }
+}
+
+public struct MetalLearner: Learner {
+  private var metalMarginals: [Tensor<Float>]!
+  private var metalQualities: [QualitiesKey: Float]!
+  private var metalRandomSeed: Int?
+
+  public init(randomSeed: Int? = nil) {
+    self.metalRandomSeed = randomSeed
+  }
+
+  public mutating func train<Instance, Predictor, Label>(
+    using data: Data<Instance, Predictor, Label>
+  ) {
+    pythonDispatchSemaphore.wait()
+    defer { pythonDispatchSemaphore.signal() }
+
+    // We first suppress all Python printing because Snorkel prints some messages and it is
+    // impossible to disable that. We also disable the `tqdm` progress bar package that Snorkel is
+    // using in a hacky way.
+    let sys = Python.import("sys")
+    let os = Python.import("os")
+    sys.stdout = Python.open(os.devnull, "w")
+
+    let np = Python.import("numpy")
+    let spSparse = Python.import("scipy.sparse")
+    let metalLabelModel = Python.import("metal.label_model")
+    metalQualities = [QualitiesKey: Float]()
+    metalMarginals = data.labels.indices.map { label in
+      let annotations = spSparse.lil_matrix(
+        Python.tuple([data.instances.count, data.predictors.count]),
+        dtype: np.int32)
+      for (predictor, predictions) in data.predictedLabels[label]! {
+        for (instance, value) in zip(predictions.instances, predictions.values) {
+          annotations[instance, predictor] = Python.int(Int(value) + 1)
+        }
+      }
+      let labelModel = metalLabelModel.LabelModel(
+        k: data.classCounts[label],
+        seed: metalRandomSeed ?? Int.random(in: 0..<1000000),
+        verbose: false)
+      labelModel.train_model(annotations)
+      let marginals = Tensor<Float>(
+        numpy: labelModel.predict_proba(annotations).astype(np.float32))!
+
+      // Estimate the qualities.
+      for (predictor, predictions) in data.predictedLabels[label]! {
+        for (instance, value) in zip(predictions.instances, predictions.values) {
+          // We use a heuristic way to estimate predictor qualities because Snorkel does not
+          // provide an explicit way to do so.
+          let quality = marginals[instance, Int(value)].scalarized()
+          metalQualities[QualitiesKey(instance, label, predictor)] = quality
+        }
+      }
+
+      return marginals
+    }
+  }
+
+  public func labelProbabilities(_ instances: [Int]) -> [Tensor<Float>] {
+    metalMarginals.map { marginals in
+      Tensor<Float>(
+        stacking: instances.map { instance in
+          let marginals = marginals[instance]
+          if marginals.rank == 0 {
+            return Tensor<Float>(stacking: [1.0 - marginals, marginals])
+          } else {
+            return marginals
+          }
+        })
+    }
+  }
+
+  public func qualities(
+    _ instances: [Int],
+    _ predictors: [Int],
+    _ labels: [Int]
+  ) -> Tensor<Float> {
+    var qualities = [Float]()
+    qualities.reserveCapacity(instances.count * labels.count * predictors.count)
+    var i = 0
+    for instance in instances {
+      for label in labels {
+        for predictor in predictors {
+          qualities.append(metalQualities[QualitiesKey(instance, label, predictor)] ?? -1)
+          i += 1
+        }
+      }
+    }
+    return Tensor<Float>(
+      shape: [instances.count, labels.count, predictors.count],
+      scalars: qualities)
+  }
+}
+
+extension MetalLearner {
   internal struct QualitiesKey: Hashable {
     internal let instance: Int
     internal let label: Int

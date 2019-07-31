@@ -120,7 +120,7 @@ func mmceLearner<Instance, Predictor, Label>(
   return EMLearner(
     for: model,
     randomSeed: 42,
-    batchSize: 512,
+    batchSize: 128,
     useWarmStarting: true,
     mStepCount: 1000,
     emStepCount: 5,
@@ -163,14 +163,22 @@ func lnlLearner<Instance, Predictor, Label>(
   return EMLearner(
     for: model,
     randomSeed: 42,
-    batchSize: 512,
+    batchSize: 128,
     useWarmStarting: true,
     mStepCount: 1000,
-    emStepCount: 5,
-    marginalStepCount: 1000,
+    emStepCount: 10,
+    marginalStepCount: 0,
     mStepLogCount: 100,
     verbose: false)
 }
+
+// Per-dataset configurations:
+//   BlueBirds:
+//     - LNL-IE-16-IH-[16, 16, 16, 16]-PE-16-PH-[] (gam=0.00)
+//     - LNL-IE-0-IH-[16, 16, 16, 16]-PE-16-PH-[] (gam=0.00)
+//   Word Similarity:
+//     - LNL-IE-16-IH-[4]-PE-16-PH-[] (gam=0.00)
+//     - LNL-IE-0-IH-[4]-PE-16-PH-[] (gam=0.00)
 
 func learners<Dataset: NoisyLabelsExperiments.Dataset>()
 -> [String: Experiment<Dataset>.Learner]
@@ -213,8 +221,12 @@ where Dataset.Loader.Predictor: Equatable {
   ]
 
 #if SNORKEL
-  learners["SNORKEL"] = Experiment<Dataset>.Learner(
+  learners["Snorkel"] = Experiment<Dataset>.Learner(
     createFn: { _ in SnorkelLearner() },
+    requiresFeatures: false,
+    supportsMultiThreading: false)
+  learners["MeTaL"] = Experiment<Dataset>.Learner(
+    createFn: { _ in MetalLearner(randomSeed: 42) },
     requiresFeatures: false,
     supportsMultiThreading: false)
 #endif

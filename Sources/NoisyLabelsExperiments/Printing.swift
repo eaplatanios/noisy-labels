@@ -248,9 +248,10 @@ extension Metric {
 
 fileprivate func compareLearners(_ learner1: String, _ learner2: String) -> Bool {
   func score(_ learner: String) -> Int {
-    if learner.hasPrefix("LNL-E") { return 4 }
-    if learner.hasPrefix("LNL") { return 5 }
-    if learner.hasPrefix("SNORKEL") { return 3 }
+    if learner.hasPrefix("LNL-E") { return 5 }
+    if learner.hasPrefix("LNL") { return 6 }
+    if learner.hasPrefix("MeTaL") { return 4 }
+    if learner.hasPrefix("Snorkel") { return 3 }
     if learner.hasPrefix("MMCE") { return 2 }
     if learner.hasPrefix("MAJ-S") { return 1 }
     if learner.hasPrefix("MAJ") { return 0 }

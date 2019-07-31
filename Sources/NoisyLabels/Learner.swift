@@ -327,7 +327,9 @@ public struct SnorkelLearner: Learner {
     Python.exec("""
       import tqdm
       def nop(*a, **k):
-        return a
+        if len(a) > 0:
+          return a[0]
+        return None
       tqdm.tqdm = nop
       """, locals, locals)
 

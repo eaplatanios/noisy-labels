@@ -184,10 +184,10 @@ fileprivate func figureTitle(for dataset: String) -> String {
 
 fileprivate func compareLearners(_ learner1: String, _ learner2: String) -> Bool {
   func score(_ learner: String) -> Int {
-    if learner.hasPrefix("LNL-F") { return 5 }
-    if learner.hasPrefix("LNL") { return 4 }
-    if learner.hasPrefix("Snorkel") { return 3 }
-    if learner.hasPrefix("MMCE-M") { return 2 }
+    if learner.hasPrefix("LNL-E") { return 4 }
+    if learner.hasPrefix("LNL") { return 5 }
+    if learner.hasPrefix("SNORKEL") { return 3 }
+    if learner.hasPrefix("MMCE") { return 2 }
     if learner.hasPrefix("MAJ-S") { return 1 }
     if learner.hasPrefix("MAJ") { return 0 }
     return -1
@@ -197,11 +197,11 @@ fileprivate func compareLearners(_ learner1: String, _ learner2: String) -> Bool
 }
 
 fileprivate func learnerColor(_ learner: String) -> PythonObject {
-  if learner.hasPrefix("LNL-F") { return redPalette[2] }
-    if learner.hasPrefix("LNL") { return redPalette[0] }
-    if learner.hasPrefix("Snorkel") { return greenPalette[2] }
-    if learner.hasPrefix("MMCE-M") { return bluePalette[1] }
-    if learner.hasPrefix("MAJ-S") { return bluePalette[2] }
-    if learner.hasPrefix("MAJ") { return bluePalette[3] }
-    return "black"
+  if learner.hasPrefix("LNL-E") { return redPalette[0] }
+  if learner.hasPrefix("LNL") { return redPalette[2] }
+  if learner.hasPrefix("SNORKEL") { return greenPalette[2] }
+  if learner.hasPrefix("MMCE") { return bluePalette[1] }
+  if learner.hasPrefix("MAJ-S") { return bluePalette[2] }
+  if learner.hasPrefix("MAJ") { return bluePalette[3] }
+  return "black"
 }

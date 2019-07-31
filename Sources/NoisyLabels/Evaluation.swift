@@ -41,9 +41,14 @@ public func computeAccuracy(
   estimatedLabelProbabilities: Tensor<Float>,
   trueLabels: Tensor<Int32>
 ) -> Float {
-  let estimatedLabels = estimatedLabelProbabilities.rank > 1 ?
-    Tensor<Int32>(estimatedLabelProbabilities.argmax(squeezingAxis: -1)) :
-    Tensor<Int32>(estimatedLabelProbabilities .>= 0.5)
+  // We add a small random perturbation in order to randomly break ties.
+  let estimates = estimatedLabelProbabilities + Tensor<Float>(
+    randomUniform: estimatedLabelProbabilities.shape,
+    lowerBound: Tensor<Float>(-1e-3),
+    upperBound: Tensor<Float>(1e-3))
+  let estimatedLabels = estimates.rank > 1 ?
+    Tensor<Int32>(estimates.argmax(squeezingAxis: -1)) :
+    Tensor<Int32>(estimates .>= 0.5)
   return Tensor<Float>(estimatedLabels .== trueLabels).mean().scalarized()
 }
 

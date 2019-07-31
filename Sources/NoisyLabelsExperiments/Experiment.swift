@@ -54,17 +54,15 @@ where Dataset.Loader.Predictor: Equatable {
     let runs = runs ?? dataset.runs
     let totalRunCount = runs.map { run in
       switch run {
-      case let .predictorSubsampling(predictorCount, repetitionCount):
-        return data.predictors.count <= predictorCount ? 1 : repetitionCount
-      case let .redundancy(max, repetitionCount):
-        return data.predictors.count <= max ? 1 : repetitionCount
+      case let .predictorSubsampling(_, repetitionCount): return repetitionCount
+      case let .redundancy(_, repetitionCount): return repetitionCount
       }
     }.reduce(0, +)
     let progressBarDispatchQueue = DispatchQueue(label: "Progress Bar")
     var progressBar = ProgressBar(
       count: learners.count * totalRunCount,
       configuration: [
-        ProgressString(string: "Experiment Run:"),
+        ProgressString(string: "Experiment:"),
         ProgressIndex(),
         ProgressBarLine(),
         ProgressTimeEstimates()])
@@ -85,7 +83,7 @@ where Dataset.Loader.Predictor: Equatable {
         case let .predictorSubsampling(predictorCount, repetitionCount):
           // TODO: resetSeed()
           let predictorSamples = data.predictors.count <= predictorCount ?
-            [data.predictors] :
+            [[Predictor]](repeating: data.predictors, count: repetitionCount) :
             (0..<repetitionCount).map { _ in sample(from: data.predictors, count: predictorCount) }
           for repetition in 0..<predictorSamples.count {
             queue.async(group: dispatchGroup) { [data] () in
@@ -120,8 +118,7 @@ where Dataset.Loader.Predictor: Equatable {
             }
           }
         case let .redundancy(maxRedundancy, repetitionCount):
-          let actualRepetitionCount = data.predictors.count <= maxRedundancy ? 1 : repetitionCount
-          for _ in 0..<actualRepetitionCount {
+          for _ in 0..<repetitionCount {
             queue.async(group: dispatchGroup) { [data] () in
               dispatchSemaphore?.wait()
               defer { dispatchSemaphore?.signal() }

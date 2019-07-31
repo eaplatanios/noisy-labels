@@ -114,10 +114,10 @@ func mmceLearner<Instance, Predictor, Label>(
   return EMLearner(
     for: model,
     randomSeed: 42,
-    batchSize: 128,
+    batchSize: 512,
     useWarmStarting: true,
-    mStepCount: 2000,
-    emStepCount: 3,
+    mStepCount: 1000,
+    emStepCount: 5,
     marginalStepCount: 0,
     mStepLogCount: 100,
     verbose: false)
@@ -153,15 +153,15 @@ func lnlLearner<Instance, Predictor, Label>(
     entropyWeight: 0.0,
     useSoftMajorityVote: true,
     useSoftPredictions: true,
-    learningRateDecayFactor: 0.995)
+    learningRateDecayFactor: 0.997)
   return EMLearner(
     for: model,
     randomSeed: 42,
-    batchSize: 128,
+    batchSize: 512,
     useWarmStarting: true,
-    mStepCount: 2000,
-    emStepCount: 3,
-    marginalStepCount: 0,
+    mStepCount: 1000,
+    emStepCount: 5,
+    marginalStepCount: 1000,
     mStepLogCount: 100,
     verbose: false)
 }
@@ -174,19 +174,11 @@ where Dataset.Loader.Predictor: Equatable {
       createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
       requiresFeatures: false,
       supportsMultiThreading: true),
-    "MAJ-S": Experiment<Dataset>.Learner(
-      createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: true) },
-      requiresFeatures: false,
-      supportsMultiThreading: true),
-    "MMCE-M (γ=0.00)": Experiment<Dataset>.Learner(
-      createFn: { data in mmceLearner(data, gamma: 0.00) },
-      requiresFeatures: false,
-      supportsMultiThreading: true),
-    "MMCE-M (γ=0.25)": Experiment<Dataset>.Learner(
+    "MMCE": Experiment<Dataset>.Learner(
       createFn: { data in mmceLearner(data, gamma: 0.25) },
       requiresFeatures: false,
       supportsMultiThreading: true),
-    "LNL-16-16-4x16-I-1 (γ=0.00)": Experiment<Dataset>.Learner(
+    "LNL-E": Experiment<Dataset>.Learner(
       createFn: { data in
         lnlLearner(
           data,
@@ -199,20 +191,7 @@ where Dataset.Loader.Predictor: Equatable {
       },
       requiresFeatures: false,
       supportsMultiThreading: true),
-    "LNL-16-16-4x16-I-1 (γ=0.25)": Experiment<Dataset>.Learner(
-      createFn: { data in
-        lnlLearner(
-          data,
-          instanceEmbeddingSize: 16,
-          predictorEmbeddingSize: 16,
-          instanceHiddenUnitCounts: [16, 16, 16, 16],
-          predictorHiddenUnitCounts: [],
-          confusionLatentSize: 1,
-          gamma: 0.25)
-      },
-      requiresFeatures: false,
-      supportsMultiThreading: true),
-    "LNL-F-16-4x16-I-1 (γ=0.00)": Experiment<Dataset>.Learner(
+    "LNL": Experiment<Dataset>.Learner(
       createFn: { data in
       lnlLearner(
         data,
@@ -224,24 +203,11 @@ where Dataset.Loader.Predictor: Equatable {
         gamma: 0.00)
       },
       requiresFeatures: true,
-      supportsMultiThreading: true),
-    "LNL-F-16-4x16-I-1 (γ=0.25)": Experiment<Dataset>.Learner(
-      createFn: { data in
-      lnlLearner(
-        data,
-        instanceEmbeddingSize: nil,
-        predictorEmbeddingSize: 16,
-        instanceHiddenUnitCounts: [16, 16, 16, 16],
-        predictorHiddenUnitCounts: [],
-        confusionLatentSize: 1,
-        gamma: 0.25)
-      },
-      requiresFeatures: true,
       supportsMultiThreading: true)
   ]
 
 #if SNORKEL
-  learners["Snorkel"] = Experiment<Dataset>.Learner(
+  learners["SNORKEL"] = Experiment<Dataset>.Learner(
     createFn: { _ in SnorkelLearner() },
     requiresFeatures: false,
     supportsMultiThreading: false)
@@ -258,10 +224,12 @@ where Dataset.Loader.Predictor: Equatable {
   experiment.run(
     callback: callback,
     runs: [
-      .redundancy(maxRedundancy: 1, repetitionCount: 5),
-      .redundancy(maxRedundancy: 2, repetitionCount: 5),
-      .redundancy(maxRedundancy: 5, repetitionCount: 5),
-      .redundancy(maxRedundancy: 10, repetitionCount: 5)],
+      .redundancy(maxRedundancy: 1, repetitionCount: 20),
+      .redundancy(maxRedundancy: 2, repetitionCount: 20),
+      .redundancy(maxRedundancy: 4, repetitionCount: 20),
+      .redundancy(maxRedundancy: 6, repetitionCount: 20),
+      .redundancy(maxRedundancy: 8, repetitionCount: 20),
+      .redundancy(maxRedundancy: 10, repetitionCount: 20)],
     parallelismLimit: parallelismLimit)
 }
 

@@ -306,7 +306,7 @@ import Python
 internal let pythonDispatchSemaphore = DispatchSemaphore(value: 1)
 
 public struct SnorkelLearner: Learner {
-  private var snorkelMarginals: [[Float]]!
+  private var snorkelMarginals: [Tensor<Float>]!
   private var snorkelQualities: [QualitiesKey: Float]!
 
   public init() {}
@@ -333,6 +333,7 @@ public struct SnorkelLearner: Learner {
       tqdm.tqdm = nop
       """, locals, locals)
 
+    let np = Python.import("numpy")
     let snorkel = Python.import("snorkel")
     let snorkelModels = Python.import("snorkel.models")
     let snorkelText = Python.import("snorkel.contrib.models.text")
@@ -386,7 +387,7 @@ public struct SnorkelLearner: Learner {
       // Train a generative model on the labels.
       let model = snorkelGenLearning.GenerativeModel(lf_propensity: true)
       model.train(labels, reg_type: 2, reg_param: 0.1, epochs: 30)
-      let marginals = [Float](model.marginals(labels))!
+      let marginals = Tensor<Float>(numpy: model.marginals(labels).astype(np.float32))!
 
       // Close the Snorkel session.
       session.close()
@@ -396,7 +397,9 @@ public struct SnorkelLearner: Learner {
         for (instance, value) in zip(predictions.instances, predictions.values) {
           // We use a heuristic way to estimate predictor qualities because Snorkel does not
           // provide an explicit way to do so.
-          let quality = abs(value - marginals[instance])
+          let quality = data.classCounts[label] == 2 ?
+            abs(value - marginals[instance].scalarized()) :
+            marginals[instance, Int(value)].scalarized()
           snorkelQualities[QualitiesKey(instance, label, predictor)] = quality
         }
       }
@@ -409,8 +412,12 @@ public struct SnorkelLearner: Learner {
     snorkelMarginals.map { marginals in
       Tensor<Float>(
         stacking: instances.map { instance in
-          let marginal = marginals[instance]
-          return Tensor<Float>([1.0 - marginal, marginal])
+          let marginals = marginals[instance]
+          if marginals.rank == 0 {
+            return Tensor<Float>(stacking: [1.0 - marginals, marginals])
+          } else {
+            return marginals
+          }
         })
     }
   }

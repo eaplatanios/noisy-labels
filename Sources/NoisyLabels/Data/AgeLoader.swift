@@ -16,14 +16,14 @@ import Foundation
 import TensorFlow
 import ZIPFoundation
 
-/// BlueBirds dataset loader.
+/// Age dataset loader.
 ///
-/// Source: https://github.com/welinder/cubam/tree/public/demo/bluebirds
-public struct BlueBirdsLoader: DataLoader {
+/// Source: TODO.
+public struct AgeLoader: DataLoader {
   private let url: URL = URL(
-    string: "https://dl.dropboxusercontent.com/s/n5l3x6bdb9ihlon/bluebirds.zip")!
+    string: "https://dl.dropboxusercontent.com/s/udhkmjc599cc59o/age.zip")!
   private let featuresURL: URL = URL(
-    string: "https://dl.dropboxusercontent.com/s/c6svvrowgekbwmd/bluebirds_features.zip")!
+    string: "https://dl.dropboxusercontent.com/s/qy3418326wljtrc/age_features.zip")!
 
   public let dataDir: URL
 
@@ -32,10 +32,10 @@ public struct BlueBirdsLoader: DataLoader {
   }
 
   public func load(withFeatures: Bool = true) throws -> Data<Int, String, Int> {
-    logger.info("Loading the BlueBirds dataset.")
+    logger.info("Loading the Age dataset.")
 
-    let dataDir = self.dataDir.appendingPathComponent("bluebirds")
-    let compressedFile = dataDir.appendingPathComponent("bluebirds.zip")
+    let dataDir = self.dataDir.appendingPathComponent("age")
+    let compressedFile = dataDir.appendingPathComponent("age.zip")
 
     // Download the data, if necessary.
     try maybeDownload(from: url, to: compressedFile)
@@ -69,7 +69,7 @@ public struct BlueBirdsLoader: DataLoader {
         instanceIds[instance] = id
         return id
       }()
-
+      
       let predictorId = predictorIds[predictor] ?? {
         let id = predictors.count
         predictors.append(predictor)
@@ -88,8 +88,8 @@ public struct BlueBirdsLoader: DataLoader {
 
     var instanceFeatures: [Tensor<Float>]? = nil
     if withFeatures {
-      logger.info("Loading the BlueBirds dataset features.")
-      let compressedFeaturesFile = dataDir.appendingPathComponent("bluebirds_features.zip")
+      logger.info("Loading the Age dataset features.")
+      let compressedFeaturesFile = dataDir.appendingPathComponent("age_features.zip")
       try maybeDownload(from: featuresURL, to: compressedFeaturesFile)
       let extractedFeaturesDir = compressedFeaturesFile.deletingPathExtension()
       if !FileManager.default.fileExists(atPath: extractedFeaturesDir.path) {
@@ -113,7 +113,7 @@ public struct BlueBirdsLoader: DataLoader {
       labels: [0],
       trueLabels: [0: trueLabels],
       predictedLabels: [0: predictedLabels],
-      classCounts: [2],
+      classCounts: [7],
       instanceFeatures: instanceFeatures)
   }
 }

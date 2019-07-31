@@ -237,5 +237,6 @@ switch datasetName {
 case "bluebirds": try runExperiment(dataset: BlueBirdsDataset())
 case "word-similarity": try runExperiment(dataset: WordSimilarityDataset(features: .glove))
 case "rte": try runExperiment(dataset: RTEDataset())
+case "age": try runExperiment(dataset: AgeDataset())
 case _: throw Error.invalidDataset
 }

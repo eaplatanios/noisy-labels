@@ -316,6 +316,21 @@ public struct SnorkelLearner: Learner {
   ) {
     pythonDispatchSemaphore.wait()
     defer { pythonDispatchSemaphore.signal() }
+
+    // We first suppress all Python printing because Snorkel prints some messages and it is
+    // impossible to disable that. We also disable the `tqdm` progress bar package that Snorkel is
+    // using in a hacky way.
+    let sys = Python.import("sys")
+    let os = Python.import("os")
+    sys.stdout = Python.open(os.devnull, "w")
+    let locals = Python.import("__main__").__dict__
+    Python.exec("""
+      import tqdm
+      def nop(*a, **k):
+        return a
+      tqdm.tqdm = nop
+      """, locals, locals)
+
     let snorkel = Python.import("snorkel")
     let snorkelModels = Python.import("snorkel.models")
     let snorkelText = Python.import("snorkel.contrib.models.text")
@@ -355,7 +370,6 @@ public struct SnorkelLearner: Learner {
       }
 
       // Create a Snorkel label annotator.
-      let labeler = Python.import("__main__").__dict__
       Python.exec("""
         from snorkel.annotations import LabelAnnotator
         def labeler(predicted_labels):
@@ -363,8 +377,8 @@ public struct SnorkelLearner: Learner {
             for worker_id, label in predicted_labels[t.index.name]:
               yield worker_id, label
           return LabelAnnotator(label_generator=worker_label_generator)
-        """, labeler, labeler)
-      let labelAnnotator = labeler["labeler"](predictedLabels)
+        """, locals, locals)
+      let labelAnnotator = locals["labeler"](predictedLabels)
       let labels = labelAnnotator.apply()
 
       // Train a generative model on the labels.

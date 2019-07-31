@@ -25,14 +25,15 @@ enum Error: Swift.Error {
 }
 
 enum Command: String {
-  case run, plot
+  case run, makeFigures, makeTables
 }
 
 extension Command: StringEnumArgument {
   public static var completion: ShellCompletion {
     return .values([
       (Command.run.rawValue, "Runs an experiment."),
-      (Command.plot.rawValue, "Generates plots with the results of an experiment.")
+      (Command.makeFigures.rawValue, "Generates figures with the results of an experiment."),
+      (Command.makeTables.rawValue, "Generates tables with the results of an experiment.")
     ])
   }
 }
@@ -43,7 +44,7 @@ let parser = ArgumentParser(
 let commandArgument: PositionalArgument<Command> = parser.add(
   positional: "command",
   kind: Command.self,
-  usage: "Experiment command to invoke. Can be either `run` or `plot`.")
+  usage: "Experiment command to invoke. Can be `run`, `makeFigures`, or `makeTables`.")
 let dataDirArgument: OptionArgument<PathArgument> = parser.add(
   option: "--data-dir",
   kind: PathArgument.self,
@@ -80,10 +81,15 @@ let resultsDir: Foundation.URL = {
 let parallelismLimit = parsedArguments.get(parallelismArgument)
 
 switch parsedArguments.get(commandArgument) {
-case .plot:
+case .makeFigures:
   try FileManager.default.contentsOfDirectory(at: resultsDir, includingPropertiesForKeys: nil)
     .filter { !$0.hasDirectoryPath && $0.pathExtension == "tsv" }
     .forEach { try ResultsPlotter(forFile: $0).plot() }
+  exit(0)
+case .makeTables:
+  try FileManager.default.contentsOfDirectory(at: resultsDir, includingPropertiesForKeys: nil)
+    .filter { !$0.hasDirectoryPath && $0.pathExtension == "tsv" }
+    .forEach { try ResultsPrinter(forFile: $0).makeTables() }
   exit(0)
 case .run: ()
 case _: throw Error.invalidCommand

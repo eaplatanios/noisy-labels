@@ -72,23 +72,23 @@ public struct ResultsPrinter {
     for (type, typeResults) in parsed {
       for (metric, metricResults) in typeResults {
         var tableRows = [String]()
-        let typeCount = metricResults.values.first!.count
+        let types = metricResults.values.map { $0.keys }.max(by: { $0.count < $1.count })!.sorted()
         let firstColWidth = max(typeResults.keys.map { $0.tableTitle.count }.max() ?? 0, 7)
         let colWidth = 11  // Example: " 0.99±0.02 "
 
         // Example:
-        // ╔════════════════════════════════════════════════════════════════════════════════════════╗
-        // ║                                        Accuracy                                        ║
-        // ╟────────────────┬───────────────────────────────────────────────────────────────────────╢
+        // ╔═════════════════════════════════════════ ... ═════════════════════════════════╗
+        // ║                                        Accuracy                               ║
+        // ╟────────────────┬──────────────────────── ... ─────────────────────────────────╢
         var rowParts = [String]()
         rowParts.append("╔═\(String(repeating: "═", count: firstColWidth))══")
         rowParts.append([String](
           repeating: String(repeating: "═", count: colWidth),
-          count: typeCount
+          count: types.count
         ).joined(separator: "═"))
         rowParts.append("╗")
         tableRows.append(rowParts.joined())
-        let tableWidth = 4 + firstColWidth + (colWidth + 1) * typeCount
+        let tableWidth = 4 + firstColWidth + (colWidth + 1) * types.count
         let titlePosition = tableWidth / 2 - metric.tableTitle.count / 2
         var beforeSpaceCount = titlePosition - 1
         var afterSpaceCount = (tableWidth + 1) / 2 - (metric.tableTitle.count + 1) / 2 - 1
@@ -101,19 +101,19 @@ public struct ResultsPrinter {
         rowParts.append("╟─\(String(repeating: "─", count: firstColWidth))─┬")
         rowParts.append([String](
           repeating: String(repeating: "─", count: colWidth),
-          count: typeCount
+          count: types.count
         ).joined(separator: "─"))
         rowParts.append("╢")
         tableRows.append(rowParts.joined())
 
         // Example:
-        // ║                │                              Redundancy                               ║
-        // ║     Learner    ├───────────┬───────────┬───────────┬───────────┬───────────┬───────────╢
-        // ║                │     1     │     2     │     4     │     6     │     8     │    10     ║
-        // ╟────────────────┼───────────┼───────────┼───────────┼───────────┼───────────┼───────────╢
+        // ║                │                          Redundancy                          ║
+        // ║     Learner    ├───────────────────────────── ... ────────────────────────────╢
+        // ║                │     1           2            ...           8          10     ║
+        // ╟────────────────┼───────────────────────────── ... ────────────────────────────╢
         rowParts = [String]()
         rowParts.append("║ \(String(repeating: " ", count: firstColWidth)) │")
-        var width = tableWidth - firstColWidth - 5
+        let width = tableWidth - firstColWidth - 5
         var position = width / 2 - type.typeTitle.count / 2
         beforeSpaceCount = position
         afterSpaceCount = (width + 1) / 2 - (type.typeTitle.count + 1) / 2
@@ -130,19 +130,25 @@ public struct ResultsPrinter {
         rowParts.append("\(String(repeating: " ", count: afterSpaceCount))├")
         rowParts.append([String](
           repeating: String(repeating: "─", count: colWidth),
-          count: typeCount
-        ).joined(separator: "┬"))
+          count: types.count
+        ).joined(separator: "─"))
         rowParts.append("╢")
         tableRows.append(rowParts.joined())
         rowParts = [String]()
         rowParts.append("║ \(String(repeating: " ", count: firstColWidth)) ")
-        for parameter in metricResults.values.first!.keys.sorted() {
-          let p = String(parameter)
-          position = colWidth / 2 - p.count / 2
+        var first = true
+        for type in types {
+          let t = String(type)
+          position = colWidth / 2 - t.count / 2
           beforeSpaceCount = position
-          afterSpaceCount = (colWidth + 1) / 2 - (p.count + 1) / 2
-          rowParts.append("│\(String(repeating: " ", count: beforeSpaceCount))")
-          rowParts.append(p)
+          afterSpaceCount = (colWidth + 1) / 2 - (t.count + 1) / 2
+          if first {
+            rowParts.append("│\(String(repeating: " ", count: beforeSpaceCount))")
+            first = false
+          } else {
+            rowParts.append(" \(String(repeating: " ", count: beforeSpaceCount))")
+          }
+          rowParts.append(t)
           rowParts.append("\(String(repeating: " ", count: afterSpaceCount))")
         }
         rowParts.append("║")
@@ -151,49 +157,70 @@ public struct ResultsPrinter {
         rowParts.append("╟─\(String(repeating: "─", count: firstColWidth))─┼")
         rowParts.append([String](
           repeating: String(repeating: "─", count: colWidth),
-          count: typeCount
-        ).joined(separator: "┼"))
+          count: types.count
+        ).joined(separator: "─"))
         rowParts.append("╢")
         tableRows.append(rowParts.joined())
 
         // Example:
-        // ║            MAJ │ 0.59±0.01 │ 0.58±0.01 │ 0.62±0.01 │ 0.63±0.00 │ 0.63±0.00 │ 0.63±0.00 ║
-        // ║           MMCE │ 0.16±0.01 │ 0.21±0.01 │ 0.48±0.01 │ 0.53±0.01 │ 0.58±0.01 │ 0.61±0.01 ║
-        // ║        SNORKEL │ 0.56±0.01 │ 0.58±0.02 │ 0.63±0.01 │ 0.64±0.01 │ 0.65±0.01 │ 0.65±0.00 ║
+        // ║            MAJ │ 0.59±0.01   0.58±0.01        ...       0.63±0.00   0.63±0.00 ║
+        // ║           MMCE │ 0.16±0.01   0.21±0.01        ...       0.58±0.01   0.61±0.01 ║
+        // ║        SNORKEL │ 0.56±0.01   0.58±0.02        ...       0.65±0.01   0.65±0.00 ║
         for (learner, results) in metricResults.sorted(by: { compareLearners($0.key, $1.key) }) {
           rowParts = [String]()
           position = firstColWidth - learner.count + 1
           rowParts.append("║\(String(repeating: " ", count: position))")
           rowParts.append("\(learner) ")
           let results = results.sorted(by: { $0.0 < $1.0 })
+          let x = results.map { $0.0 }
           let y = results.map { $0.1 }
           let yMean = y.map { String(format: "%.2f", $0.mean) }
           let yStandardDeviation = y.map { String(format: "%.2f", $0.standardDeviation) }
           let ys = zip(yMean, yStandardDeviation).map { "\($0)±\($1)" }
-          for y in ys {
-              position = colWidth / 2 - y.count / 2
+          first = true
+          var i = 0
+          for type in types {
+            if i < x.count && x[i] == type {
+              position = colWidth / 2 - ys[i].count / 2
               beforeSpaceCount = position
-              afterSpaceCount = (colWidth + 1) / 2 - (y.count + 1) / 2
-              rowParts.append("│\(String(repeating: " ", count: beforeSpaceCount))")
-              rowParts.append(y)
+              afterSpaceCount = (colWidth + 1) / 2 - (ys[i].count + 1) / 2
+              if first {
+                rowParts.append("│\(String(repeating: " ", count: beforeSpaceCount))")
+                first = false
+              } else {
+                rowParts.append(" \(String(repeating: " ", count: beforeSpaceCount))")
+              }
+              rowParts.append(ys[i])
               rowParts.append("\(String(repeating: " ", count: afterSpaceCount))")
+              i += 1
+            } else {
+              if first {
+                rowParts.append("│\(String(repeating: " ", count: colWidth))")
+                first = false
+              } else {
+                rowParts.append(" \(String(repeating: " ", count: colWidth))")
+              }
+            }
           }
           rowParts.append("║")
           tableRows.append(rowParts.joined())
         }
 
         // Example:
-        // ╚════════════════╧═══════════╧═══════════╧═══════════╧═══════════╧═══════════╧═══════════╝
+        // ╚════════════════╧═════════════════════════════ ... ════════════════════════════╝
         rowParts = [String]()
         rowParts.append("╚═\(String(repeating: "═", count: firstColWidth))═╧")
         rowParts.append([String](
           repeating: String(repeating: "═", count: colWidth),
-          count: typeCount
-        ).joined(separator: "╧"))
+          count: types.count
+        ).joined(separator: "═"))
         rowParts.append("╝")
         tableRows.append(rowParts.joined())
 
-        tableRows.forEach { print($0) }
+        // Finally, write the table to the appropriate file.
+        let table = tableRows.joined(separator: "\n")
+        let file = tablesFolder.appendingPathComponent("\(dataset)-\(type)-\(metric).txt")
+        try table.write(to: file, atomically: true, encoding: String.Encoding.utf8)
       }
     }
   }
@@ -216,16 +243,6 @@ extension Metric {
     case .accuracy: return "Accuracy"
     case .auc: return "AUC"
     }
-  }
-}
-
-fileprivate func figureTitle(for dataset: String) -> String {
-  switch dataset {
-  case "bluebirds": return "BlueBirds"
-  case "word-similarity": return "Word Similarity"
-  case "rte": return "RTE"
-  case "age": return "Age"
-  case _: return "Unknown"
   }
 }
 

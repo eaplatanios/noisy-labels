@@ -96,6 +96,6 @@ public struct WeatherSentimentLoader: DataLoader {
       labels: [0],
       trueLabels: [0: trueLabels],
       predictedLabels: [0: predictedLabels],
-      classCounts: [2])
+      classCounts: [5])
   }
 }

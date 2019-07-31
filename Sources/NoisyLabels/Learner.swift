@@ -479,6 +479,10 @@ public struct MetalLearner: Learner {
     let sys = Python.import("sys")
     let os = Python.import("os")
     sys.stdout = Python.open(os.devnull, "w")
+    // We also fix `tqdm` because our Snorkel learner may have messed it up.
+    let tqdm = Python.import("tqdm")
+    let importlib = Python.import("importlib")
+    importlib.reload(tqdm)
 
     let np = Python.import("numpy")
     let spSparse = Python.import("scipy.sparse")

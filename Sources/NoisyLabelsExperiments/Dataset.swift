@@ -34,14 +34,10 @@ public struct BlueBirdsDataset: Dataset {
     .predictorSubsampling(predictorCount: 39, repetitionCount: 1),
     .redundancy(maxRedundancy: 1, repetitionCount: 10),
     .redundancy(maxRedundancy: 2, repetitionCount: 10),
-    .redundancy(maxRedundancy: 3, repetitionCount: 10),
-    .redundancy(maxRedundancy: 4, repetitionCount: 10),
     .redundancy(maxRedundancy: 5, repetitionCount: 10),
-    .redundancy(maxRedundancy: 6, repetitionCount: 10),
-    .redundancy(maxRedundancy: 7, repetitionCount: 10),
-    .redundancy(maxRedundancy: 8, repetitionCount: 10),
-    .redundancy(maxRedundancy: 9, repetitionCount: 10),
-    .redundancy(maxRedundancy: 10, repetitionCount: 10)]
+    .redundancy(maxRedundancy: 10, repetitionCount: 10),
+    .redundancy(maxRedundancy: 20, repetitionCount: 10),
+    .redundancy(maxRedundancy: 39, repetitionCount: 10)]
 }
 
 public struct WordSimilarityDataset: Dataset {

@@ -162,3 +162,55 @@ public struct WeatherSentimentDataset: Dataset {
     .redundancy(maxRedundancy: 9, repetitionCount: 10),
     .redundancy(maxRedundancy: 10, repetitionCount: 10)]
 }
+
+public struct MedicalTreatsDataset: Dataset {
+  public let description: String = "medical-treats"
+
+  public var loader: (Foundation.URL) -> MedicalRelationsLoader = {
+    MedicalRelationsLoader(dataDir: $0, labels: [.treats])
+  }
+
+  public var runs: [ExperimentRun] = [
+    .predictorSubsampling(predictorCount: 1, repetitionCount: 50),
+    .predictorSubsampling(predictorCount: 20, repetitionCount: 50),
+    .predictorSubsampling(predictorCount: 50, repetitionCount: 50),
+    .predictorSubsampling(predictorCount: 100, repetitionCount: 50),
+    .predictorSubsampling(predictorCount: 200, repetitionCount: 20),
+    .predictorSubsampling(predictorCount: 468, repetitionCount: 1),
+    .redundancy(maxRedundancy: 1, repetitionCount: 10),
+    .redundancy(maxRedundancy: 2, repetitionCount: 10),
+    .redundancy(maxRedundancy: 3, repetitionCount: 10),
+    .redundancy(maxRedundancy: 4, repetitionCount: 10),
+    .redundancy(maxRedundancy: 5, repetitionCount: 10),
+    .redundancy(maxRedundancy: 6, repetitionCount: 10),
+    .redundancy(maxRedundancy: 7, repetitionCount: 10),
+    .redundancy(maxRedundancy: 8, repetitionCount: 10),
+    .redundancy(maxRedundancy: 9, repetitionCount: 10),
+    .redundancy(maxRedundancy: 10, repetitionCount: 10)]
+}
+
+public struct MedicalCausesDataset: Dataset {
+  public let description: String = "medical-causes"
+
+  public var loader: (Foundation.URL) -> MedicalRelationsLoader = {
+    MedicalRelationsLoader(dataDir: $0, labels: [.causes])
+  }
+
+  public var runs: [ExperimentRun] = [
+    .predictorSubsampling(predictorCount: 1, repetitionCount: 50),
+    .predictorSubsampling(predictorCount: 20, repetitionCount: 50),
+    .predictorSubsampling(predictorCount: 50, repetitionCount: 50),
+    .predictorSubsampling(predictorCount: 100, repetitionCount: 50),
+    .predictorSubsampling(predictorCount: 200, repetitionCount: 20),
+    .predictorSubsampling(predictorCount: 468, repetitionCount: 1),
+    .redundancy(maxRedundancy: 1, repetitionCount: 10),
+    .redundancy(maxRedundancy: 2, repetitionCount: 10),
+    .redundancy(maxRedundancy: 3, repetitionCount: 10),
+    .redundancy(maxRedundancy: 4, repetitionCount: 10),
+    .redundancy(maxRedundancy: 5, repetitionCount: 10),
+    .redundancy(maxRedundancy: 6, repetitionCount: 10),
+    .redundancy(maxRedundancy: 7, repetitionCount: 10),
+    .redundancy(maxRedundancy: 8, repetitionCount: 10),
+    .redundancy(maxRedundancy: 9, repetitionCount: 10),
+    .redundancy(maxRedundancy: 10, repetitionCount: 10)]
+}

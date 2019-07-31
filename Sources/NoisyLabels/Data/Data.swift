@@ -289,10 +289,12 @@ extension Data {
     for l in labels.indices {
       for (p, predictions) in predictedLabels[l]! {
         for (i, v) in zip(predictions.instances, predictions.values) {
-          if trueLabels[l]![i]! == (v >= 0.5 ? 1 : 0) {
-            numCorrect[l * predictors.count + p] += 1
+          if let trueLabel = trueLabels[l]?[i] {
+            if trueLabel == (v >= 0.5 ? 1 : 0) {
+              numCorrect[l * predictors.count + p] += 1
+            }
+            numTotal[l * predictors.count + p] += 1
           }
-          numTotal[l * predictors.count + p] += 1
         }
       }
     }
@@ -309,23 +311,25 @@ extension Data {
     for l in labels.indices {
       for (p, predictions) in predictedLabels[l]! {
         for (i, v) in zip(predictions.instances, predictions.values) {
-          if trueLabels[l]![i]! == 0 {
-            if v >= 0.5 {
-              numConfused[l * predictors.count + p * 4 + 1] += 1
+          if let trueLabel = trueLabels[l]?[i] {
+            if trueLabel == 0 {
+              if v >= 0.5 {
+                numConfused[l * predictors.count + p * 4 + 1] += 1
+              } else {
+                numConfused[l * predictors.count + p * 4] += 1
+              }
             } else {
-              numConfused[l * predictors.count + p * 4] += 1
+              if v >= 0.5 {
+                numConfused[l * predictors.count + p * 4 + 3] += 1
+              } else {
+                numConfused[l * predictors.count + p * 4 + 2] += 1
+              }
             }
-          } else {
-            if v >= 0.5 {
-              numConfused[l * predictors.count + p * 4 + 3] += 1
-            } else {
-              numConfused[l * predictors.count + p * 4 + 2] += 1
+            if trueLabel == (v >= 0.5 ? 1 : 0) {
+              numConfused[l * predictors.count + p] += 1
             }
+            numTotal[l * predictors.count + p] += 1
           }
-          if trueLabels[l]![i]! == (v >= 0.5 ? 1 : 0) {
-            numConfused[l * predictors.count + p] += 1
-          }
-          numTotal[l * predictors.count + p] += 1
         }
       }
     }

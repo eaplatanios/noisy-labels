@@ -244,8 +244,8 @@ where Dataset.Loader.Predictor: Equatable {
     runs: [
       .redundancy(maxRedundancy: 1, repetitionCount: 20),
       .redundancy(maxRedundancy: 2, repetitionCount: 20),
-      .redundancy(maxRedundancy: 4, repetitionCount: 10),
-      .redundancy(maxRedundancy: 6, repetitionCount: 10),
+      .redundancy(maxRedundancy: 4, repetitionCount: 20),
+      .redundancy(maxRedundancy: 6, repetitionCount: 20),
       .redundancy(maxRedundancy: 8, repetitionCount: 20),
       .redundancy(maxRedundancy: 10, repetitionCount: 20),
       // .redundancy(maxRedundancy: 20, repetitionCount: 20),
@@ -261,5 +261,7 @@ case "rte": try runExperiment(dataset: RTEDataset())
 case "age": try runExperiment(dataset: AgeDataset())
 case "sentiment-popularity": try runExperiment(dataset: SentimentPopularityDataset())
 case "weather-sentiment": try runExperiment(dataset: WeatherSentimentDataset())
+case "medical-treats": try runExperiment(dataset: MedicalTreatsDataset())
+case "medical-causes": try runExperiment(dataset: MedicalCausesDataset())
 case _: throw Error.invalidDataset
 }

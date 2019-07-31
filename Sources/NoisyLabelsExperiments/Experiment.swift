@@ -76,15 +76,15 @@ where Dataset.Loader.Predictor: Equatable {
     let concurrentQueue = DispatchQueue(label: "Noisy Labels Concurrent", attributes: .concurrent)
     let serialQueue = DispatchQueue(label: "Noisy Labels Serial")
     let dispatchGroup = DispatchGroup()
-    for (learnerName, learner) in learners {
-      let queue = learner.supportsMultiThreading ? concurrentQueue : serialQueue
-      for run in runs {
-        switch run {
-        case let .predictorSubsampling(predictorCount, repetitionCount):
-          // TODO: resetSeed()
-          let predictorSamples = data.predictors.count <= predictorCount ?
-            [[Predictor]](repeating: data.predictors, count: repetitionCount) :
-            (0..<repetitionCount).map { _ in sample(from: data.predictors, count: predictorCount) }
+    for run in runs {
+      switch run {
+      case let .predictorSubsampling(predictorCount, repetitionCount):
+        // TODO: resetSeed()
+        let predictorSamples = data.predictors.count <= predictorCount ?
+          [[Predictor]](repeating: data.predictors, count: repetitionCount) :
+          (0..<repetitionCount).map { _ in sample(from: data.predictors, count: predictorCount) }
+        for (learnerName, learner) in learners {
+          let queue = learner.supportsMultiThreading ? concurrentQueue : serialQueue
           for repetition in 0..<predictorSamples.count {
             queue.async(group: dispatchGroup) { [data] () in
               dispatchSemaphore?.wait()
@@ -117,14 +117,17 @@ where Dataset.Loader.Predictor: Equatable {
               }
             }
           }
-        case let .redundancy(maxRedundancy, repetitionCount):
-          for _ in 0..<repetitionCount {
+        }
+      case let .redundancy(maxRedundancy, repetitionCount):
+        for _ in 0..<repetitionCount {
+          // TODO: resetSeed()
+          let filteredData = data.withMaxRedundancy(maxRedundancy)
+          for (learnerName, learner) in learners {
+            let queue = learner.supportsMultiThreading ? concurrentQueue : serialQueue
             queue.async(group: dispatchGroup) { [data] () in
               dispatchSemaphore?.wait()
               defer { dispatchSemaphore?.signal() }
               progressBarDispatchQueue.sync { progressBar.next() }
-              // TODO: resetSeed()
-              let filteredData = data.withMaxRedundancy(maxRedundancy)
               var learner = learner.createFn(filteredData)
               learner.train(using: filteredData)
               let result = EvaluationResult(merging: learner.evaluatePerLabel(using: filteredData))

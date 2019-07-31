@@ -260,5 +260,6 @@ case "word-similarity": try runExperiment(dataset: WordSimilarityDataset(feature
 case "rte": try runExperiment(dataset: RTEDataset())
 case "age": try runExperiment(dataset: AgeDataset())
 case "sentiment-popularity": try runExperiment(dataset: SentimentPopularityDataset())
+case "weather-sentiment": try runExperiment(dataset: WeatherSentimentDataset())
 case _: throw Error.invalidDataset
 }

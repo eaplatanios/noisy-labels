@@ -181,6 +181,7 @@ fileprivate func figureTitle(for dataset: String) -> String {
   case "rte": return "RTE"
   case "age": return "Age"
   case "sentiment-popularity": return "Sentiment Popularity"
+  case "weather-sentiment": return "Weather Sentiment"
   case _: return "Unknown"
   }
 }

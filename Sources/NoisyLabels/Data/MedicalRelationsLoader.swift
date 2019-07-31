@@ -30,7 +30,7 @@ public struct MedicalRelationsLoader: DataLoader {
   private let url: URL = URL(
     string: "https://dl.dropboxusercontent.com/s/3q97sd499e2z991/medical_relations.zip")!
   private let featuresURL: URL = URL(
-    string: "https://dl.dropboxusercontent.com/s/tnyr4hsaf5q4va9/wordsim_glove_features.zip")!
+    string: "https://dl.dropboxusercontent.com/s/dfq7ea5idc0vxew/medical_relations_features.zip")!
 
   public let dataDir: URL
   public let labels: [Label]
@@ -102,31 +102,19 @@ public struct MedicalRelationsLoader: DataLoader {
     var instanceFeatures: [Tensor<Float>]? = nil
     if withFeatures {
       logger.info("Loading the medical relations dataset features.")
-      fatalError("The medical relations dataset does not support instance features yet.")
-      // let compressedFeaturesFile = dataDir.appendingPathComponent(
-      //   "wordsim_\(features.rawValue)_features.zip")
-      // let featuresURL = { () -> URL in
-      //   switch self.features {
-      //   case .glove: return gloveFeaturesURL
-      //   case .bert: return bertFeaturesURL
-      //   }
-      // }()
-      // try maybeDownload(from: featuresURL, to: compressedFeaturesFile)
-      // let extractedFeaturesDir = compressedFeaturesFile.deletingPathExtension()
-      // if !FileManager.default.fileExists(atPath: extractedFeaturesDir.path) {
-      //   try FileManager.default.unzipItem(at: compressedFeaturesFile, to: extractedFeaturesDir)
-      // }
-      // let featuresFile = extractedFeaturesDir.appendingPathComponent(
-      //   "\(features.rawValue)_features.txt")
-      // let featuresString = try String(contentsOf: featuresFile, encoding: .utf8)
-      // var features = [String: Tensor<Float>]()
-      // for line in featuresString.components(separatedBy: .newlines).filter({ !$0.isEmpty }) {
-      //   let lineParts = line.components(separatedBy: "\t")
-      //   let instance = String(lineParts[0])
-      //   let values = lineParts[1].components(separatedBy: " ").map { Float($0)! }
-      //   features[instance] = Tensor(values)
-      // }
-      // instanceFeatures = instances.map { features[$0]! }
+      let compressedFeaturesFile = dataDir.appendingPathComponent("medical_relations_features.zip")
+      try maybeDownload(from: featuresURL, to: compressedFeaturesFile)
+      let extractedFeaturesDir = compressedFeaturesFile.deletingPathExtension()
+      if !FileManager.default.fileExists(atPath: extractedFeaturesDir.path) {
+        try FileManager.default.unzipItem(at: compressedFeaturesFile, to: extractedFeaturesDir)
+      }
+      let featuresFile = extractedFeaturesDir.appendingPathComponent("features.txt")
+      let featuresString = try String(contentsOf: featuresFile, encoding: .utf8)
+      var features = [Tensor<Float>]()
+      for line in featuresString.components(separatedBy: .newlines).filter({ !$0.isEmpty }) {
+        features.append(Tensor(line.components(separatedBy: " ").map { Float($0)! }))
+      }
+      instanceFeatures = features
     }
 
     return Data(

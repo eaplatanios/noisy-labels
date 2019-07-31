@@ -71,6 +71,8 @@ public struct ResultsPrinter {
     // Plot all the results and save them in PDF files alongside the original results file.
     for (type, typeResults) in parsed {
       for (metric, metricResults) in typeResults {
+        // TODO: Generalize this to other metrics.
+        if metric != .accuracy && metric != .auc { continue }
         var tableRows = [String]()
         let types = metricResults.values.map { $0.keys }.max(by: { $0.count < $1.count })!.sorted()
         let firstColWidth = max(typeResults.keys.map { $0.tableTitle.count }.max() ?? 0, 7)

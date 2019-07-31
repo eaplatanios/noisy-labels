@@ -114,3 +114,29 @@ public struct AgeDataset: Dataset {
     .redundancy(maxRedundancy: 9, repetitionCount: 10),
     .redundancy(maxRedundancy: 10, repetitionCount: 10)]
 }
+
+public struct SentimentPopularityDataset: Dataset {
+  public let description: String = "sentiment-popularity"
+
+  public var loader: (Foundation.URL) -> SentimentPopularityLoader = {
+    SentimentPopularityLoader(dataDir: $0)
+  }
+
+  public var runs: [ExperimentRun] = [
+    .predictorSubsampling(predictorCount: 1, repetitionCount: 50),
+    .predictorSubsampling(predictorCount: 10, repetitionCount: 50),
+    .predictorSubsampling(predictorCount: 20, repetitionCount: 50),
+    .predictorSubsampling(predictorCount: 50, repetitionCount: 50),
+    .predictorSubsampling(predictorCount: 100, repetitionCount: 20),
+    .predictorSubsampling(predictorCount: 143, repetitionCount: 1),
+    .redundancy(maxRedundancy: 1, repetitionCount: 10),
+    .redundancy(maxRedundancy: 2, repetitionCount: 10),
+    .redundancy(maxRedundancy: 3, repetitionCount: 10),
+    .redundancy(maxRedundancy: 4, repetitionCount: 10),
+    .redundancy(maxRedundancy: 5, repetitionCount: 10),
+    .redundancy(maxRedundancy: 6, repetitionCount: 10),
+    .redundancy(maxRedundancy: 7, repetitionCount: 10),
+    .redundancy(maxRedundancy: 8, repetitionCount: 10),
+    .redundancy(maxRedundancy: 9, repetitionCount: 10),
+    .redundancy(maxRedundancy: 10, repetitionCount: 10)]
+}

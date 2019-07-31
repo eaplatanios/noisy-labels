@@ -244,10 +244,13 @@ where Dataset.Loader.Predictor: Equatable {
     runs: [
       .redundancy(maxRedundancy: 1, repetitionCount: 20),
       .redundancy(maxRedundancy: 2, repetitionCount: 20),
-      .redundancy(maxRedundancy: 4, repetitionCount: 20),
-      .redundancy(maxRedundancy: 6, repetitionCount: 20),
+      .redundancy(maxRedundancy: 4, repetitionCount: 10),
+      .redundancy(maxRedundancy: 6, repetitionCount: 10),
       .redundancy(maxRedundancy: 8, repetitionCount: 20),
-      .redundancy(maxRedundancy: 10, repetitionCount: 20)],
+      .redundancy(maxRedundancy: 10, repetitionCount: 20),
+      // .redundancy(maxRedundancy: 20, repetitionCount: 20),
+      // .redundancy(maxRedundancy: 40, repetitionCount: 20),
+    ],
     parallelismLimit: parallelismLimit)
 }
 
@@ -256,5 +259,6 @@ case "bluebirds": try runExperiment(dataset: BlueBirdsDataset())
 case "word-similarity": try runExperiment(dataset: WordSimilarityDataset(features: .glove))
 case "rte": try runExperiment(dataset: RTEDataset())
 case "age": try runExperiment(dataset: AgeDataset())
+case "sentiment-popularity": try runExperiment(dataset: SentimentPopularityDataset())
 case _: throw Error.invalidDataset
 }

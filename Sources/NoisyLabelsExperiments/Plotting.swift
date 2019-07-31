@@ -180,6 +180,7 @@ fileprivate func figureTitle(for dataset: String) -> String {
   case "word-similarity": return "Word Similarity"
   case "rte": return "RTE"
   case "age": return "Age"
+  case "sentiment-popularity": return "Sentiment Popularity"
   case _: return "Unknown"
   }
 }
@@ -202,7 +203,7 @@ fileprivate func compareLearners(_ learner1: String, _ learner2: String) -> Bool
 fileprivate func learnerColor(_ learner: String) -> PythonObject {
   if learner.hasPrefix("LNL-E") { return redPalette[0] }
   if learner.hasPrefix("LNL") { return redPalette[2] }
-  if learner.hasPrefix("Snorkel") { return greenPalette[0] }
+  if learner.hasPrefix("Snorkel") { return greenPalette[1] }
   if learner.hasPrefix("MeTaL") { return greenPalette[2] }
   if learner.hasPrefix("MMCE") { return bluePalette[1] }
   if learner.hasPrefix("MAJ-S") { return bluePalette[2] }

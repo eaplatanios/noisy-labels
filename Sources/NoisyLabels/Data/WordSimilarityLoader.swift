@@ -18,8 +18,7 @@ import ZIPFoundation
 
 /// Word similarity Amazon Mechanical Turk dataset loader.
 ///
-/// Source:
-/// - https://sites.google.com/site/nlpannotations
+/// Source: https://sites.google.com/site/nlpannotations
 public struct WordSimilarityLoader: DataLoader {
   private let url: URL = URL(
     string: "https://dl.dropboxusercontent.com/s/wbgaob9t42cas37/wordsim.zip")!
@@ -67,14 +66,14 @@ public struct WordSimilarityLoader: DataLoader {
       let predictor = String(parts[1])
       let value = Float(parts[3])! / 10.0
       let trueLabel = Float(parts[4])! > 2.5 ? 1 : 0
-      
+
       let instanceId = instanceIds[instance] ?? {
         let id = instances.count
         instances.append(instance)
         instanceIds[instance] = id
         return id
       }()
-      
+
       let predictorId = predictorIds[predictor] ?? {
         let id = predictors.count
         predictors.append(predictor)

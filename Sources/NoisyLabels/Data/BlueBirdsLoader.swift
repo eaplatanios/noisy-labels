@@ -16,16 +16,14 @@ import Foundation
 import TensorFlow
 import ZIPFoundation
 
-/// PASCAL RTE Amazon Mechanical Turk dataset loader.
+/// BlueBirds dataset loader.
 ///
-/// Sources:
-/// - https://sites.google.com/site/nlpannotations
-/// - https://www.kaggle.com/nltkdata/rte-corpus
-public struct RTELoader: DataLoader {
+/// Source: https://github.com/welinder/cubam/tree/public/demo/bluebirds
+public struct BlueBirdsLoader: DataLoader {
   private let url: URL = URL(
-    string: "https://dl.dropboxusercontent.com/s/ebkpj9a5ndy7gh5/rte.zip")!
+    string: "https://dl.dropboxusercontent.com/s/n5l3x6bdb9ihlon/bluebirds.zip")!
   private let featuresURL: URL = URL(
-    string: "https://dl.dropboxusercontent.com/s/bc5dr440k6olt79/rte_features.zip")!
+    string: "https://dl.dropboxusercontent.com/s/c6svvrowgekbwmd/bluebirds_features.zip")!
 
   public let dataDir: URL
 
@@ -34,10 +32,10 @@ public struct RTELoader: DataLoader {
   }
 
   public func load(withFeatures: Bool = true) throws -> Data<Int, String, Int> {
-    logger.info("Loading the RTE dataset.")
+    logger.info("Loading the BlueBirds dataset.")
 
-    let dataDir = self.dataDir.appendingPathComponent("rte")
-    let compressedFile = dataDir.appendingPathComponent("rte.zip")
+    let dataDir = self.dataDir.appendingPathComponent("bluebirds")
+    let compressedFile = dataDir.appendingPathComponent("bluebirds.zip")
 
     // Download the data, if necessary.
     try maybeDownload(from: url, to: compressedFile)
@@ -60,10 +58,10 @@ public struct RTELoader: DataLoader {
     let originalContents = try String(contentsOfFile: originalFile.path, encoding: .utf8)
     for line in originalContents.split(separator: "\n").dropFirst() {
       let parts = line.split(separator: "\t")
-      let instance = Int(parts[2])!
-      let predictor = String(parts[1])
-      let value = Float(parts[3])!
-      let trueLabel = Int(parts[4])!
+      let instance = Int(parts[1])!
+      let predictor = String(parts[0])
+      let value = Float(parts[2])!
+      let trueLabel = Int(parts[3])!
 
       let instanceId = instanceIds[instance] ?? {
         let id = instances.count
@@ -71,7 +69,7 @@ public struct RTELoader: DataLoader {
         instanceIds[instance] = id
         return id
       }()
-
+      
       let predictorId = predictorIds[predictor] ?? {
         let id = predictors.count
         predictors.append(predictor)
@@ -90,8 +88,8 @@ public struct RTELoader: DataLoader {
 
     var instanceFeatures: [Tensor<Float>]? = nil
     if withFeatures {
-      logger.info("Loading the RTE dataset features.")
-      let compressedFeaturesFile = dataDir.appendingPathComponent("rte_features.zip")
+      logger.info("Loading the BlueBirds dataset features.")
+      let compressedFeaturesFile = dataDir.appendingPathComponent("bluebirds_features.zip")
       try maybeDownload(from: featuresURL, to: compressedFeaturesFile)
       let extractedFeaturesDir = compressedFeaturesFile.deletingPathExtension()
       if !FileManager.default.fileExists(atPath: extractedFeaturesDir.path) {

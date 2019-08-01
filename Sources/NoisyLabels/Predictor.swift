@@ -304,7 +304,7 @@ public struct LNLPredictor: Predictor {
     let difficulties = difficultyLayers.differentiableMap(instances) { $1($0) }
     let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     return differentiableZip(difficulties, competences).differentiableMap {
-      logSoftmax($0.first + $0.second).logSumExp(squeezingAxes: -1)
+      logSoftmax($0.first + $0.second, alongAxis: -2).logSumExp(squeezingAxes: -1)
     }
   }
 
@@ -369,7 +369,7 @@ public struct FeaturizedLNLPredictor: Predictor {
   @noDerivative public let predictorHiddenUnitCounts: [Int]
   @noDerivative public let confusionLatentSize: Int
 
-  public let instanceFeatures: Tensor<Float>
+  @noDerivative public let instanceFeatures: Tensor<Float>
   public var predictorFeatures: Tensor<Float>
   public var instanceProcessingLayers: [Dense<Float>]
   public var predictorProcessingLayers: [Dense<Float>]
@@ -500,7 +500,7 @@ public struct FeaturizedLNLPredictor: Predictor {
     let difficulties = difficultyLayers.differentiableMap(instances) { $1($0) }
     let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     return differentiableZip(difficulties, competences).differentiableMap {
-      logSoftmax($0.first + $0.second).logSumExp(squeezingAxes: -1)
+      logSoftmax($0.first + $0.second, alongAxis: -2).logSumExp(squeezingAxes: -1)
     }
   }
 
@@ -560,7 +560,7 @@ public struct DecoupledLNLPredictor: Predictor {
   @noDerivative public let predictorHiddenUnitCounts: [Int]
   @noDerivative public let confusionLatentSize: Int
 
-  public let instanceFeatures: Tensor<Float>
+  @noDerivative public let instanceFeatures: Tensor<Float>
   public var predictorFeatures: Tensor<Float>
   public var instanceLProcessingLayers: [Dense<Float>]
   public var instanceQProcessingLayers: [Dense<Float>]
@@ -709,7 +709,7 @@ public struct DecoupledLNLPredictor: Predictor {
     let difficulties = difficultyLayers.differentiableMap(instances) { $1($0) }
     let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     return differentiableZip(difficulties, competences).differentiableMap {
-      logSoftmax($0.first + $0.second).logSumExp(squeezingAxes: -1)
+      logSoftmax($0.first + $0.second, alongAxis: -2).logSumExp(squeezingAxes: -1)
     }
   }
 

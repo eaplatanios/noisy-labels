@@ -195,7 +195,7 @@ func featurizedLNLLearner<Instance, Predictor, Label>(
   let model = EMModel(
     predictor: predictor,
     optimizer: optimizer,
-    entropyWeight: 0.01,
+    entropyWeight: 0.0,
     useSoftPredictions: true,
     learningRateDecayFactor: 0.997)
   return EMLearner(
@@ -204,8 +204,8 @@ func featurizedLNLLearner<Instance, Predictor, Label>(
     batchSize: 128,
     useWarmStarting: true,
     mStepCount: 1000,
-    emStepCount: 5,
-    marginalStepCount: 0,
+    emStepCount: 2,
+    marginalStepCount: 1000,
     mStepLogCount: 100,
     verbose: true)
 }
@@ -289,10 +289,10 @@ where Dataset.Loader.Predictor: Equatable {
       createFn: { data in
       featurizedLNLLearner(
         data,
-        predictorEmbeddingSize: 16,
-        instanceHiddenUnitCounts: [16, 16, 16, 16],
-        predictorHiddenUnitCounts: [16, 16, 16, 16],
-        confusionLatentSize: 4,
+        predictorEmbeddingSize: 512,
+        instanceHiddenUnitCounts: [512],
+        predictorHiddenUnitCounts: [],
+        confusionLatentSize: 1,
         gamma: 0.00)
       },
       requiresFeatures: true,

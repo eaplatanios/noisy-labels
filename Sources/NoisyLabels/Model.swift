@@ -22,7 +22,6 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
   public let labelCount: Int
   public let classCounts: [Int]
   public let entropyWeight: Float
-  public let useSoftMajorityVote: Bool
   public let useSoftPredictions: Bool
   public let initialLearningRate: Float
   public let learningRateDecayFactor: Float
@@ -36,7 +35,6 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
     predictor: Predictor,
     optimizer: Optimizer,
     entropyWeight: Float = 0.0,
-    useSoftMajorityVote: Bool = true,
     useSoftPredictions: Bool = true,
     learningRateDecayFactor: Float = 1.0
   ) {
@@ -47,7 +45,6 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
     self.labelCount = predictor.labelCount
     self.classCounts = predictor.classCounts
     self.entropyWeight = entropyWeight
-    self.useSoftMajorityVote = useSoftMajorityVote
     self.useSoftPredictions = useSoftPredictions
     self.initialLearningRate = optimizer.learningRate
     self.learningRateDecayFactor = learningRateDecayFactor
@@ -68,7 +65,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
     for l in 0..<labelCount {
       let qLog = qLogs[l].gathering(where: labelMasks[l])
       let values = data.values.gathering(where: labelMasks[l])
-      let yHat = useSoftMajorityVote && classCounts[l] == 2 ?
+      let yHat = useSoftPredictions && classCounts[l] == 2 ?
         Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
         Tensor<Float>(oneHotAtIndices: Tensor<Int32>(values), depth: classCounts[l])
       let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
@@ -94,7 +91,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
     let majorityVote = Tensor<Float>(majorityVote ? 0 : 1)
     let labelMasks = self.labelMasks(for: data.labels)
     let (negativeLogLikelihood, gradient) = predictor.valueWithGradient { [
-      eStepAccumulators, useSoftMajorityVote, entropyWeight
+      eStepAccumulators, useSoftPredictions, entropyWeight
     ] predictor -> Tensor<Float> in
       let predictions = predictor(data.instances, data.predictors, data.labels)
       let includePredictionsPrior = withoutDerivative(at: predictions.includePredictionsPrior)
@@ -108,7 +105,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
         let qLog = parameters.qualities.gathering(where: parameters.labelMask)
         let values = data.values.gathering(where: parameters.labelMask)
         let classCount = hLog.shape[1]
-        let yHat = { useSoftMajorityVote && classCount == 2 ?
+        let yHat = { useSoftPredictions && classCount == 2 ?
           Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
           Tensor<Float>(oneHotAtIndices: Tensor<Int32>(values), depth: classCount) }()
         let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
@@ -132,7 +129,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
   public mutating func executeMarginalStep(using data: TrainingData) -> Float {
     let labelMasks = self.labelMasks(for: data.labels)
     let (negativeLogLikelihood, gradient) = predictor.valueWithGradient { [
-      eStepAccumulators, useSoftMajorityVote, entropyWeight
+      eStepAccumulators, useSoftPredictions, entropyWeight
     ] predictor -> Tensor<Float> in
       let predictions = predictor(data.instances, data.predictors, data.labels)
       return modelZip(
@@ -145,7 +142,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
         let qLog = parameters.qualities.gathering(where: parameters.labelMask)
         let values = data.values.gathering(where: parameters.labelMask)
         let classCount = hLog.shape[1]
-        let yHat = { useSoftMajorityVote && classCount == 2 ?
+        let yHat = { useSoftPredictions && classCount == 2 ?
           Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
           Tensor<Float>(oneHotAtIndices: Tensor<Int32>(values), depth: classCount) }()
         let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
@@ -167,7 +164,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
       let hLog = predictions.labelProbabilities[l].gathering(where: labelMasks[l])
       let qLog = predictions.qualities[l].gathering(where: labelMasks[l])
       let values = data.values.gathering(where: labelMasks[l])
-      let yHat = useSoftMajorityVote && classCounts[l] == 2 ?
+      let yHat = useSoftPredictions && classCounts[l] == 2 ?
         Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
         Tensor<Float>(oneHotAtIndices: Tensor<Int32>(values), depth: classCounts[l])
       let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -2, -1)

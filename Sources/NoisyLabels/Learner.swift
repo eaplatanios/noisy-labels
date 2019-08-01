@@ -159,9 +159,9 @@ public struct EMLearner<
       var accumulatedNLL = Float(0.0)
       var accumulatedSteps = 0
       var datasetIterator = dataset.repeated()
-        // .shuffled(sampleCount: 10000, randomSeed: randomSeed)
+        .shuffled(sampleCount: 10000, randomSeed: randomSeed &+ Int64(emStep))
         .batched(batchSize)
-        .prefetched(count: 100)
+        .prefetched(count: 10)
         .makeIterator()
 
       for mStep in 0..<mStepCount {
@@ -172,7 +172,7 @@ public struct EMLearner<
         if verbose {
           if let logSteps = mStepLogCount, mStep % logSteps == 0 || mStep == mStepCount - 1 {
             let nll = accumulatedNLL / Float(accumulatedSteps)
-            let message = "M-Step \(String(format: "%5d", mStep)) | " + 
+            let message = "M-Step \(String(format: "%5d", mStep)) | " +
               "Negative Log-Likelihood: \(String(format: "%.8f", nll))"
             logger.info("\(message)")
             accumulatedNLL = 0.0

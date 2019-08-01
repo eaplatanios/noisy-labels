@@ -114,10 +114,11 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
         let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
         let yAccumulated = parameters.eStepAccumulator.gathering(
           atIndices: data.instances.gathering(where: parameters.labelMask))
-        let yAccumulatedHLog = includePredictionsPrior ?
-          yAccumulated + withoutDerivative(at: hLog) * majorityVote :
-          yAccumulated + log(0.5) * majorityVote
-        let yExpected = exp(yAccumulatedHLog - yAccumulatedHLog.logSumExp(alongAxes: -1))
+        // let yAccumulatedHLog = includePredictionsPrior ?
+        //   yAccumulated + withoutDerivative(at: hLog) * majorityVote :
+        //   yAccumulated + log(0.5) * majorityVote
+        // let yExpected = exp(yAccumulatedHLog - yAccumulatedHLog.logSumExp(alongAxes: -1))
+        let yExpected = exp(yAccumulated - yAccumulated.logSumExp(alongAxes: -1))
         return entropyWeight * (exp(hLog) * hLog).sum() - 
           (yExpected * hLog).sum() -
           (yExpected * qLogYHat).sum()
@@ -191,7 +192,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
     return (0..<labelCount).map { l -> Tensor<Float> in
       let hLog = predictions.labelProbabilities[l].gathering(where: labelMasks[l])
       let qLog = predictions.qualities[l].gathering(where: labelMasks[l])
-      let qLogHLog = qLog * hLog.expandingShape(at: -1)
+      let qLogHLog = qLog + hLog.expandingShape(at: -1)
       return Raw.matrixDiagPart(qLogHLog).logSumExp(squeezingAxes: -1)
     }
   }

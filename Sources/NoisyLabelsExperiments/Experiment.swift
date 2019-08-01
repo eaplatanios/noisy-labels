@@ -28,7 +28,8 @@ where Dataset.Loader.Predictor: Equatable {
   public let learners: [String: Learner]
 
   internal let data: NoisyLabels.Data<Instance, Predictor, Label>
-  internal let dispatchQueue = DispatchQueue(label: "Noisy Labels", attributes: .concurrent)
+  internal let concurrentQueue = DispatchQueue(label: "Noisy Labels", attributes: .concurrent)
+  internal let serialQueue = DispatchQueue(label: "Noisy Labels Serial")
   internal let dispatchGroup = DispatchGroup()
   internal let progressBarDispatchQueue = DispatchQueue(label: "Progress Bar")
 
@@ -74,9 +75,9 @@ where Dataset.Loader.Predictor: Equatable {
           [[Predictor]](repeating: data.predictors, count: repetitionCount) :
           (0..<repetitionCount).map { _ in sample(from: data.predictors, count: predictorCount) }
         for (learnerName, learner) in learners {
-          let flags: DispatchWorkItemFlags = learner.supportsMultiThreading ? [] : .barrier
+          let queue = learner.supportsMultiThreading ? concurrentQueue : serialQueue
           for repetition in 0..<predictorSamples.count {
-            dispatchQueue.async(group: dispatchGroup, flags: flags) { [data] () in
+            queue.async(group: dispatchGroup) { [data] () in
               dispatchSemaphore?.wait()
               defer { dispatchSemaphore?.signal() }
               self.progressBarDispatchQueue.sync { progressBar.next() }
@@ -113,8 +114,8 @@ where Dataset.Loader.Predictor: Equatable {
           // TODO: resetSeed()
           let filteredData = data.withMaxRedundancy(maxRedundancy)
           for (learnerName, learner) in learners {
-            let flags: DispatchWorkItemFlags = learner.supportsMultiThreading ? [] : .barrier
-            dispatchQueue.async(group: dispatchGroup, flags: flags) { [data] () in
+            let queue = learner.supportsMultiThreading ? concurrentQueue : serialQueue
+            queue.async(group: dispatchGroup) { [data] () in
               dispatchSemaphore?.wait()
               defer { dispatchSemaphore?.signal() }
               self.progressBarDispatchQueue.sync { progressBar.next() }

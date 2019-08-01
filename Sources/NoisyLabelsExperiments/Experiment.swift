@@ -17,15 +17,6 @@ import NoisyLabels
 import Progress
 import TensorFlow
 
-internal extension Array where Element == Float {
-  var mean: Float { reduce(0, { $0 + $1 }) / Float(count) }
-  var standardDeviation: Element {
-    let mean = reduce(0, { $0 + $1 }) / Float(count)
-    let variance = map { ($0 - mean) * ($0 - mean) }
-    return TensorFlow.sqrt(variance.mean)
-  }
-}
-
 public struct Experiment<Dataset: NoisyLabelsExperiments.Dataset>
 where Dataset.Loader.Predictor: Equatable {
   public typealias Instance = Dataset.Loader.Instance
@@ -37,6 +28,9 @@ where Dataset.Loader.Predictor: Equatable {
   public let learners: [String: Learner]
 
   internal let data: NoisyLabels.Data<Instance, Predictor, Label>
+  internal let dispatchQueue = DispatchQueue(label: "Noisy Labels", attributes: .concurrent)
+  internal let dispatchGroup = DispatchGroup()
+  internal let progressBarDispatchQueue = DispatchQueue(label: "Progress Bar")
 
   public init(dataDir: URL, dataset: Dataset, learners: [String: Learner]) throws {
     self.dataDir = dataDir
@@ -58,7 +52,6 @@ where Dataset.Loader.Predictor: Equatable {
       case let .redundancy(_, repetitionCount): return repetitionCount
       }
     }.reduce(0, +)
-    let progressBarDispatchQueue = DispatchQueue(label: "Progress Bar")
     var progressBar = ProgressBar(
       count: learners.count * totalRunCount,
       configuration: [
@@ -73,9 +66,6 @@ where Dataset.Loader.Predictor: Equatable {
         return nil
       }
     }()
-    let concurrentQueue = DispatchQueue(label: "Noisy Labels Concurrent", attributes: .concurrent)
-    let serialQueue = DispatchQueue(label: "Noisy Labels Serial")
-    let dispatchGroup = DispatchGroup()
     for run in runs {
       switch run {
       case let .predictorSubsampling(predictorCount, repetitionCount):
@@ -84,12 +74,12 @@ where Dataset.Loader.Predictor: Equatable {
           [[Predictor]](repeating: data.predictors, count: repetitionCount) :
           (0..<repetitionCount).map { _ in sample(from: data.predictors, count: predictorCount) }
         for (learnerName, learner) in learners {
-          let queue = learner.supportsMultiThreading ? concurrentQueue : serialQueue
+          let flags: DispatchWorkItemFlags = learner.supportsMultiThreading ? [] : .barrier
           for repetition in 0..<predictorSamples.count {
-            queue.async(group: dispatchGroup) { [data] () in
+            dispatchQueue.async(group: dispatchGroup, flags: flags) { [data] () in
               dispatchSemaphore?.wait()
               defer { dispatchSemaphore?.signal() }
-              progressBarDispatchQueue.sync { progressBar.next() }
+              self.progressBarDispatchQueue.sync { progressBar.next() }
               let filteredData = data.filtered(
                 predictors: predictorSamples[repetition],
                 keepInstances: true)
@@ -123,11 +113,11 @@ where Dataset.Loader.Predictor: Equatable {
           // TODO: resetSeed()
           let filteredData = data.withMaxRedundancy(maxRedundancy)
           for (learnerName, learner) in learners {
-            let queue = learner.supportsMultiThreading ? concurrentQueue : serialQueue
-            queue.async(group: dispatchGroup) { [data] () in
+            let flags: DispatchWorkItemFlags = learner.supportsMultiThreading ? [] : .barrier
+            dispatchQueue.async(group: dispatchGroup, flags: flags) { [data] () in
               dispatchSemaphore?.wait()
               defer { dispatchSemaphore?.signal() }
-              progressBarDispatchQueue.sync { progressBar.next() }
+              self.progressBarDispatchQueue.sync { progressBar.next() }
               var learner = learner.createFn(filteredData)
               learner.train(using: filteredData)
               let result = EvaluationResult(merging: learner.evaluatePerLabel(using: filteredData))

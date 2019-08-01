@@ -252,39 +252,31 @@ func decoupledLNLLearner<Instance, Predictor, Label>(
     verbose: true)
 }
 
-// Per-dataset configurations:
-//   BlueBirds:
-//     - LNL-IE-16-IH-[16, 16, 16, 16]-PE-16-PH-[] (gam=0.00)
-//     - LNL-IE-0-IH-[16, 16, 16, 16]-PE-16-PH-[] (gam=0.00)
-//   Word Similarity:
-//     - LNL-IE-16-IH-[4]-PE-16-PH-[] (gam=0.00)
-//     - LNL-IE-0-IH-[4]-PE-16-PH-[] (gam=0.00)
-
 func learners<Dataset: NoisyLabelsExperiments.Dataset>()
 -> [String: Experiment<Dataset>.Learner]
 where Dataset.Loader.Predictor: Equatable {
   var learners: [String: Experiment<Dataset>.Learner] = [
-    // "MAJ": Experiment<Dataset>.Learner(
-    //   createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
-    //   requiresFeatures: false,
-    //   supportsMultiThreading: true),
-    // "MMCE": Experiment<Dataset>.Learner(
-    //   createFn: { data in mmceLearner(data, gamma: 0.25) },
-    //   requiresFeatures: false,
-    //   supportsMultiThreading: true),
-    // "LNL-E": Experiment<Dataset>.Learner(
-    //   createFn: { data in
-    //     lnlLearner(
-    //       data,
-    //       instanceEmbeddingSize: 16,
-    //       predictorEmbeddingSize: 16,
-    //       instanceHiddenUnitCounts: [16, 16, 16, 16],
-    //       predictorHiddenUnitCounts: [],
-    //       confusionLatentSize: 1,
-    //       gamma: 0.00)
-    //   },
-    //   requiresFeatures: false,
-    //   supportsMultiThreading: true),
+    "MAJ": Experiment<Dataset>.Learner(
+      createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
+      requiresFeatures: false,
+      supportsMultiThreading: true),
+    "MMCE": Experiment<Dataset>.Learner(
+      createFn: { data in mmceLearner(data, gamma: 0.25) },
+      requiresFeatures: false,
+      supportsMultiThreading: true),
+    "LNL-E": Experiment<Dataset>.Learner(
+      createFn: { data in
+        lnlLearner(
+          data,
+          instanceEmbeddingSize: 512,
+          predictorEmbeddingSize: 512,
+          instanceHiddenUnitCounts: [512],
+          predictorHiddenUnitCounts: [],
+          confusionLatentSize: 1,
+          gamma: 0.00)
+      },
+      requiresFeatures: false,
+      supportsMultiThreading: true),
     "LNL": Experiment<Dataset>.Learner(
       createFn: { data in
       featurizedLNLLearner(
@@ -296,31 +288,18 @@ where Dataset.Loader.Predictor: Equatable {
         gamma: 0.00)
       },
       requiresFeatures: true,
-      supportsMultiThreading: true),
-    // "LNL": Experiment<Dataset>.Learner(
-    //   createFn: { data in
-    //   decoupledLNLLearner(
-    //     data,
-    //     predictorEmbeddingSize: 16,
-    //     instanceLHiddenUnitCounts: [16],
-    //     instanceQHiddenUnitCounts: [16],
-    //     predictorHiddenUnitCounts: [],
-    //     confusionLatentSize: 1,
-    //     gamma: 0.00)
-    //   },
-    //   requiresFeatures: true,
-    //   supportsMultiThreading: true)
+      supportsMultiThreading: true)
   ]
 
 #if SNORKEL
-  // learners["Snorkel"] = Experiment<Dataset>.Learner(
-  //   createFn: { _ in SnorkelLearner() },
-  //   requiresFeatures: false,
-  //   supportsMultiThreading: false)
-  // learners["MeTaL"] = Experiment<Dataset>.Learner(
-  //   createFn: { _ in MetalLearner(randomSeed: 42) },
-  //   requiresFeatures: false,
-  //   supportsMultiThreading: false)
+  learners["Snorkel"] = Experiment<Dataset>.Learner(
+    createFn: { _ in SnorkelLearner() },
+    requiresFeatures: false,
+    supportsMultiThreading: false)
+  learners["MeTaL"] = Experiment<Dataset>.Learner(
+    createFn: { _ in MetalLearner(randomSeed: 42) },
+    requiresFeatures: false,
+    supportsMultiThreading: false)
 #endif
 
   return learners
@@ -334,10 +313,10 @@ where Dataset.Loader.Predictor: Equatable {
   experiment.run(
     callback: callback,
     runs: [
-      // .redundancy(maxRedundancy: 1, repetitionCount: 10),
-      // .redundancy(maxRedundancy: 2, repetitionCount: 10),
-      // .redundancy(maxRedundancy: 5, repetitionCount: 10),
-      .redundancy(maxRedundancy: 10, repetitionCount: 1),
+      .redundancy(maxRedundancy: 1, repetitionCount: 10),
+      .redundancy(maxRedundancy: 2, repetitionCount: 10),
+      .redundancy(maxRedundancy: 5, repetitionCount: 10),
+      .redundancy(maxRedundancy: 10, repetitionCount: 10),
       // .redundancy(maxRedundancy: 20, repetitionCount: 20),
       // .redundancy(maxRedundancy: 40, repetitionCount: 20),
     ],

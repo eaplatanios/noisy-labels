@@ -15,8 +15,8 @@
 import Foundation
 import Logging
 import NoisyLabels
+import SPMUtility
 import TensorFlow
-import Utility
 
 let logger = Logger(label: "Noisy Labels Experiment")
 
@@ -40,7 +40,7 @@ extension Command: StringEnumArgument {
 
 let parser = ArgumentParser(
   usage: "<options>",
-  overview: "This executable can be used to perform 'NoisyLabels' experiments.")
+  overview: "This executable can be used to run Noisy Labels experiments.")
 let commandArgument: PositionalArgument<Command> = parser.add(
   positional: "command",
   kind: Command.self,
@@ -68,13 +68,13 @@ let parsedArguments = try parser.parse(arguments)
 let currentDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 let dataDir: Foundation.URL = {
   if let argument = parsedArguments.get(dataDirArgument) {
-    return URL(fileURLWithPath: argument.path.asString)
+    return URL(fileURLWithPath: argument.path.pathString)
   }
   return currentDir.appendingPathComponent("temp/data")
 }()
 let resultsDir: Foundation.URL = {
   if let argument = parsedArguments.get(resultsDirArgument) {
-    return URL(fileURLWithPath: argument.path.asString)
+    return URL(fileURLWithPath: argument.path.pathString)
   }
   return currentDir.appendingPathComponent("temp/results")
 }()

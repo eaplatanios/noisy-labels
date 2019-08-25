@@ -14,7 +14,6 @@
 
 import Foundation
 import NoisyLabels
-import Utility
 
 public protocol Dataset: CustomStringConvertible {
   associatedtype Loader: DataLoader

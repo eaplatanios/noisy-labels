@@ -14,8 +14,7 @@
 
 import TensorFlow
 
-public protocol Predictor: Differentiable, KeyPathIterable
-where AllDifferentiableVariables: KeyPathIterable {
+public protocol Predictor: Differentiable, KeyPathIterable {
   var instanceCount: Int { get }
   var predictorCount: Int { get }
   var labelCount: Int { get }

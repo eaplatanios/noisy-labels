@@ -14,7 +14,7 @@
 
 import Foundation
 import NoisyLabels
-import Utility
+import SPMUtility
 
 public protocol Dataset: CustomStringConvertible {
   associatedtype Loader: DataLoader

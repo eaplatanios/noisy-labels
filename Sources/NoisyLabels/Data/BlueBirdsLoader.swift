@@ -22,13 +22,17 @@ import ZIPFoundation
 public struct BlueBirdsLoader: DataLoader {
   private let url: URL = URL(
     string: "https://dl.dropboxusercontent.com/s/n5l3x6bdb9ihlon/bluebirds.zip")!
-  private let featuresURL: URL = URL(
-    string: "https://dl.dropboxusercontent.com/s/c6svvrowgekbwmd/bluebirds_features.zip")!
+  private let vggFeaturesURL: URL = URL(
+    string: "https://dl.dropboxusercontent.com/s/c6svvrowgekbwmd/bluebirds_vgg_features.zip")!
+  private let resnetFeaturesURL: URL = URL(
+    string: "https://dl.dropboxusercontent.com/s/x2b676bgxqx4q5j/bluebirds_resnet_features.zip")!
 
   public let dataDir: URL
+  public let features: Features
 
-  public init(dataDir: URL) {
+  public init(dataDir: URL, features: Features = .resnet) {
     self.dataDir = dataDir
+    self.features = features
   }
 
   public func load(withFeatures: Bool = true) throws -> Data<Int, String, Int> {
@@ -89,7 +93,14 @@ public struct BlueBirdsLoader: DataLoader {
     var instanceFeatures: [Tensor<Float>]? = nil
     if withFeatures {
       logger.info("Loading the BlueBirds dataset features.")
-      let compressedFeaturesFile = dataDir.appendingPathComponent("bluebirds_features.zip")
+      let compressedFeaturesFile = dataDir.appendingPathComponent(
+        "bluebirds_\(features.rawValue)_features.zip")
+      let featuresURL = { () -> URL in
+        switch self.features {
+        case .vgg: return vggFeaturesURL
+        case .resnet: return resnetFeaturesURL
+        }
+      }()
       try maybeDownload(from: featuresURL, to: compressedFeaturesFile)
       let extractedFeaturesDir = compressedFeaturesFile.deletingPathExtension()
       if !FileManager.default.fileExists(atPath: extractedFeaturesDir.path) {
@@ -115,5 +126,11 @@ public struct BlueBirdsLoader: DataLoader {
       predictedLabels: [0: predictedLabels],
       classCounts: [2],
       instanceFeatures: instanceFeatures)
+  }
+}
+
+extension BlueBirdsLoader {
+  public enum Features: String {
+    case vgg, resnet
   }
 }

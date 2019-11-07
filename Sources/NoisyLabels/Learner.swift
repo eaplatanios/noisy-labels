@@ -323,7 +323,7 @@ public struct TwoStepLearner<AggregationLearner: Learner, BaseLearner: Learner>:
       uniqueKeysWithValues: zip(data.labelIndices, labelProbabilities).map {
         ($0, [0: (
           instances: data.instanceIndices,
-          values: $1.scalars.map { $0 > 0.5 ? Float(1) : Float(0) })])
+          values: $1.argmax(squeezingAxis: -1).scalars.map(Float.init))])
       })
     let aggregatedData = Data(
       instances: data.instances,
@@ -331,7 +331,10 @@ public struct TwoStepLearner<AggregationLearner: Learner, BaseLearner: Learner>:
       labels: data.labels,
       trueLabels: data.trueLabels,
       predictedLabels: aggregatedLabels,
-      classCounts: data.classCounts)
+      classCounts: data.classCounts,
+      instanceFeatures: data.instanceFeatures,
+      predictorFeatures: nil,
+      labelFeatures: data.labelFeatures)
     if verbose { logger.info("Training the main learner.") }
     baseLearner.train(using: aggregatedData)
   }

@@ -122,15 +122,15 @@ public struct Data<Instance, Predictor, Label> {
   }
 
   public var instanceIndices: [Int] {
-    return [Int](0..<instances.count)
+    [Int](0..<instances.count)
   }
 
   public var predictorIndices: [Int] {
-    return [Int](0..<predictors.count)
+    [Int](0..<predictors.count)
   }
 
   public var labelIndices: [Int] {
-    return [Int](0..<labels.count)
+    [Int](0..<labels.count)
   }
 
   public var avgLabelsPerPredictor: Float {

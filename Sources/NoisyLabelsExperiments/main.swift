@@ -128,7 +128,7 @@ func mmceLearner<Instance, Predictor, Label>(
     verbose: false)
 }
 
-func twoStepMmceLnlLearner<Instance, Predictor, Label>(
+func twoStepMmceLearner<Instance, Predictor, Label>(
   _ data: NoisyLabels.Data<Instance, Predictor, Label>,
   instanceEmbeddingSize: Int?,
   predictorEmbeddingSize: Int?,
@@ -137,7 +137,7 @@ func twoStepMmceLnlLearner<Instance, Predictor, Label>(
   confusionLatentSize: Int,
   gamma: Float
 ) -> Learner {
-  let aggregationPredictor = MinimaxConditionalEntropyPredictor(data: data, gamma: gamma)
+  let aggregationPredictor = MinimaxConditionalEntropyPredictor(data: data, gamma: 0.25)
   let aggregationOptimizer = Adam(
     for: aggregationPredictor,
     learningRate: 1e-3,
@@ -171,7 +171,7 @@ func twoStepMmceLnlLearner<Instance, Predictor, Label>(
     gamma: gamma)
   let baseOptimizer = Adam(
     for: basePredictor,
-    learningRate: 1e-4,
+    learningRate: 1e-3,
     beta1: 0.9,
     beta2: 0.99,
     epsilon: 1e-8,
@@ -198,7 +198,7 @@ func twoStepMmceLnlLearner<Instance, Predictor, Label>(
     verbose: true)
 }
 
-func twoStepMmceFeaturizedLnlLearner<Instance, Predictor, Label>(
+func twoStepMmceFeaturizedLearner<Instance, Predictor, Label>(
   _ data: NoisyLabels.Data<Instance, Predictor, Label>,
   predictorEmbeddingSize: Int,
   instanceHiddenUnitCounts: [Int],
@@ -206,7 +206,7 @@ func twoStepMmceFeaturizedLnlLearner<Instance, Predictor, Label>(
   confusionLatentSize: Int,
   gamma: Float
 ) -> Learner {
-  let aggregationPredictor = MinimaxConditionalEntropyPredictor(data: data, gamma: gamma)
+  let aggregationPredictor = MinimaxConditionalEntropyPredictor(data: data, gamma: 0.25)
   let aggregationOptimizer = Adam(
     for: aggregationPredictor,
     learningRate: 1e-3,
@@ -239,7 +239,7 @@ func twoStepMmceFeaturizedLnlLearner<Instance, Predictor, Label>(
     gamma: gamma)
   let baseOptimizer = Adam(
     for: basePredictor,
-    learningRate: 1e-4,
+    learningRate: 1e-3,
     beta1: 0.9,
     beta2: 0.99,
     epsilon: 1e-8,
@@ -404,7 +404,7 @@ where Dataset.Loader.Predictor: Equatable {
 //      supportsMultiThreading: true),
     "MMCE-ME": Experiment<Dataset>.Learner(
       createFn: { data in
-        twoStepMmceLnlLearner(
+        twoStepMmceLearner(
           data,
           instanceEmbeddingSize: 512,
           predictorEmbeddingSize: 512,
@@ -417,7 +417,7 @@ where Dataset.Loader.Predictor: Equatable {
       supportsMultiThreading: true),
     "MMCE-M": Experiment<Dataset>.Learner(
       createFn: { data in
-        twoStepMmceFeaturizedLnlLearner(
+        twoStepMmceFeaturizedLearner(
           data,
           predictorEmbeddingSize: 512,
           instanceHiddenUnitCounts: [512],
@@ -442,13 +442,13 @@ where Dataset.Loader.Predictor: Equatable {
 //      supportsMultiThreading: true),
 //    "LNL": Experiment<Dataset>.Learner(
 //      createFn: { data in
-//      featurizedLNLLearner(
-//        data,
-//        predictorEmbeddingSize: 512,
-//        instanceHiddenUnitCounts: [512],
-//        predictorHiddenUnitCounts: [],
-//        confusionLatentSize: 1,
-//        gamma: 0.00)
+//        featurizedLNLLearner(
+//          data,
+//          predictorEmbeddingSize: 16,
+//          instanceHiddenUnitCounts: [16, 16, 16, 16],
+//          predictorHiddenUnitCounts: [],
+//          confusionLatentSize: 1,
+//          gamma: 0.00)
 //      },
 //      requiresFeatures: true,
 //      supportsMultiThreading: true)
@@ -476,9 +476,9 @@ where Dataset.Loader.Predictor: Equatable {
   experiment.run(
     callback: callback,
     runs: [
-      .redundancy(maxRedundancy: 1, repetitionCount: 10),
-      .redundancy(maxRedundancy: 2, repetitionCount: 10),
-      .redundancy(maxRedundancy: 5, repetitionCount: 10),
+//      .redundancy(maxRedundancy: 1, repetitionCount: 10),
+//      .redundancy(maxRedundancy: 2, repetitionCount: 10),
+//      .redundancy(maxRedundancy: 5, repetitionCount: 10),
       .redundancy(maxRedundancy: 10, repetitionCount: 10),
       // .redundancy(maxRedundancy: 20, repetitionCount: 20),
       // .redundancy(maxRedundancy: 40, repetitionCount: 20),

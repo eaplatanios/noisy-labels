@@ -64,7 +64,7 @@ public extension DataLoader {
   }
 }
 
-internal class DataDownloadDelegate : NSObject, URLSessionDownloadDelegate {
+internal class DataDownloadDelegate: NSObject, URLSessionDownloadDelegate {
   let destinationFileUrl: URL
   let semaphore: DispatchSemaphore
   let numBytesFrequency: Int64 

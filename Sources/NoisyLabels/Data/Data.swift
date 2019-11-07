@@ -84,7 +84,7 @@ public struct Data<Instance, Predictor, Label> {
   public let instances: [Instance]
   public let predictors: [Predictor]
   public let labels: [Label]
-  
+
   /// Contains the true label value per label and per instance.
   public let trueLabels: [Int: [Int: Int]]
 

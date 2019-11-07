@@ -25,8 +25,8 @@ public func logSoftmax<T: TensorFlowFloatingPoint>(
 }
 
 public struct Pair<Element1: Differentiable, Element2: Differentiable>: Differentiable {
-  @differentiable public var first: Element1
-  @differentiable public var second: Element2
+  public var first: Element1
+  public var second: Element2
 
   @inlinable
   @differentiable
@@ -98,11 +98,55 @@ public extension Array where Element: Differentiable {
   }
 }
 
+public struct MaskPair<Value: Differentiable>: Differentiable {
+  public var value: Value
+  @noDerivative public var mask: Tensor<Bool>
+
+  @inlinable
+  @differentiable(wrt: value)
+  public init(value: Value, mask: Tensor<Bool>) {
+    self.value = value
+    self.mask = mask
+  }
+}
+
+@inlinable
+@differentiable(wrt: values, vjp: _vjpMaskZip)
+internal func maskZip(
+  values: [Tensor<Float>],
+  masks: [Tensor<Bool>]
+) -> [MaskPair<Tensor<Float>>] {
+  var result = [MaskPair<Tensor<Float>>]()
+  result.reserveCapacity(masks.count)
+  for l in masks.indices {
+    result.append(MaskPair(value: values[l], mask: masks[l]))
+  }
+  return result
+}
+
+@inlinable
+internal func _vjpMaskZip(
+  values: [Tensor<Float>],
+  masks: [Tensor<Bool>]
+) -> ([MaskPair<Tensor<Float>>], (Array<MaskPair<Tensor<Float>>>.TangentVector) -> (
+  Array<Tensor<Float>>.TangentVector
+)) {
+  (
+    maskZip(values: values, masks: masks),
+    { v in
+      var p = [Tensor<Float>](repeating: Tensor<Float>.zero, count: values.count)
+      for i in v.base.indices {
+        if i < values.count { p[i] = v[i].value }
+      }
+      return Array<Tensor<Float>>.TangentVector(p)
+    })
+}
+
 public struct ModelParameters: Differentiable {
   @noDerivative public let labelMask: Tensor<Bool>
   @noDerivative public var eStepAccumulator: Tensor<Float>
-  @differentiable public var labelProbabilities: Tensor<Float>
-  @differentiable public var qualities: Tensor<Float>
+  public var labelProbabilities: Tensor<Float>
+  public var qualities: Tensor<Float>
 
   @inlinable
   @differentiable(wrt: (labelProbabilities, qualities))

@@ -88,13 +88,13 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
   }
 
   public mutating func executeMStep(using data: TrainingData, majorityVote: Bool) -> Float {
-    let majorityVote = Tensor<Float>(majorityVote ? 0 : 1)
+    // let majorityVote = Tensor<Float>(majorityVote ? 0 : 1)
     let labelMasks = self.labelMasks(for: data.labels)
     let (negativeLogLikelihood, gradient) = predictor.valueWithGradient { [
       eStepAccumulators, useSoftPredictions, entropyWeight
     ] predictor -> Tensor<Float> in
       let predictions = predictor(data.instances, data.predictors, data.labels)
-      let includePredictionsPrior = withoutDerivative(at: predictions.includePredictionsPrior)
+      // let includePredictionsPrior = withoutDerivative(at: predictions.includePredictionsPrior)
       return modelZip(
         labelMasks: labelMasks,
         eStepAccumulators: eStepAccumulators,

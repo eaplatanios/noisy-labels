@@ -115,7 +115,7 @@ where Dataset.Loader.Predictor: Equatable {
           let filteredData = data.withMaxRedundancy(maxRedundancy)
           for (learnerName, learner) in learners {
             let queue = learner.supportsMultiThreading ? concurrentQueue : serialQueue
-            queue.async(group: dispatchGroup) { [data] () in
+            queue.async(group: dispatchGroup) { () in
               dispatchSemaphore?.wait()
               defer { dispatchSemaphore?.signal() }
               self.progressBarDispatchQueue.sync { progressBar.next() }

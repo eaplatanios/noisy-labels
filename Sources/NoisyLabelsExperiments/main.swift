@@ -30,7 +30,7 @@ enum Command: String {
 
 extension Command: StringEnumArgument {
   public static var completion: ShellCompletion {
-    return .values([
+    .values([
       (Command.run.rawValue, "Runs an experiment."),
       (Command.makeFigures.rawValue, "Generates figures with the results of an experiment."),
       (Command.makeTables.rawValue, "Generates tables with the results of an experiment.")

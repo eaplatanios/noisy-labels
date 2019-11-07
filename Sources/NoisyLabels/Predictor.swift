@@ -41,9 +41,9 @@ public protocol Predictor: Differentiable, KeyPathIterable {
 }
 
 public struct Predictions: Differentiable {
-  @differentiable public var labelProbabilities: [Tensor<Float>]
-  @differentiable public var qualities: [Tensor<Float>]
-  @differentiable public var regularizationTerm: Tensor<Float>
+  public var labelProbabilities: [Tensor<Float>]
+  public var qualities: [Tensor<Float>]
+  public var regularizationTerm: Tensor<Float>
   @noDerivative public let includePredictionsPrior: Bool
 
   @inlinable

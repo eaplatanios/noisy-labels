@@ -128,6 +128,144 @@ func mmceLearner<Instance, Predictor, Label>(
     verbose: false)
 }
 
+func twoStepMmceLnlLearner<Instance, Predictor, Label>(
+  _ data: NoisyLabels.Data<Instance, Predictor, Label>,
+  instanceEmbeddingSize: Int?,
+  predictorEmbeddingSize: Int?,
+  instanceHiddenUnitCounts: [Int],
+  predictorHiddenUnitCounts: [Int],
+  confusionLatentSize: Int,
+  gamma: Float
+) -> Learner {
+  let aggregationPredictor = MinimaxConditionalEntropyPredictor(data: data, gamma: gamma)
+  let aggregationOptimizer = Adam(
+    for: aggregationPredictor,
+    learningRate: 1e-3,
+    beta1: 0.9,
+    beta2: 0.99,
+    epsilon: 1e-8,
+    decay: 0)
+  let aggregationModel = EMModel(
+    predictor: aggregationPredictor,
+    optimizer: aggregationOptimizer,
+    entropyWeight: 0.0,
+    useSoftPredictions: false,
+    learningRateDecayFactor: 1.0)
+  let aggregationLearner = EMLearner(
+    for: aggregationModel,
+    randomSeed: 42,
+    batchSize: 128,
+    useWarmStarting: true,
+    mStepCount: 1000,
+    emStepCount: 5,
+    marginalStepCount: 0,
+    mStepLogCount: 100,
+    verbose: false)
+  let basePredictor = LNLPredictor(
+    data: data,
+    instanceEmbeddingSize: instanceEmbeddingSize,
+    predictorEmbeddingSize: predictorEmbeddingSize,
+    instanceHiddenUnitCounts: instanceHiddenUnitCounts,
+    predictorHiddenUnitCounts: predictorHiddenUnitCounts,
+    confusionLatentSize: confusionLatentSize,
+    gamma: gamma)
+  let baseOptimizer = Adam(
+    for: basePredictor,
+    learningRate: 1e-4,
+    beta1: 0.9,
+    beta2: 0.99,
+    epsilon: 1e-8,
+    decay: 0)
+  let baseModel = EMModel(
+    predictor: basePredictor,
+    optimizer: baseOptimizer,
+    entropyWeight: 0.01,
+    useSoftPredictions: true,
+    learningRateDecayFactor: 0.995)
+  let baseLearner = EMLearner(
+    for: baseModel,
+    randomSeed: 42,
+    batchSize: 512,
+    useWarmStarting: true,
+    mStepCount: 1000,
+    emStepCount: 1,
+    marginalStepCount: 0,
+    mStepLogCount: 100,
+    verbose: true)
+  return TwoStepLearner(
+    aggregationLearner: aggregationLearner,
+    baseLearner: baseLearner,
+    verbose: true)
+}
+
+func twoStepMmceFeaturizedLnlLearner<Instance, Predictor, Label>(
+  _ data: NoisyLabels.Data<Instance, Predictor, Label>,
+  predictorEmbeddingSize: Int,
+  instanceHiddenUnitCounts: [Int],
+  predictorHiddenUnitCounts: [Int],
+  confusionLatentSize: Int,
+  gamma: Float
+) -> Learner {
+  let aggregationPredictor = MinimaxConditionalEntropyPredictor(data: data, gamma: gamma)
+  let aggregationOptimizer = Adam(
+    for: aggregationPredictor,
+    learningRate: 1e-3,
+    beta1: 0.9,
+    beta2: 0.99,
+    epsilon: 1e-8,
+    decay: 0)
+  let aggregationModel = EMModel(
+    predictor: aggregationPredictor,
+    optimizer: aggregationOptimizer,
+    entropyWeight: 0.0,
+    useSoftPredictions: false,
+    learningRateDecayFactor: 1.0)
+  let aggregationLearner = EMLearner(
+    for: aggregationModel,
+    randomSeed: 42,
+    batchSize: 128,
+    useWarmStarting: true,
+    mStepCount: 1000,
+    emStepCount: 5,
+    marginalStepCount: 0,
+    mStepLogCount: 100,
+    verbose: false)
+  let basePredictor = FeaturizedLNLPredictor(
+    data: data,
+    predictorEmbeddingSize: predictorEmbeddingSize,
+    instanceHiddenUnitCounts: instanceHiddenUnitCounts,
+    predictorHiddenUnitCounts: predictorHiddenUnitCounts,
+    confusionLatentSize: confusionLatentSize,
+    gamma: gamma)
+  let baseOptimizer = Adam(
+    for: basePredictor,
+    learningRate: 1e-4,
+    beta1: 0.9,
+    beta2: 0.99,
+    epsilon: 1e-8,
+    decay: 0)
+  let baseModel = EMModel(
+    predictor: basePredictor,
+    optimizer: baseOptimizer,
+    entropyWeight: 0.01,
+    useSoftPredictions: true,
+    learningRateDecayFactor: 0.995)
+  let baseLearner = EMLearner(
+    for: baseModel,
+    randomSeed: 42,
+    batchSize: 512,
+    useWarmStarting: true,
+    mStepCount: 1000,
+    emStepCount: 1,
+    marginalStepCount: 0,
+    mStepLogCount: 100,
+    verbose: true)
+  return TwoStepLearner(
+    aggregationLearner: aggregationLearner,
+    baseLearner: baseLearner,
+    verbose: true)
+}
+
 func lnlLearner<Instance, Predictor, Label>(
   _ data: NoisyLabels.Data<Instance, Predictor, Label>,
   instanceEmbeddingSize: Int?,
@@ -256,17 +394,17 @@ func learners<Dataset: NoisyLabelsExperiments.Dataset>()
 -> [String: Experiment<Dataset>.Learner]
 where Dataset.Loader.Predictor: Equatable {
   var learners: [String: Experiment<Dataset>.Learner] = [
-    "MAJ": Experiment<Dataset>.Learner(
-      createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
-      requiresFeatures: false,
-      supportsMultiThreading: true),
-    "MMCE": Experiment<Dataset>.Learner(
-      createFn: { data in mmceLearner(data, gamma: 0.25) },
-      requiresFeatures: false,
-      supportsMultiThreading: true),
-    "LNL-E": Experiment<Dataset>.Learner(
+//    "MAJ": Experiment<Dataset>.Learner(
+//      createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
+//      requiresFeatures: false,
+//      supportsMultiThreading: true),
+//    "MMCE": Experiment<Dataset>.Learner(
+//      createFn: { data in mmceLearner(data, gamma: 0.25) },
+//      requiresFeatures: false,
+//      supportsMultiThreading: true),
+    "MMCE-ME": Experiment<Dataset>.Learner(
       createFn: { data in
-        lnlLearner(
+        twoStepMmceLnlLearner(
           data,
           instanceEmbeddingSize: 512,
           predictorEmbeddingSize: 512,
@@ -275,20 +413,45 @@ where Dataset.Loader.Predictor: Equatable {
           confusionLatentSize: 1,
           gamma: 0.00)
       },
-      requiresFeatures: false,
+      requiresFeatures: true,
       supportsMultiThreading: true),
-    "LNL": Experiment<Dataset>.Learner(
+    "MMCE-M": Experiment<Dataset>.Learner(
       createFn: { data in
-      featurizedLNLLearner(
-        data,
-        predictorEmbeddingSize: 512,
-        instanceHiddenUnitCounts: [512],
-        predictorHiddenUnitCounts: [],
-        confusionLatentSize: 1,
-        gamma: 0.00)
+        twoStepMmceFeaturizedLnlLearner(
+          data,
+          predictorEmbeddingSize: 512,
+          instanceHiddenUnitCounts: [512],
+          predictorHiddenUnitCounts: [],
+          confusionLatentSize: 1,
+          gamma: 0.00)
       },
       requiresFeatures: true,
-      supportsMultiThreading: true)
+      supportsMultiThreading: true),
+//    "LNL-E": Experiment<Dataset>.Learner(
+//      createFn: { data in
+//        lnlLearner(
+//          data,
+//          instanceEmbeddingSize: 512,
+//          predictorEmbeddingSize: 512,
+//          instanceHiddenUnitCounts: [512],
+//          predictorHiddenUnitCounts: [],
+//          confusionLatentSize: 1,
+//          gamma: 0.00)
+//      },
+//      requiresFeatures: false,
+//      supportsMultiThreading: true),
+//    "LNL": Experiment<Dataset>.Learner(
+//      createFn: { data in
+//      featurizedLNLLearner(
+//        data,
+//        predictorEmbeddingSize: 512,
+//        instanceHiddenUnitCounts: [512],
+//        predictorHiddenUnitCounts: [],
+//        confusionLatentSize: 1,
+//        gamma: 0.00)
+//      },
+//      requiresFeatures: true,
+//      supportsMultiThreading: true)
   ]
 
 #if SNORKEL

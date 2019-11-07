@@ -293,7 +293,60 @@ public struct EMLearner<
       concatenatedQualities[0]
     return aggregatedQualities
       .reshaped(to: [labels.count, instances.count, predictors.count])
-      .transposed(withPermutations: 1, 0, 2)
+      .transposed(permutation: 1, 0, 2)
+  }
+}
+
+public struct TwoStepLearner<AggregationLearner: Learner, BaseLearner: Learner>: Learner {
+  public private(set) var aggregationLearner: AggregationLearner
+  public private(set) var baseLearner: BaseLearner
+
+  public let verbose: Bool
+
+  public init(
+    aggregationLearner: AggregationLearner,
+    baseLearner: BaseLearner,
+    verbose: Bool = false
+  ) {
+    self.aggregationLearner = aggregationLearner
+    self.baseLearner = baseLearner
+    self.verbose = verbose
+  }
+
+  public mutating func train<Instance, Predictor, Label>(
+    using data: Data<Instance, Predictor, Label>
+  ) {
+    if verbose { logger.info("Training the aggregation learner.") }
+    aggregationLearner.train(using: data)
+    let labelProbabilities = aggregationLearner.labelProbabilities(data.instanceIndices)
+    let aggregatedLabels = [Int: [Int: (instances: [Int], values: [Float])]](
+      uniqueKeysWithValues: zip(data.labelIndices, labelProbabilities).map {
+        ($0, [0: (
+          instances: data.instanceIndices,
+          values: $1.scalars.map { $0 > 0.5 ? Float(1) : Float(0) })])
+      })
+    let aggregatedData = Data(
+      instances: data.instances,
+      predictors: [0],
+      labels: data.labels,
+      trueLabels: data.trueLabels,
+      predictedLabels: aggregatedLabels,
+      classCounts: data.classCounts)
+    if verbose { logger.info("Training the main learner.") }
+    baseLearner.train(using: aggregatedData)
+  }
+
+  public func labelProbabilities(_ instances: [Int]) -> [Tensor<Float>] {
+    baseLearner.labelProbabilities(instances)
+  }
+
+  public func qualities(
+    _ instances: [Int],
+    _ predictors: [Int],
+    _ labels: [Int]
+  ) -> Tensor<Float> {
+    // TODO: Replace with an optional return type. This is currently a placeholder value.
+    -Tensor<Float>(ones: [instances.count, predictors.count, labels.count])
   }
 }
 

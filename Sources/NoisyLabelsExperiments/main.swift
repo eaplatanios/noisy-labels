@@ -302,8 +302,8 @@ func lnlLearner<Instance, Predictor, Label>(
     batchSize: 512,
     useWarmStarting: true,
     mStepCount: 1000,
-    emStepCount: 5,
-    marginalStepCount: 0,
+    emStepCount: 2,
+    marginalStepCount: 1000,
     mStepLogCount: 100,
     verbose: true)
 }
@@ -325,7 +325,7 @@ func featurizedLNLLearner<Instance, Predictor, Label>(
     gamma: gamma)
   let optimizer = Adam(
     for: predictor,
-    learningRate: 1e-3,
+    learningRate: 1e-4,
     beta1: 0.9,
     beta2: 0.99,
     epsilon: 1e-8,
@@ -333,13 +333,13 @@ func featurizedLNLLearner<Instance, Predictor, Label>(
   let model = EMModel(
     predictor: predictor,
     optimizer: optimizer,
-    entropyWeight: 0.0,
+    entropyWeight: 0.01,
     useSoftPredictions: true,
-    learningRateDecayFactor: 0.997)
+    learningRateDecayFactor: 0.995)
   return EMLearner(
     for: model,
     randomSeed: 42,
-    batchSize: 128,
+    batchSize: 512,
     useWarmStarting: true,
     mStepCount: 1000,
     emStepCount: 2,
@@ -394,14 +394,14 @@ func learners<Dataset: NoisyLabelsExperiments.Dataset>()
 -> [String: Experiment<Dataset>.Learner]
 where Dataset.Loader.Predictor: Equatable {
   var learners: [String: Experiment<Dataset>.Learner] = [
-//    "MAJ": Experiment<Dataset>.Learner(
-//      createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
-//      requiresFeatures: false,
-//      supportsMultiThreading: true),
-//    "MMCE": Experiment<Dataset>.Learner(
-//      createFn: { data in mmceLearner(data, gamma: 0.25) },
-//      requiresFeatures: false,
-//      supportsMultiThreading: true),
+    "MAJ": Experiment<Dataset>.Learner(
+      createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
+      requiresFeatures: false,
+      supportsMultiThreading: true),
+    "MMCE": Experiment<Dataset>.Learner(
+      createFn: { data in mmceLearner(data, gamma: 0.25) },
+      requiresFeatures: false,
+      supportsMultiThreading: true),
     "MMCE-ME": Experiment<Dataset>.Learner(
       createFn: { data in
         twoStepMmceLearner(
@@ -427,31 +427,31 @@ where Dataset.Loader.Predictor: Equatable {
       },
       requiresFeatures: true,
       supportsMultiThreading: true),
-//    "LNL-E": Experiment<Dataset>.Learner(
-//      createFn: { data in
-//        lnlLearner(
-//          data,
-//          instanceEmbeddingSize: 512,
-//          predictorEmbeddingSize: 512,
-//          instanceHiddenUnitCounts: [512],
-//          predictorHiddenUnitCounts: [],
-//          confusionLatentSize: 1,
-//          gamma: 0.00)
-//      },
-//      requiresFeatures: false,
-//      supportsMultiThreading: true),
-//    "LNL": Experiment<Dataset>.Learner(
-//      createFn: { data in
-//        featurizedLNLLearner(
-//          data,
-//          predictorEmbeddingSize: 16,
-//          instanceHiddenUnitCounts: [16, 16, 16, 16],
-//          predictorHiddenUnitCounts: [],
-//          confusionLatentSize: 1,
-//          gamma: 0.00)
-//      },
-//      requiresFeatures: true,
-//      supportsMultiThreading: true)
+    "LNL-E": Experiment<Dataset>.Learner(
+      createFn: { data in
+        lnlLearner(
+          data,
+          instanceEmbeddingSize: 512,
+          predictorEmbeddingSize: 512,
+          instanceHiddenUnitCounts: [512],
+          predictorHiddenUnitCounts: [],
+          confusionLatentSize: 1,
+          gamma: 0.00)
+      },
+      requiresFeatures: false,
+      supportsMultiThreading: true),
+    "LNL": Experiment<Dataset>.Learner(
+      createFn: { data in
+        featurizedLNLLearner(
+          data,
+          predictorEmbeddingSize: 512,
+          instanceHiddenUnitCounts: [512],
+          predictorHiddenUnitCounts: [],
+          confusionLatentSize: 1,
+          gamma: 0.00)
+      },
+      requiresFeatures: true,
+      supportsMultiThreading: true)
   ]
 
 #if SNORKEL
@@ -477,11 +477,11 @@ where Dataset.Loader.Predictor: Equatable {
     callback: callback,
     runs: [
 //      .redundancy(maxRedundancy: 1, repetitionCount: 10),
-//      .redundancy(maxRedundancy: 2, repetitionCount: 10),
-//      .redundancy(maxRedundancy: 5, repetitionCount: 10),
+      .redundancy(maxRedundancy: 2, repetitionCount: 10),
+      .redundancy(maxRedundancy: 5, repetitionCount: 10),
       .redundancy(maxRedundancy: 10, repetitionCount: 10),
-      // .redundancy(maxRedundancy: 20, repetitionCount: 20),
-      // .redundancy(maxRedundancy: 40, repetitionCount: 20),
+//      .redundancy(maxRedundancy: 20, repetitionCount: 10),
+//      .redundancy(maxRedundancy: 40, repetitionCount: 10),
     ],
     parallelismLimit: parallelismLimit)
 }

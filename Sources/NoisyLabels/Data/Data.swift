@@ -314,19 +314,16 @@ extension Data {
           if let trueLabel = trueLabels[l]?[i] {
             if trueLabel == 0 {
               if v >= 0.5 {
-                numConfused[l * predictors.count + p * 4 + 1] += 1
+                numConfused[l * predictors.count * 4 + p * 4 + 1] += 1
               } else {
-                numConfused[l * predictors.count + p * 4] += 1
+                numConfused[l * predictors.count * 4 + p * 4] += 1
               }
             } else {
               if v >= 0.5 {
-                numConfused[l * predictors.count + p * 4 + 3] += 1
+                numConfused[l * predictors.count * 4 + p * 4 + 3] += 1
               } else {
-                numConfused[l * predictors.count + p * 4 + 2] += 1
+                numConfused[l * predictors.count * 4 + p * 4 + 2] += 1
               }
-            }
-            if trueLabel == (v >= 0.5 ? 1 : 0) {
-              numConfused[l * predictors.count + p] += 1
             }
             numTotal[l * predictors.count + p] += 1
           }
@@ -336,7 +333,7 @@ extension Data {
     let l = labels.count
     let p = predictors.count
     let numConfusedTensor = Tensor<Float>(shape: [l, p, 2, 2], scalars: numConfused)
-    let numTotalTensor = Tensor<Float>(shape: [l, p], scalars: numTotal)
+    let numTotalTensor = Tensor<Float>(shape: [l, p, 1, 1], scalars: numTotal)
     return numConfusedTensor / numTotalTensor
   }
 }

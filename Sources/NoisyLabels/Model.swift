@@ -29,7 +29,8 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
   public private(set) var predictor: Predictor
   public private(set) var optimizer: Optimizer
 
-  private var eStepAccumulators: [Tensor<Float>]
+  public private(set) var eStepAccumulators: [Tensor<Float>]
+  public private(set) var expectedLabels: [Tensor<Float>] = []
 
   public init(
     predictor: Predictor,
@@ -63,13 +64,13 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
     let labelMasks = self.labelMasks(for: data.labels)
     let qLogs = predictor.qualities(data.instances, data.predictors, data.labels)
     for l in 0..<labelCount {
-      let qLog = qLogs[l].gathering(where: labelMasks[l])
+      let qLog = logSoftmax(qLogs[l].gathering(where: labelMasks[l]), alongAxis: 1)
       let values = data.values.gathering(where: labelMasks[l])
       let yHat = useSoftPredictions && classCounts[l] == 2 ?
         Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
         Tensor<Float>(oneHotAtIndices: Tensor<Int32>(values), depth: classCounts[l])
       let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
-      eStepAccumulators[l] = Raw.tensorScatterAdd(
+      eStepAccumulators[l] = _Raw.tensorScatterAdd(
         eStepAccumulators[l],
         indices: data.instances.gathering(where: labelMasks[l]).expandingShape(at: -1),
         updates: majorityVote ? yHat : qLogYHat)
@@ -77,9 +78,8 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
   }
 
   public mutating func finalizeEStep(majorityVote: Bool) {
-    if majorityVote {
-      eStepAccumulators = eStepAccumulators.map(log)
-    }
+    if majorityVote { eStepAccumulators = eStepAccumulators.map(log) }
+    expectedLabels = eStepAccumulators.map { exp($0 - $0.logSumExp(alongAxes: -1)) }
   }
 
   public mutating func prepareForMStep() {
@@ -87,17 +87,15 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
     optimizer.learningRate = initialLearningRate
   }
 
-  public mutating func executeMStep(using data: TrainingData, majorityVote: Bool) -> Float {
-    // let majorityVote = Tensor<Float>(majorityVote ? 0 : 1)
+  public mutating func executeMStep(using data: TrainingData) -> Float {
     let labelMasks = self.labelMasks(for: data.labels)
     let (negativeLogLikelihood, gradient) = predictor.valueWithGradient { [
-      eStepAccumulators, useSoftPredictions, entropyWeight
+      expectedLabels, useSoftPredictions, entropyWeight
     ] predictor -> Tensor<Float> in
       let predictions = predictor(data.instances, data.predictors, data.labels)
-      // let includePredictionsPrior = withoutDerivative(at: predictions.includePredictionsPrior)
       return modelZip(
         labelMasks: labelMasks,
-        eStepAccumulators: eStepAccumulators,
+        expectedLabels: expectedLabels,
         labelProbabilities: predictions.labelProbabilities,
         qualities: predictions.qualities
       ).differentiableMap { parameters -> Tensor<Float> in
@@ -109,14 +107,9 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
           Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
           Tensor<Float>(oneHotAtIndices: Tensor<Int32>(values), depth: classCount) }()
         let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
-        let yAccumulated = parameters.eStepAccumulator.gathering(
+        let yExpected = parameters.expectedLabels.gathering(
           atIndices: data.instances.gathering(where: parameters.labelMask))
-        // let yAccumulatedHLog = includePredictionsPrior ?
-        //   yAccumulated + withoutDerivative(at: hLog) * majorityVote :
-        //   yAccumulated + log(0.5) * majorityVote
-        // let yExpected = exp(yAccumulatedHLog - yAccumulatedHLog.logSumExp(alongAxes: -1))
-        let yExpected = exp(yAccumulated - yAccumulated.logSumExp(alongAxes: -1))
-        return entropyWeight * (exp(hLog) * hLog).sum() - 
+        return entropyWeight * (exp(hLog) * hLog).sum() -
           (yExpected * hLog).sum() -
           (yExpected * qLogYHat).sum()
       }.differentiableReduce(predictions.regularizationTerm, { $0 + $1 })
@@ -129,12 +122,12 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
   public mutating func executeMarginalStep(using data: TrainingData) -> Float {
     let labelMasks = self.labelMasks(for: data.labels)
     let (negativeLogLikelihood, gradient) = predictor.valueWithGradient { [
-      eStepAccumulators, useSoftPredictions, entropyWeight
+      expectedLabels, useSoftPredictions, entropyWeight
     ] predictor -> Tensor<Float> in
       let predictions = predictor(data.instances, data.predictors, data.labels)
       return modelZip(
         labelMasks: labelMasks,
-        eStepAccumulators: eStepAccumulators, // TODO: Remove this from here.
+        expectedLabels: expectedLabels, // TODO: Remove this from here.
         labelProbabilities: predictions.labelProbabilities,
         qualities: predictions.qualities
       ).differentiableMap { parameters -> Tensor<Float> in
@@ -176,6 +169,12 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
   }
 
   public func labelProbabilities(_ instances: Tensor<Int32>) -> [Tensor<Float>] {
+//    var probabilities = [Tensor<Float>]()
+//    for i in 0..<expectedLabels.count {
+//      probabilities.append(exp(expectedLabels[i].gathering(atIndices: instances)))
+//    }
+//    return probabilities
+//    expectedLabels.map { exp($0.gathering(atIndices: instances)) }
     predictor.labelProbabilities(instances).map(exp)
   }
 
@@ -189,8 +188,8 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
     return (0..<labelCount).map { l -> Tensor<Float> in
       let hLog = predictions.labelProbabilities[l].gathering(where: labelMasks[l])
       let qLog = predictions.qualities[l].gathering(where: labelMasks[l])
-      let qLogHLog = qLog + hLog.expandingShape(at: -1)
-      return Raw.matrixDiagPart(qLogHLog).logSumExp(squeezingAxes: -1)
+      let qLogHLog = _Raw.matrixDiagPart(qLog) + hLog
+      return qLogHLog.logSumExp(squeezingAxes: -1)
     }
   }
 }

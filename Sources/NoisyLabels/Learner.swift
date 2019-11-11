@@ -165,9 +165,7 @@ public struct EMLearner<
         .makeIterator()
 
       for mStep in 0..<mStepCount {
-        accumulatedNLL += model.executeMStep(
-          using: datasetIterator.next()!,
-          majorityVote: emStep == 0)
+        accumulatedNLL += model.executeMStep(using: datasetIterator.next()!)
         accumulatedSteps += 1
         if verbose {
           if let logSteps = mStepLogCount, mStep % logSteps == 0 || mStep == mStepCount - 1 {
@@ -207,6 +205,15 @@ public struct EMLearner<
         }
       }
     }
+
+    // TODO: Do we really need this?
+    // Final E-Step
+    if verbose { logger.info("Running Final E-Step") }
+    model.prepareForEStep()
+    for batch in dataset.batched(batchSize) {
+      model.executeEStep(using: batch, majorityVote: false)
+    }
+    model.finalizeEStep(majorityVote: false)
   }
 
   public func negativeLogLikelihood(for data: TrainingData) -> Float {
@@ -275,8 +282,8 @@ public struct EMLearner<
           qualities.append([p])
         }
       } else {
-        for (i, p) in predictions.enumerated() {
-          qualities[i].append(p)
+        for (l, p) in predictions.enumerated() {
+          qualities[l].append(p)
         }
       }
     }
@@ -284,7 +291,7 @@ public struct EMLearner<
     // Aggregate the collected qualities into a single matrix with shape:
     // [InstanceCount, LabelCount, PredictorCount].
     let concatenatedQualities = qualities.map { qualities in
-      qualities.count > 1 ? 
+      qualities.count > 1 ?
         exp(Tensor<Float>(concatenating: qualities, alongAxis: 0)) :
         exp(qualities[0])
     }

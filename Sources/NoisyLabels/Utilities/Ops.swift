@@ -100,7 +100,7 @@ public extension Array where Element: Differentiable {
 
 public struct ModelParameters: Differentiable {
   @noDerivative public let labelMask: Tensor<Bool>
-  @noDerivative public var eStepAccumulator: Tensor<Float>
+  @noDerivative public var expectedLabels: Tensor<Float>
   public var labelProbabilities: Tensor<Float>
   public var qualities: Tensor<Float>
 
@@ -108,12 +108,12 @@ public struct ModelParameters: Differentiable {
   @differentiable(wrt: (labelProbabilities, qualities))
   public init(
     labelMask: Tensor<Bool>,
-    eStepAccumulator: Tensor<Float>,
+    expectedLabels: Tensor<Float>,
     labelProbabilities: Tensor<Float>,
     qualities: Tensor<Float>
   ) {
     self.labelMask = labelMask
-    self.eStepAccumulator = eStepAccumulator
+    self.expectedLabels = expectedLabels
     self.labelProbabilities = labelProbabilities
     self.qualities = qualities
   }
@@ -123,7 +123,7 @@ public struct ModelParameters: Differentiable {
 @differentiable(wrt: (labelProbabilities, qualities), vjp: _vjpModelZip)
 internal func modelZip(
   labelMasks: [Tensor<Bool>],
-  eStepAccumulators: [Tensor<Float>],
+  expectedLabels: [Tensor<Float>],
   labelProbabilities: [Tensor<Float>],
   qualities: [Tensor<Float>]
 ) -> [ModelParameters] {
@@ -132,7 +132,7 @@ internal func modelZip(
   for l in labelMasks.indices {
     result.append(ModelParameters(
       labelMask: labelMasks[l],
-      eStepAccumulator: eStepAccumulators[l],
+      expectedLabels: expectedLabels[l],
       labelProbabilities: labelProbabilities[l],
       qualities: qualities[l]))
   }
@@ -142,7 +142,7 @@ internal func modelZip(
 @inlinable
 internal func _vjpModelZip(
   labelMasks: [Tensor<Bool>],
-  eStepAccumulators: [Tensor<Float>],
+  expectedLabels: [Tensor<Float>],
   labelProbabilities: [Tensor<Float>],
   qualities: [Tensor<Float>]
 ) -> ([ModelParameters], (Array<ModelParameters>.TangentVector) -> (
@@ -152,7 +152,7 @@ internal func _vjpModelZip(
   (
     modelZip(
       labelMasks: labelMasks,
-      eStepAccumulators: eStepAccumulators,
+      expectedLabels: expectedLabels,
       labelProbabilities: labelProbabilities,
       qualities: qualities),
     { v in

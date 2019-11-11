@@ -169,12 +169,6 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
   }
 
   public func labelProbabilities(_ instances: Tensor<Int32>) -> [Tensor<Float>] {
-//    var probabilities = [Tensor<Float>]()
-//    for i in 0..<expectedLabels.count {
-//      probabilities.append(exp(expectedLabels[i].gathering(atIndices: instances)))
-//    }
-//    return probabilities
-//    expectedLabels.map { exp($0.gathering(atIndices: instances)) }
     predictor.labelProbabilities(instances).map(exp)
   }
 

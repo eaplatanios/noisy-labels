@@ -228,7 +228,9 @@ public struct EMLearner<
     let instances = Tensor<Int32>(instances.map(Int32.init))
     var labelProbabilities = [[Tensor<Float>]]()
     for batch in Dataset(elements: instances).batched(batchSize) {
-      let predictions = model.labelProbabilities(batch)
+      // TODO: Look into this.
+      // let predictions = model.labelProbabilities(batch)
+      let predictions = model.expectedLabels.map { exp($0.gathering(atIndices: batch)) }
       if labelProbabilities.isEmpty {
         for p in predictions {
           labelProbabilities.append([p])

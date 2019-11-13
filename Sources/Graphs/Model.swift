@@ -17,7 +17,6 @@ import TensorFlow
 
 public struct Model<Predictor: Graphs.Predictor, Optimizer: TensorFlow.Optimizer>
 where Optimizer.Model == Predictor {
-  public let useSoftPredictions: Bool
   public let entropyWeight: Float
 
   public let randomSeed: Int64
@@ -38,7 +37,6 @@ where Optimizer.Model == Predictor {
   public init(
     predictor: Predictor,
     optimizer: Optimizer,
-    useSoftPredictions: Bool,
     entropyWeight: Float,
     randomSeed: Int64,
     batchSize: Int = 128,
@@ -52,7 +50,6 @@ where Optimizer.Model == Predictor {
   ) {
     self.predictor = predictor
     self.optimizer = optimizer
-    self.useSoftPredictions = useSoftPredictions
     self.entropyWeight = entropyWeight
     self.randomSeed = randomSeed
     self.batchSize = batchSize
@@ -108,7 +105,7 @@ where Optimizer.Model == Predictor {
     var batches = [Tensor<Float>]()
     for batch in Dataset(elements: Tensor<Int32>(nodeIndices.map(Int32.init))).batched(batchSize) {
       batches.append(expectedLabels.gathering(atIndices: batch))
-//      batches.append(predictor.labelProbabilities(batch))
+      // batches.append(predictor.labelProbabilities(batch))
     }
     if batches.count == 1 { return batches[0] }
     return Tensor<Float>(concatenating: batches, alongAxis: 0)
@@ -195,13 +192,10 @@ where Optimizer.Model == Predictor {
     for batch in unlabeledData.batched(batchSize) {
       let qualities = predictor.qualities(batch.nodeIndices, batch.neighborIndices)
       let qLog = logSoftmax(qualities, alongAxis: 2)                                                // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-      let neighborValues = expectedLabels.gathering(atIndices: batch.neighborIndices)               // [BatchSize, MaxNeighborCount, ClassCount]
-      let yHat = useSoftPredictions ?
-        neighborValues.expandingShape(at: 2) :
-        Tensor<Float>(
-          oneHotAtIndices: neighborValues.argmax(squeezingAxis: -1),
-          depth: predictor.classCount
-        ).expandingShape(at: 2)                                                                     // [BatchSize, MaxNeighborCount, 1, ClassCount]
+      let neighborValues = exp(predictor.labelProbabilities(
+        batch.neighborIndices.reshaped(to: [-1])
+      ).reshaped(to: [-1, predictor.maxBatchNeighborCount, predictor.classCount]))                  // [BatchSize, MaxNeighborCount, ClassCount]
+      let yHat = neighborValues.expandingShape(at: 2)                                               // [BatchSize, MaxNeighborCount, 1, ClassCount]
       let mask = batch.neighborMask.expandingShape(at: -1)
       let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)            // [BatchSize, ClassCount]
       eStepAccumulator = _Raw.tensorScatterAdd(
@@ -262,6 +256,7 @@ where Optimizer.Model == Predictor {
   private mutating func performMStep(data: Dataset<UnlabeledData>, emStep: Int) {
     if !useWarmStarting { predictor.reset() }
     let classCount = predictor.classCount
+    let maxBatchNeighborCount = predictor.maxBatchNeighborCount
     var accumulatedNLL = Float(0.0)
     var accumulatedSteps = 0
     var dataIterator = data.repeated()
@@ -272,24 +267,23 @@ where Optimizer.Model == Predictor {
     for mStep in 0..<mStepCount {
       let batch = dataIterator.next()!
       let (negativeLogLikelihood, gradient) = predictor.valueWithGradient {
-        [expectedLabels, useSoftPredictions, entropyWeight]
-        predictor -> Tensor<Float> in
+        [expectedLabels, entropyWeight] predictor -> Tensor<Float> in
         let predictions = predictor(batch.nodeIndices, batch.neighborIndices)
         let hLog = predictions.labelProbabilities
-        let qLog = logSoftmax(predictions.qualities, alongAxis: 2)                                  // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-        let neighborValues = expectedLabels.gathering(atIndices: batch.neighborIndices)             // [BatchSize, MaxNeighborCount, ClassCount]
-        let yHat = useSoftPredictions ?
-          neighborValues.expandingShape(at: 2) :
-          Tensor<Float>(
-            oneHotAtIndices: neighborValues.argmax(squeezingAxis: -1),
-            depth: classCount
-          ).expandingShape(at: 2)                                                                   // [BatchSize, MaxNeighborCount, 1, ClassCount]
-        let mask = batch.neighborMask.expandingShape(at: -1)
+        let qualities = predictions.qualities                                                       // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+        let qLog = logSoftmax(qualities, alongAxis: 2)                                              // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+        let neighborValues = exp(predictor.labelProbabilities(
+          batch.neighborIndices.reshaped(to: [-1])
+        ).reshaped(to: [-1, maxBatchNeighborCount, classCount]))                                    // [BatchSize, MaxNeighborCount, ClassCount]
+        let yHat = neighborValues.expandingShape(at: 2)                                             // [BatchSize, MaxNeighborCount, 1, ClassCount]
+        let mask = batch.neighborMask.expandingShape(at: -1)                                        // [BatchSize, MaxNeighborCount, 1]
         let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)          // [BatchSize, ClassCount]
         let yExpected = expectedLabels.gathering(atIndices: batch.nodeIndices)
+        let regularizer = qualities * mask.expandingShape(at: -1)
         return entropyWeight * (exp(hLog) * hLog).sum() -
           (yExpected * hLog).sum() -
-          (yExpected * qLogYHat).sum()
+          (yExpected * qLogYHat).sum() -
+          (regularizer[0..., 0..., 0, 0].sum() + regularizer[0..., 0..., 1, 1].sum())
       }
       optimizer.update(&predictor, along: gradient)
       accumulatedNLL += negativeLogLikelihood.scalarized()

@@ -106,9 +106,8 @@ public struct MLPPredictor: Predictor {
     let projectedNeighbors = neighborsUnflattenLayer(
       nodeLatentLayer(neighborsFlattenLayer(neighbors)))                                            // [BatchSize,                     1, ClassCount, ClassCount, ConfusionLatentSize]
     let qualities = logSoftmax(
-      projectedNodes + projectedNeighbors,
-      alongAxis: -2
-    ).logSumExp(squeezingAxes: -1)                                                                  // [BatchSize, MaxBatchNeighborCount, ClassCount, ClassCount]
+      (projectedNodes + projectedNeighbors).logSumExp(squeezingAxes: -1),
+      alongAxis: -2)                                                                                // [BatchSize, MaxBatchNeighborCount, ClassCount, ClassCount]
     return Predictions(labelProbabilities: labelProbabilities, qualities: qualities)
   }
 
@@ -131,9 +130,8 @@ public struct MLPPredictor: Predictor {
     let projectedNeighbors = neighborsUnflattenLayer(
       nodeLatentLayer(neighborsFlattenLayer(neighbors)))                                            // [BatchSize,                     1, ClassCount, ClassCount, ConfusionLatentSize]
     return logSoftmax(
-      projectedNodes + projectedNeighbors,
-      alongAxis: -2
-    ).logSumExp(squeezingAxes: -1)                                                                  // [BatchSize, MaxBatchNeighborCount, ClassCount, ClassCount]
+      (projectedNodes + projectedNeighbors).logSumExp(squeezingAxes: -1),
+      alongAxis: -2)                                                                                // [BatchSize, MaxBatchNeighborCount, ClassCount, ClassCount]
   }
 
   public mutating func reset() {

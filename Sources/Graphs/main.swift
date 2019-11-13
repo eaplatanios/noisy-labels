@@ -34,7 +34,6 @@ let optimizer = Adam(
 var model = Model(
   predictor: predictor,
   optimizer: optimizer,
-  useSoftPredictions: true,
   entropyWeight: 0,
   randomSeed: 42,
   batchSize: 128,

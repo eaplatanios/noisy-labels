@@ -35,6 +35,7 @@ var model = Model(
   predictor: predictor,
   optimizer: optimizer,
   entropyWeight: 0,
+  qualitiesRegularizationWeight: 1,
   randomSeed: 42,
   batchSize: 128,
   useWarmStarting: false,

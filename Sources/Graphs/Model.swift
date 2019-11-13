@@ -18,6 +18,7 @@ import TensorFlow
 public struct Model<Predictor: Graphs.Predictor, Optimizer: TensorFlow.Optimizer>
 where Optimizer.Model == Predictor {
   public let entropyWeight: Float
+  public let qualitiesRegularizationWeight: Float
 
   public let randomSeed: Int64
   public let batchSize: Int
@@ -38,6 +39,7 @@ where Optimizer.Model == Predictor {
     predictor: Predictor,
     optimizer: Optimizer,
     entropyWeight: Float,
+    qualitiesRegularizationWeight: Float,
     randomSeed: Int64,
     batchSize: Int = 128,
     useWarmStarting: Bool = true,
@@ -51,6 +53,7 @@ where Optimizer.Model == Predictor {
     self.predictor = predictor
     self.optimizer = optimizer
     self.entropyWeight = entropyWeight
+    self.qualitiesRegularizationWeight = qualitiesRegularizationWeight
     self.randomSeed = randomSeed
     self.batchSize = batchSize
     self.useWarmStarting = useWarmStarting
@@ -267,7 +270,8 @@ where Optimizer.Model == Predictor {
     for mStep in 0..<mStepCount {
       let batch = dataIterator.next()!
       let (negativeLogLikelihood, gradient) = predictor.valueWithGradient {
-        [expectedLabels, entropyWeight] predictor -> Tensor<Float> in
+        [expectedLabels, entropyWeight, qualitiesRegularizationWeight]
+        predictor -> Tensor<Float> in
         let predictions = predictor(batch.nodeIndices, batch.neighborIndices)
         let hLog = predictions.labelProbabilities
         let qualities = predictions.qualities                                                       // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
@@ -279,11 +283,12 @@ where Optimizer.Model == Predictor {
         let mask = batch.neighborMask.expandingShape(at: -1)                                        // [BatchSize, MaxNeighborCount, 1]
         let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)          // [BatchSize, ClassCount]
         let yExpected = expectedLabels.gathering(atIndices: batch.nodeIndices)
-        let regularizer = qualities * mask.expandingShape(at: -1)
+        let maskedQ = qualities * mask.expandingShape(at: -1)
+        let qualitiesRegularizer = maskedQ[0..., 0..., 0, 0] + maskedQ[0..., 0..., 1, 1]
         return entropyWeight * (exp(hLog) * hLog).sum() -
           (yExpected * hLog).sum() -
           (yExpected * qLogYHat).sum() -
-          (regularizer[0..., 0..., 0, 0].sum() + regularizer[0..., 0..., 1, 1].sum())
+          qualitiesRegularizationWeight * qualitiesRegularizer.sum()
       }
       optimizer.update(&predictor, along: gradient)
       accumulatedNLL += negativeLogLikelihood.scalarized()

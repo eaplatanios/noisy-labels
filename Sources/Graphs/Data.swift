@@ -95,6 +95,10 @@ public struct Data {
       nodeIndices: trainNodes + validationNodes + testNodes,
       maxNeighborCount: maxBatchNeighborCount)
   }
+  
+  public var unlabeledNodeIndices: Tensor<Int32> {
+    Tensor<Int32>((validationNodes + testNodes).map(Int32.init))
+  }
 
   public var maxNeighborCount: Int { nodeNeighbors.map { $0.count }.max()! }
 }

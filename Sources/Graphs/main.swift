@@ -20,9 +20,9 @@ let workingDirectory = URL(fileURLWithPath: FileManager.default.currentDirectory
 let dataDirectory = workingDirectory.appendingPathComponent("data").appendingPathComponent("cora")
 let data = try Data(loadFromDirectory: dataDirectory)
 
-let predictor = DecoupledMLPPredictor(
+let predictor = MLPPredictor(
   data: data,
-  hiddenUnitCounts: [16],
+  hiddenUnitCounts: [128],
   confusionLatentSize: 4)
 let optimizer = Adam(
   for: predictor,
@@ -35,10 +35,11 @@ var model = Model(
   predictor: predictor,
   optimizer: optimizer,
   useSoftPredictions: true,
-  entropyWeight: 0.01,
+  entropyWeight: 0,
   randomSeed: 42,
   batchSize: 128,
-  useWarmStarting: true,
+  useWarmStarting: false,
+  eStepCount: 10,
   mStepCount: 1000,
   emStepCount: 100,
   mStepLogCount: 100,

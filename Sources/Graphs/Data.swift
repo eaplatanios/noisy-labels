@@ -39,43 +39,31 @@ public struct LabeledData: TensorGroup {
 
 public struct UnlabeledData: TensorGroup {
   public let nodeIndices: Tensor<Int32>      // [BatchSize]
-  public let nodeFeatures: Tensor<Float>     // [BatchSize, FeatureCount]
   public let neighborIndices: Tensor<Int32>  // [BatchSize, MaxNeighborCount]
-  public let neighborFeatures: Tensor<Float> // [BatchSize, MaxNeighborCount, FeatureCount]
   public let neighborMask: Tensor<Float>     // [BatchSize, MaxNeighborCount]
 
   public init(
     nodeIndices: Tensor<Int32>,
-    nodeFeatures: Tensor<Float>,
     neighborIndices: Tensor<Int32>,
-    neighborFeatures: Tensor<Float>,
     neighborMask: Tensor<Float>
   ) {
     self.nodeIndices = nodeIndices
-    self.nodeFeatures = nodeFeatures
     self.neighborIndices = neighborIndices
-    self.neighborFeatures = neighborFeatures
     self.neighborMask = neighborMask
   }
 
   public init<C: RandomAccessCollection>(_handles: C) where C.Element: _AnyTensorHandle {
-    precondition(_handles.count == 5)
+    precondition(_handles.count == 3)
     let niIndex = _handles.startIndex
-    let nfIndex = _handles.index(niIndex, offsetBy: 1)
-    let nniIndex = _handles.index(nfIndex, offsetBy: 1)
-    let nnfIndex = _handles.index(nniIndex, offsetBy: 1)
-    let nnmIndex = _handles.index(nnfIndex, offsetBy: 1)
+    let nniIndex = _handles.index(niIndex, offsetBy: 1)
+    let nnmIndex = _handles.index(nniIndex, offsetBy: 1)
     self.nodeIndices = Tensor<Int32>(handle: TensorHandle<Int32>(handle: _handles[niIndex]))
-    self.nodeFeatures = Tensor<Float>(handle: TensorHandle<Float>(handle: _handles[nfIndex]))
     self.neighborIndices = Tensor<Int32>(handle: TensorHandle<Int32>(handle: _handles[nniIndex]))
-    self.neighborFeatures = Tensor<Float>(handle: TensorHandle<Float>(handle: _handles[nnfIndex]))
     self.neighborMask = Tensor<Float>(handle: TensorHandle<Float>(handle: _handles[nnmIndex]))
   }
 
   public var _tensorHandles: [_AnyTensorHandle] {
-    var handles = nodeIndices._tensorHandles + nodeFeatures._tensorHandles
-    handles += neighborIndices._tensorHandles + neighborFeatures._tensorHandles
-    return handles + neighborMask._tensorHandles
+    nodeIndices._tensorHandles + neighborIndices._tensorHandles + neighborMask._tensorHandles
   }
 }
 
@@ -86,20 +74,26 @@ public struct Data {
   public let nodeFeatures: [[Float]]
   public let nodeNeighbors: [[Int]]
   public let nodeLabels: [Int: Int]
-  public let trainNodes: Set<Int>
-  public let validationNodes: Set<Int>
-  public let testNodes: Set<Int>
+  public let trainNodes: [Int]
+  public let validationNodes: [Int]
+  public let testNodes: [Int]
+
+  public let maxBatchNeighborCount: Int = 10
 
   public var labeledData: LabeledData {
-    convertToLabeledData(nodeIndices: Array(trainNodes))
+    convertToLabeledData(nodeIndices: trainNodes)
   }
 
   public var unlabeledData: UnlabeledData {
-    convertToUnlabeledData(nodeIndices: Array(validationNodes.union(testNodes)))
+    convertToUnlabeledData(
+      nodeIndices: validationNodes + testNodes,
+      maxNeighborCount: maxBatchNeighborCount)
   }
 
   public var allUnlabeledData: UnlabeledData {
-    convertToUnlabeledData(nodeIndices: Array(trainNodes.union(validationNodes).union(testNodes)))
+    convertToUnlabeledData(
+      nodeIndices: trainNodes + validationNodes + testNodes,
+      maxNeighborCount: maxBatchNeighborCount)
   }
 
   public var maxNeighborCount: Int { nodeNeighbors.map { $0.count }.max()! }
@@ -125,9 +119,9 @@ extension Data {
 
     // Load the node labels file.
     logger.info("Data / Loading Labels")
-    var trainNodes = Set<Int>()
-    var validationNodes = Set<Int>()
-    var testNodes = Set<Int>()
+    var trainNodes = [Int]()
+    var validationNodes = [Int]()
+    var testNodes = [Int]()
     var nodeLabels = [Int: Int]()
     var classCount = 0
     for lineParts in try parse(tsvFileAt: directory.appendingPathComponent("labels.txt")) {
@@ -137,9 +131,9 @@ extension Data {
       nodeLabels[node] = label
       classCount = max(classCount, label + 1)
       switch lineParts[2] {
-        case "train": trainNodes.update(with: node)
-        case "val": validationNodes.update(with: node)
-        case "test": testNodes.update(with: node)
+        case "train": trainNodes.append(node)
+        case "val": validationNodes.append(node)
+        case "test": testNodes.append(node)
         default: ()
       }
     }
@@ -165,37 +159,35 @@ extension Data {
       nodeLabels: Tensor<Int32>(nodeLabels.map(Int32.init)))
   }
 
-  fileprivate func convertToUnlabeledData(nodeIndices: [Int]) -> UnlabeledData {
-    let nodeFeatures = nodeIndices.map { self.nodeFeatures[$0] }
-    let neighborIndices = nodeIndices.map { nodeNeighbors[$0] }
-    let neighborFeatures = neighborIndices.map { $0.map { self.nodeFeatures[$0] } }
-    let neighborMask = neighborIndices.map { $0.map { _ in Float(1) } }
+  fileprivate func convertToUnlabeledData(
+    nodeIndices: [Int],
+    maxNeighborCount: Int? = nil
+  ) -> UnlabeledData {
+    let maxNeighborCount = maxNeighborCount ?? self.maxNeighborCount
+    var batchedNodeIndices = [Tensor<Int32>]()
+    var batchedNeighborIndices = [Tensor<Int32>]()
+    var batchedNeighborMasks = [Tensor<Float>]()
+    for nodeIndex in nodeIndices {
+      let neighborIndices = nodeNeighbors[nodeIndex]
+      var neighborCount = 0
+      while neighborCount < neighborIndices.count {
+        let t = min(neighborCount + maxNeighborCount, neighborIndices.count)
+        let neighborIndicesBatch = neighborIndices[neighborCount..<t]
+        let neighborMaskBatch = neighborIndicesBatch.map { _ in Float(1) }
+        batchedNodeIndices.append(Tensor<Int32>(Int32(nodeIndex)))
+        batchedNeighborIndices.append(
+          Tensor<Int32>(neighborIndicesBatch.map(Int32.init))
+            .padded(forSizes: [(before: 0, after: maxNeighborCount - neighborIndicesBatch.count)]))
+        batchedNeighborMasks.append(
+          Tensor<Float>(neighborMaskBatch)
+          .padded(forSizes: [(before: 0, after: maxNeighborCount - neighborMaskBatch.count)]))
+        neighborCount += maxNeighborCount
+      }
+    }
     return UnlabeledData(
-      nodeIndices: Tensor<Int32>(nodeIndices.map(Int32.init)),
-      nodeFeatures: Tensor<Float>(
-        stacking: nodeFeatures.map(Tensor<Float>.init),
-        alongAxis: 0),
-      neighborIndices: Tensor<Int32>(
-        stacking: neighborIndices.map {
-          Tensor<Int32>($0.map(Int32.init)).padded(
-            forSizes: [(before: 0, after: maxNeighborCount - $0.count)])
-        },
-        alongAxis: 0),
-      neighborFeatures: Tensor<Float>(
-        stacking: neighborFeatures.map {
-          Tensor<Float>(
-            stacking: $0.map(Tensor<Float>.init),
-            alongAxis: 0
-          ).padded(forSizes: [
-            (before: 0, after: maxNeighborCount - $0.count),
-            (before: 0, after: 0)])
-        },
-        alongAxis: 0),
-      neighborMask: Tensor<Float>(
-        stacking: neighborMask.map {
-          Tensor<Float>($0).padded(forSizes: [(before: 0, after: maxNeighborCount - $0.count)])
-        },
-        alongAxis: 0))
+      nodeIndices: Tensor<Int32>(stacking: batchedNodeIndices, alongAxis: 0),
+      neighborIndices: Tensor<Int32>(stacking: batchedNeighborIndices, alongAxis: 0),
+      neighborMask: Tensor<Float>(stacking: batchedNeighborMasks, alongAxis: 0))
   }
 }
 

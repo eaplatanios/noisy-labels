@@ -8,6 +8,7 @@ let package = Package(
   platforms: [.macOS(.v10_12)],
   products: [
     .library(name: "NoisyLabels", targets: ["NoisyLabels"]),
+    .executable(name: "Graphs", targets: ["Graphs"]),
     .executable(name: "NoisyLabelsExperiments", targets: ["NoisyLabelsExperiments"])
   ],
   dependencies: [
@@ -18,6 +19,7 @@ let package = Package(
   ],
   targets: [
     .target(name: "NoisyLabels", dependencies: ["Logging", "ZIPFoundation"]),
+    .target(name: "Graphs", dependencies: ["Logging", "ZIPFoundation"]),
     .target(name: "NoisyLabelsExperiments", dependencies: ["NoisyLabels", "Progress", "SPMUtility"]),
   ]
 )

@@ -23,7 +23,6 @@ where Optimizer.Model == Predictor {
   public let randomSeed: Int64
   public let batchSize: Int
   public let useWarmStarting: Bool
-  public let eStepCount: Int
   public let mStepCount: Int
   public let emStepCount: Int
   public let mStepLogCount: Int?
@@ -43,7 +42,6 @@ where Optimizer.Model == Predictor {
     randomSeed: Int64,
     batchSize: Int = 128,
     useWarmStarting: Bool = true,
-    eStepCount: Int = 10,
     mStepCount: Int = 1000,
     emStepCount: Int = 100,
     mStepLogCount: Int? = 100,
@@ -57,7 +55,6 @@ where Optimizer.Model == Predictor {
     self.randomSeed = randomSeed
     self.batchSize = batchSize
     self.useWarmStarting = useWarmStarting
-    self.eStepCount = eStepCount
     self.mStepCount = mStepCount
     self.emStepCount = emStepCount
     self.mStepLogCount = mStepLogCount
@@ -76,13 +73,11 @@ where Optimizer.Model == Predictor {
     if verbose { logger.info("Initialization") }
     initialize(using: data)
     // performMStep(data: labeledData, emStep: 0)
-    // for _ in 0..<eStepCount {
-    //   performEStep(
-    //     labeledData: labeledData,
-    //     unlabeledData: unlabeledData,
-    //     unlabeledNodeIndices: unlabeledNodeIndices)
-    //   emStepCallback(self)
-    // }
+    // performEStep(
+    //   labeledData: labeledData,
+    //   unlabeledData: unlabeledData,
+    //   unlabeledNodeIndices: unlabeledNodeIndices)
+    emStepCallback(self)
 
     for emStep in 0..<emStepCount {
       // M-Step
@@ -91,16 +86,15 @@ where Optimizer.Model == Predictor {
 
       // E-Step
       if verbose { logger.info("Iteration \(emStep) - Running E-Step") }
-      for _ in 0..<eStepCount {
-        performEStep(
-          labeledData: labeledData,
-          unlabeledData: unlabeledData,
-          unlabeledNodeIndices: unlabeledNodeIndices)
-        emStepCallback(self)
-      }
+      performEStep(
+        labeledData: labeledData,
+        unlabeledData: unlabeledData,
+        unlabeledNodeIndices: unlabeledNodeIndices)
 
       // TODO: Add support for marginal likelihood fine-tuning.
       // How do we handle labeled data in that case?
+      
+      emStepCallback(self)
     }
   }
 

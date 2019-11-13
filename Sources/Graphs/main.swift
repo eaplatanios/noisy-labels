@@ -39,7 +39,6 @@ var model = Model(
   randomSeed: 42,
   batchSize: 128,
   useWarmStarting: false,
-  eStepCount: 10,
   mStepCount: 1000,
   emStepCount: 100,
   mStepLogCount: 100,

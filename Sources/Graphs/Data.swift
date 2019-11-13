@@ -78,8 +78,6 @@ public struct Data {
   public let validationNodes: [Int]
   public let testNodes: [Int]
 
-  public let maxBatchNeighborCount: Int = 10
-
   public var labeledData: LabeledData {
     convertToLabeledData(nodeIndices: trainNodes)
   }
@@ -99,6 +97,8 @@ public struct Data {
   public var unlabeledNodeIndices: Tensor<Int32> {
     Tensor<Int32>((validationNodes + testNodes).map(Int32.init))
   }
+
+  public var maxBatchNeighborCount: Int { maxNeighborCount }
 
   public var maxNeighborCount: Int { nodeNeighbors.map { $0.count }.max()! }
 }

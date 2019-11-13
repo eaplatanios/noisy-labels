@@ -260,6 +260,7 @@ public struct DecoupledMLPPredictor: Predictor {
   public mutating func reset() {
     var inputSize = featureCount
     self.nodeProcessingLayers = [Dense<Float>]()
+    self.neighborProcessingLayers = [Dense<Float>]()
     for hiddenUnitCount in hiddenUnitCounts {
       self.nodeProcessingLayers.append(Dense<Float>(
         inputSize: inputSize,

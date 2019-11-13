@@ -197,13 +197,13 @@ where Optimizer.Model == Predictor {
       let qLog = logSoftmax(qualities, alongAxis: 2)                                                // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
       let neighborValues = expectedLabels.gathering(atIndices: batch.neighborIndices)               // [BatchSize, MaxNeighborCount, ClassCount]
       let yHat = useSoftPredictions ?
-        neighborValues :
+        neighborValues.expandingShape(at: 2) :
         Tensor<Float>(
           oneHotAtIndices: neighborValues.argmax(squeezingAxis: -1),
-          depth: predictor.classCount)                                                              // [BatchSize, MaxNeighborCount, ClassCount]
-      let maskOffset = (1 - batch.neighborMask.expandingShape(at: -1)) * -999999
-      var qLogYHat = (qLog * yHat.expandingShape(at: 2)).sum(squeezingAxes: -1)                     // [BatchSize, MaxNeighborCount, ClassCount]
-      qLogYHat = (qLogYHat + maskOffset).logSumExp(squeezingAxes: 1)                                // [BatchSize, ClassCount]
+          depth: predictor.classCount
+        ).expandingShape(at: 2)                                                                     // [BatchSize, MaxNeighborCount, 1, ClassCount]
+      let mask = batch.neighborMask.expandingShape(at: -1)
+      let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)            // [BatchSize, ClassCount]
       eStepAccumulator = _Raw.tensorScatterAdd(
         eStepAccumulator,
         indices: batch.nodeIndices.expandingShape(at: -1),
@@ -279,13 +279,13 @@ where Optimizer.Model == Predictor {
         let qLog = logSoftmax(predictions.qualities, alongAxis: 2)                                  // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
         let neighborValues = expectedLabels.gathering(atIndices: batch.neighborIndices)             // [BatchSize, MaxNeighborCount, ClassCount]
         let yHat = useSoftPredictions ?
-          neighborValues :
+          neighborValues.expandingShape(at: 2) :
           Tensor<Float>(
             oneHotAtIndices: neighborValues.argmax(squeezingAxis: -1),
-            depth: classCount)                                                                      // [BatchSize, MaxNeighborCount, ClassCount]
-        let maskOffset = (1 - batch.neighborMask.expandingShape(at: -1)) * -999999
-        var qLogYHat = (qLog * yHat.expandingShape(at: 2)).sum(squeezingAxes: -1)                     // [BatchSize, MaxNeighborCount, ClassCount]
-        qLogYHat = (qLogYHat + maskOffset).logSumExp(squeezingAxes: 1)                                // [BatchSize, ClassCount]
+            depth: classCount
+          ).expandingShape(at: 2)                                                                   // [BatchSize, MaxNeighborCount, 1, ClassCount]
+        let mask = batch.neighborMask.expandingShape(at: -1)
+        let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)          // [BatchSize, ClassCount]
         let yExpected = expectedLabels.gathering(atIndices: batch.nodeIndices)
         return entropyWeight * (exp(hLog) * hLog).sum() -
           (yExpected * hLog).sum() -

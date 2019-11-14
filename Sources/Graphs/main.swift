@@ -18,10 +18,10 @@ import TensorFlow
 let workingDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
   .appendingPathComponent("temp")
 let dataDirectory = workingDirectory.appendingPathComponent("data").appendingPathComponent("cora")
-let data = try Data(loadFromDirectory: dataDirectory)
 
-let predictor = MLPPredictor(
-  data: data,
+let graph = try Graph(loadFromDirectory: dataDirectory)
+let predictor = MLPGraphPredictor(
+  graph: graph,
   hiddenUnitCounts: [128],
   confusionLatentSize: 4)
 let optimizer = Adam(
@@ -42,8 +42,8 @@ var model = Model(
   mStepCount: 1000,
   emStepCount: 100,
   mStepLogCount: 100,
-  emStepCallback: { m in dump(evaluate(model: m, using: data)) },
+  emStepCallback: { dump(evaluate(model: $0, using: graph)) },
   verbose: true)
 
-dump(evaluate(model: model, using: data))
-model.train(using: data)
+dump(evaluate(model: model, using: graph))
+model.train(using: graph)

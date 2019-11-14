@@ -15,7 +15,7 @@
 import Foundation
 import TensorFlow
 
-public struct Model<Predictor: Graphs.Predictor, Optimizer: TensorFlow.Optimizer>
+public struct Model<Predictor: GraphPredictor, Optimizer: TensorFlow.Optimizer>
 where Optimizer.Model == Predictor {
   public let entropyWeight: Float
   public let qualitiesRegularizationWeight: Float
@@ -64,18 +64,18 @@ where Optimizer.Model == Predictor {
     self.expectedLabels = Tensor<Float>(zeros: [predictor.nodeCount, predictor.classCount])
   }
 
-  public mutating func train(using data: Data) {
-    let labeledData = Dataset(elements: data.labeledData)
-    let unlabeledData = Dataset(elements: data.unlabeledData)
-    let allUnlabeledData = Dataset(elements: data.allUnlabeledData)
-    let unlabeledNodeIndices = Dataset(elements: data.unlabeledNodeIndices)
+  public mutating func train(using graph: Graph) {
+    let labeledData = Dataset(elements: graph.labeledData)
+    let unlabeledData = Dataset(elements: graph.unlabeledData)
+    let allUnlabeledData = Dataset(elements: graph.allUnlabeledData)
+    let unlabeledNodeIndices = Dataset(elements: graph.unlabeledNodeIndices)
 
     if verbose { logger.info("Initialization") }
-    initialize(using: data)
+    initialize(using: graph)
     // performMStep(data: labeledData, emStep: 0)
     // performEStep(
     //   labeledData: labeledData,
-    //   unlabeledData: unlabeledData,
+    //   unlabeledData: nil,
     //   unlabeledNodeIndices: unlabeledNodeIndices)
     emStepCallback(self)
 
@@ -98,9 +98,9 @@ where Optimizer.Model == Predictor {
     }
   }
 
-  public func labelProbabilities(for nodeIndices: [Int]) -> Tensor<Float> {
+  public func labelProbabilities(for nodeIndices: [Int32]) -> Tensor<Float> {
     var batches = [Tensor<Float>]()
-    for batch in Dataset(elements: Tensor<Int32>(nodeIndices.map(Int32.init))).batched(batchSize) {
+    for batch in Dataset(elements: Tensor<Int32>(nodeIndices)).batched(batchSize) {
       batches.append(expectedLabels.gathering(atIndices: batch))
       // batches.append(predictor.labelProbabilities(batch))
     }
@@ -108,23 +108,23 @@ where Optimizer.Model == Predictor {
     return Tensor<Float>(concatenating: batches, alongAxis: 0)
   }
 
-  private mutating func initialize(using data: Data) {
+  private mutating func initialize(using graph: Graph) {
     eStepAccumulator = Tensor<Float>(zeros: [predictor.nodeCount, predictor.classCount])
-    var labeledNodes = Set<Int>()
-    var nodesToLabel = Set<Int>()
+    var labeledNodes = Set<Int32>()
+    var nodesToLabel = Set<Int32>()
 
     // Start with the labeled nodes.
-    for node in data.trainNodes {
-      let label = data.nodeLabels[node]!
+    for node in graph.trainNodes {
+      let label = graph.labels[node]!
       eStepAccumulator = _Raw.tensorScatterAdd(
         eStepAccumulator,
-        indices: Tensor<Int32>([Int32(node)]).expandingShape(at: -1),
+        indices: Tensor<Int32>([node]).expandingShape(at: -1),
         updates: Tensor<Float>(
           oneHotAtIndices: Tensor<Int32>(Int32(label)),
           depth: predictor.classCount).expandingShape(at: 0))
       labeledNodes.update(with: node)
       nodesToLabel.remove(node)
-      data.nodeNeighbors[node].forEach {
+      graph.neighbors[Int(node)].forEach {
         if !labeledNodes.contains($0) {
           nodesToLabel.update(with: $0)
         }
@@ -134,21 +134,21 @@ where Optimizer.Model == Predictor {
     // Proceed with label propagation for the unlabeled nodes.
     while !nodesToLabel.isEmpty {
       for node in nodesToLabel {
-        let labeledNeighbors = data.nodeNeighbors[node].filter(labeledNodes.contains)
-        var probabilities = Tensor<Float>(zeros: [data.classCount])
+        let labeledNeighbors = graph.neighbors[Int(node)].filter(labeledNodes.contains)
+        var probabilities = Tensor<Float>(zeros: [graph.classCount])
         for neighbor in labeledNeighbors {
-          probabilities += eStepAccumulator[neighbor]
+          probabilities += eStepAccumulator[Int(neighbor)]
         }
         probabilities /= probabilities.sum()
         eStepAccumulator = _Raw.tensorScatterAdd(
           eStepAccumulator,
-          indices: Tensor<Int32>([Int32(node)]).expandingShape(at: -1),
+          indices: Tensor<Int32>([node]).expandingShape(at: -1),
           updates: probabilities.expandingShape(at: 0))
       }
       for node in nodesToLabel {
         labeledNodes.update(with: node)
         nodesToLabel.remove(node)
-        data.nodeNeighbors[node].forEach {
+        graph.neighbors[Int(node)].forEach {
           if !labeledNodes.contains($0) {
             nodesToLabel.update(with: $0)
           }
@@ -156,11 +156,13 @@ where Optimizer.Model == Predictor {
       }
     }
 
-    for node in (0..<data.nodeCount).filter({ !labeledNodes.contains($0) }) {
+    for node in (0..<Int32(graph.nodeCount)).filter({ !labeledNodes.contains($0) }) {
       eStepAccumulator = _Raw.tensorScatterAdd(
         eStepAccumulator,
-        indices: Tensor<Int32>([Int32(node)]).expandingShape(at: -1),
-        updates: Tensor<Float>(repeating: 1 / Float(data.classCount), shape: [1, data.classCount]))
+        indices: Tensor<Int32>([node]).expandingShape(at: -1),
+        updates: Tensor<Float>(
+          repeating: 1 / Float(graph.classCount),
+          shape: [1, graph.classCount]))
     }
 
     expectedLabels = eStepAccumulator
@@ -168,7 +170,7 @@ where Optimizer.Model == Predictor {
 
   private mutating func performEStep(
     labeledData: Dataset<LabeledData>,
-    unlabeledData: Dataset<UnlabeledData>,
+    unlabeledData: Dataset<Tensor<Int32>>?,
     unlabeledNodeIndices: Dataset<Tensor<Int32>>
   ) {
     eStepAccumulator = Tensor<Float>(zeros: [predictor.nodeCount, predictor.classCount])
@@ -186,25 +188,27 @@ where Optimizer.Model == Predictor {
     }
 
     // Compute expectations for the labels of the unlabeled nodes.
-    for batch in unlabeledData.batched(batchSize) {
-      let qualities = predictor.qualities(batch.nodeIndices, batch.neighborIndices)
-      let qLog = logSoftmax(qualities, alongAxis: 2)                                                // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-      let neighborValues = exp(predictor.labelProbabilities(
-        batch.neighborIndices.reshaped(to: [-1])
-      ).reshaped(to: [-1, predictor.maxBatchNeighborCount, predictor.classCount]))                  // [BatchSize, MaxNeighborCount, ClassCount]
-      let yHat = neighborValues.expandingShape(at: 2)                                               // [BatchSize, MaxNeighborCount, 1, ClassCount]
-      let mask = batch.neighborMask.expandingShape(at: -1)
-      let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)            // [BatchSize, ClassCount]
-      eStepAccumulator = _Raw.tensorScatterAdd(
-        eStepAccumulator,
-        indices: batch.nodeIndices.expandingShape(at: -1),
-        updates: qLogYHat)
+    if let unlabeledData = unlabeledData {
+      for batch in unlabeledData.batched(batchSize) {
+        let predictions = predictor(batch.scalars)
+        let qualities = predictions.qualities
+        let qualitiesMask = predictions.qualitiesMask
+        let qLog = logSoftmax(qualities, alongAxis: 2)                                              // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+        let neighborValues = exp(predictions.neighborLabelProbabilities)                            // [BatchSize, MaxNeighborCount, ClassCount]
+        let yHat = neighborValues.expandingShape(at: 2)                                             // [BatchSize, MaxNeighborCount, 1, ClassCount]
+        let mask = qualitiesMask.expandingShape(at: -1)
+        let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)          // [BatchSize, ClassCount]
+        eStepAccumulator = _Raw.tensorScatterAdd(
+          eStepAccumulator,
+          indices: batch.expandingShape(at: -1),
+          updates: qLogYHat)
+      }
     }
     for batch in unlabeledNodeIndices.batched(batchSize) {
       eStepAccumulator = _Raw.tensorScatterAdd(
         eStepAccumulator,
         indices: batch.expandingShape(at: -1),
-        updates: predictor.labelProbabilities(batch))
+        updates: predictor.labelProbabilities(batch.scalars))
     }
     expectedLabels = exp(logSoftmax(eStepAccumulator, alongAxis: -1))
   }
@@ -223,37 +227,37 @@ where Optimizer.Model == Predictor {
   //     let neighborIndices = Tensor<Int32>(
   //       repeating: 0,
   //       shape: [Int(batch.nodeIndices.shape[0]), predictor.maxBatchNeighborCount])
-  //     let (loss, gradient) = predictor.valueWithGradient { predictor -> Tensor<Float> in
-  //       let predictions = predictor(batch.nodeIndices, neighborIndices)
-  //       let crossEntropy = softmaxCrossEntropy(
-  //         logits: predictions.labelProbabilities,
-  //         labels: batch.nodeLabels)
-  //       let zero = predictions.qualities.sum() * 0.0
-  //       return crossEntropy + zero
-  //       // softmaxCrossEntropy(
-  //       //   logits: predictor.labelProbabilities(batch.nodeIndices),
-  //       //   labels: batch.nodeLabels)
-  //     }
-  //     optimizer.update(&predictor, along: gradient)
-  //     accumulatedLoss += loss.scalarized()
-  //     accumulatedSteps += 1
-  //     if verbose {
-  //       if let logSteps = mStepLogCount, mStep % logSteps == 0 || mStep == mStepCount - 1 {
-  //         let nll = accumulatedLoss / Float(accumulatedSteps)
-  //         let message = "Supervised M-Step \(String(format: "%5d", mStep)) | " +
-  //           "Loss: \(String(format: "%.8f", nll))"
-  //         logger.info("\(message)")
-  //         accumulatedLoss = 0.0
-  //         accumulatedSteps = 0
+  //     withLearningPhase(.training) {
+  //       let (loss, gradient) = predictor.valueWithGradient { predictor -> Tensor<Float> in
+  //         let predictions = predictor(batch.nodeIndices.scalars)
+  //         let crossEntropy = softmaxCrossEntropy(
+  //           logits: predictions.labelProbabilities,
+  //           labels: batch.nodeLabels)
+  //         let zero = predictions.qualities.sum() * 0.0
+  //         return crossEntropy + zero
+  //         // softmaxCrossEntropy(
+  //         //   logits: predictor.labelProbabilities(batch.nodeIndices.scalars),
+  //         //   labels: batch.nodeLabels)
+  //       }
+  //       optimizer.update(&predictor, along: gradient)
+  //       accumulatedLoss += loss.scalarized()
+  //       accumulatedSteps += 1
+  //       if verbose {
+  //         if let logSteps = mStepLogCount, mStep % logSteps == 0 || mStep == mStepCount - 1 {
+  //           let nll = accumulatedLoss / Float(accumulatedSteps)
+  //           let message = "Supervised M-Step \(String(format: "%5d", mStep)) | " +
+  //             "Loss: \(String(format: "%.8f", nll))"
+  //           logger.info("\(message)")
+  //           accumulatedLoss = 0.0
+  //           accumulatedSteps = 0
+  //         }
   //       }
   //     }
   //   }
   // }
 
-  private mutating func performMStep(data: Dataset<UnlabeledData>, emStep: Int) {
+  private mutating func performMStep(data: Dataset<Tensor<Int32>>, emStep: Int) {
     if !useWarmStarting { predictor.reset() }
-    let classCount = predictor.classCount
-    let maxBatchNeighborCount = predictor.maxBatchNeighborCount
     var accumulatedNLL = Float(0.0)
     var accumulatedSteps = 0
     var dataIterator = data.repeated()
@@ -263,38 +267,39 @@ where Optimizer.Model == Predictor {
       .makeIterator()
     for mStep in 0..<mStepCount {
       let batch = dataIterator.next()!
-      let (negativeLogLikelihood, gradient) = predictor.valueWithGradient {
-        [expectedLabels, entropyWeight, qualitiesRegularizationWeight]
-        predictor -> Tensor<Float> in
-        let predictions = predictor(batch.nodeIndices, batch.neighborIndices)
-        let hLog = predictions.labelProbabilities
-        let qualities = predictions.qualities                                                       // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-        let qLog = logSoftmax(qualities, alongAxis: 2)                                              // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-        let neighborValues = exp(predictor.labelProbabilities(
-          batch.neighborIndices.reshaped(to: [-1])
-        ).reshaped(to: [-1, maxBatchNeighborCount, classCount]))                                    // [BatchSize, MaxNeighborCount, ClassCount]
-        let yHat = neighborValues.expandingShape(at: 2)                                             // [BatchSize, MaxNeighborCount, 1, ClassCount]
-        let mask = batch.neighborMask.expandingShape(at: -1)                                        // [BatchSize, MaxNeighborCount, 1]
-        let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)          // [BatchSize, ClassCount]
-        let yExpected = expectedLabels.gathering(atIndices: batch.nodeIndices)
-        let maskedQ = qualities * mask.expandingShape(at: -1)
-        let qualitiesRegularizer = maskedQ[0..., 0..., 0, 0] + maskedQ[0..., 0..., 1, 1]
-        return entropyWeight * (exp(hLog) * hLog).sum() -
-          (yExpected * hLog).sum() -
-          (yExpected * qLogYHat).sum() -
-          qualitiesRegularizationWeight * qualitiesRegularizer.sum()
-      }
-      optimizer.update(&predictor, along: gradient)
-      accumulatedNLL += negativeLogLikelihood.scalarized()
-      accumulatedSteps += 1
-      if verbose {
-        if let logSteps = mStepLogCount, mStep % logSteps == 0 || mStep == mStepCount - 1 {
-          let nll = accumulatedNLL / Float(accumulatedSteps)
-          let message = "M-Step \(String(format: "%5d", mStep)) | " +
-            "Negative Log-Likelihood: \(String(format: "%.8f", nll))"
-          logger.info("\(message)")
-          accumulatedNLL = 0.0
-          accumulatedSteps = 0
+      withLearningPhase(.training) {
+        let (negativeLogLikelihood, gradient) = predictor.valueWithGradient {
+          [expectedLabels, entropyWeight, qualitiesRegularizationWeight]
+          predictor -> Tensor<Float> in
+          let predictions = predictor(batch.scalars)
+          let hLog = predictions.labelProbabilities
+          let qualities = predictions.qualities                                                     // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          let qualitiesMask = predictions.qualitiesMask                                             // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          let qLog = logSoftmax(qualities, alongAxis: 2)                                            // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          let neighborValues = exp(predictions.neighborLabelProbabilities)                          // [BatchSize, MaxNeighborCount, ClassCount]
+          let yHat = neighborValues.expandingShape(at: 2)                                           // [BatchSize, MaxNeighborCount, 1, ClassCount]
+          let mask = qualitiesMask.expandingShape(at: -1)                                           // [BatchSize, MaxNeighborCount, 1]
+          let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)        // [BatchSize, ClassCount]
+          let yExpected = expectedLabels.gathering(atIndices: batch)
+          let maskedQ = qualities * mask.expandingShape(at: -1)
+          let qualitiesRegularizer = maskedQ[0..., 0..., 0, 0] + maskedQ[0..., 0..., 1, 1]
+          return entropyWeight * (exp(hLog) * hLog).sum() -
+            (yExpected * hLog).sum() -
+            (yExpected * qLogYHat).sum() -
+            qualitiesRegularizationWeight * qualitiesRegularizer.sum()
+        }
+        optimizer.update(&predictor, along: gradient)
+        accumulatedNLL += negativeLogLikelihood.scalarized()
+        accumulatedSteps += 1
+        if verbose {
+          if let logSteps = mStepLogCount, mStep % logSteps == 0 || mStep == mStepCount - 1 {
+            let nll = accumulatedNLL / Float(accumulatedSteps)
+            let message = "M-Step \(String(format: "%5d", mStep)) | " +
+              "Negative Log-Likelihood: \(String(format: "%.8f", nll))"
+            logger.info("\(message)")
+            accumulatedNLL = 0.0
+            accumulatedSteps = 0
+          }
         }
       }
     }

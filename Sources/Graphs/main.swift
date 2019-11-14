@@ -20,9 +20,13 @@ let workingDirectory = URL(fileURLWithPath: FileManager.default.currentDirectory
 let dataDirectory = workingDirectory.appendingPathComponent("data").appendingPathComponent("cora")
 
 let graph = try Graph(loadFromDirectory: dataDirectory)
-let predictor = MLPGraphPredictor(
+// let predictor = MLPPredictor(
+//   graph: graph,
+//   hiddenUnitCounts: [128],
+//   confusionLatentSize: 4)
+let predictor = GCNPredictor(
   graph: graph,
-  hiddenUnitCounts: [128],
+  hiddenUnitCounts: [16],
   confusionLatentSize: 4)
 let optimizer = Adam(
   for: predictor,

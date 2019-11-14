@@ -14,7 +14,11 @@
 
 import TensorFlow
 
+public typealias NeighborProjectionMatrix =
+  (nodeIndices: Tensor<Int32>, adjacencyMatrix: Tensor<Float>)
+
 public struct NodeIndexMap {
+  public let graph: Graph
   public let nodeIndicesArray: [Int32]
   public let neighborIndicesArray: [[Int32]]
   public let uniqueNodeIndicesArray: [Int32]
@@ -25,7 +29,7 @@ public struct NodeIndexMap {
   public let uniqueNodeIndices: Tensor<Int32>
 
   public init(nodes: [Int32], graph: Graph) {
-    // We need features for all provided nodes and their neighbors.
+    self.graph = graph
     var nodeIndices = [Int32]()
     var neighborIndices = [[Int32]](repeating: [], count: nodes.count)
     var uniqueNodeIndices = [Int32]()
@@ -63,6 +67,41 @@ public struct NodeIndexMap {
       },
       alongAxis: 0)
     self.uniqueNodeIndices = Tensor<Int32>(uniqueNodeIndices)
+  }
+
+  public func neighborProjectionMatrices(depth: Int) -> [NeighborProjectionMatrix] {
+    var results = [(Tensor<Int32>, Tensor<Float>)]()
+    results.reserveCapacity(depth)
+    var previousIndices = uniqueNodeIndicesArray
+    for _ in 0..<depth {
+      var currentIndices = previousIndices
+      var currentAdjacency = [[Float]](
+        repeating: [Float](
+          repeating: 0,
+          count: previousIndices.count),
+        count: previousIndices.count)
+      for (pi, previousIndex) in previousIndices.enumerated() {
+        currentAdjacency[Int(pi)][Int(pi)] = 1
+        for neighbor in graph.neighbors[Int(previousIndex)] {
+          if let index = currentIndices.firstIndex(of: neighbor) {
+            currentAdjacency[Int(index)][Int(pi)] = 1
+          } else {
+            var newAdjacencyRow = [Float](repeating: 0, count: previousIndices.count)
+            newAdjacencyRow[Int(pi)] = 1
+            currentAdjacency.append(newAdjacencyRow)
+            currentIndices.append(neighbor)
+          }
+        }
+      }
+      previousIndices = currentIndices
+      let nodeIndices = Tensor<Int32>(currentIndices)
+      var adjacencyMatrix = Tensor<Float>(
+        stacking: currentAdjacency.map(Tensor<Float>.init),
+        alongAxis: 0).transposed()
+      adjacencyMatrix /= adjacencyMatrix.sum(alongAxes: 0)
+      results.append((nodeIndices: nodeIndices, adjacencyMatrix: adjacencyMatrix))
+    }
+    return results.reversed()
   }
 }
 
@@ -105,7 +144,7 @@ extension GraphPredictor {
   public var classCount: Int { graph.classCount }
 }
 
-public struct MLPGraphPredictor: GraphPredictor {
+public struct MLPPredictor: GraphPredictor {
   @noDerivative public let graph: Graph
   @noDerivative public let hiddenUnitCounts: [Int]
   @noDerivative public let confusionLatentSize: Int
@@ -170,6 +209,109 @@ public struct MLPGraphPredictor: GraphPredictor {
     let nodeFeatures = graph.features.gathering(atIndices: nodeIndices)
     let nodeLatent = hiddenLayers.differentiableReduce(nodeFeatures) { $1($0) }
     return logSoftmax(predictionLayer(nodeLatent))
+  }
+
+  public mutating func reset() {
+    var inputSize = graph.featureCount
+    self.hiddenLayers = [Dense<Float>]()
+    for hiddenUnitCount in hiddenUnitCounts {
+      self.hiddenLayers.append(Dense<Float>(
+        inputSize: inputSize,
+        outputSize: hiddenUnitCount,
+        activation: { leakyRelu($0) }))
+      inputSize = hiddenUnitCount
+    }
+    let C = Int32(graph.classCount)
+    let L = Int32(confusionLatentSize)
+    self.predictionLayer = Dense<Float>(inputSize: inputSize, outputSize: Int(C))
+    self.nodeLatentLayer = Sequential {
+      Dense<Float>(inputSize: inputSize, outputSize: Int(C * C * L))
+      Reshape<Float>(shape: Tensor<Int32>([-1, C, C, L]))
+    }
+  }
+}
+
+public struct GCNPredictor: GraphPredictor {
+  @noDerivative public let graph: Graph
+  @noDerivative public let hiddenUnitCounts: [Int]
+  @noDerivative public let confusionLatentSize: Int
+
+  public var hiddenLayers: [Dense<Float>]
+  public var predictionLayer: Dense<Float>
+  public var nodeLatentLayer: Sequential<Dense<Float>, Reshape<Float>>
+
+  public init(graph: Graph, hiddenUnitCounts: [Int], confusionLatentSize: Int) {
+    self.graph = graph
+    self.hiddenUnitCounts = hiddenUnitCounts
+    self.confusionLatentSize = confusionLatentSize
+
+    var inputSize = graph.featureCount
+    self.hiddenLayers = [Dense<Float>]()
+    for hiddenUnitCount in hiddenUnitCounts {
+      self.hiddenLayers.append(Dense<Float>(
+        inputSize: inputSize,
+        outputSize: hiddenUnitCount,
+        activation: { leakyRelu($0) }))
+      inputSize = hiddenUnitCount
+    }
+    let C = Int32(graph.classCount)
+    let L = Int32(confusionLatentSize)
+    self.predictionLayer = Dense<Float>(inputSize: inputSize, outputSize: Int(C))
+    self.nodeLatentLayer = Sequential {
+      Dense<Float>(inputSize: inputSize, outputSize: Int(C * C * L))
+      Reshape<Float>(shape: Tensor<Int32>([-1, C, C, L]))
+    }
+  }
+
+  @differentiable
+  public func callAsFunction(_ nodes: [Int32]) -> GraphPredictions {
+    // We need features for all provided nodes and their neighbors.
+    let indexMap = withoutDerivative(at: nodes) { NodeIndexMap(nodes: $0, graph: graph) }
+    let projectionMatrices = indexMap.neighborProjectionMatrices(depth: hiddenUnitCounts.count)
+
+    // Compute features, label probabilities, and qualities for all requested nodes.
+    var allFeatures = graph.features.gathering(atIndices: indexMap.uniqueNodeIndices)
+    for i in 0..<hiddenUnitCounts.count {
+      allFeatures = leakyRelu(hiddenLayers[i](matmul(
+        projectionMatrices[i].adjacencyMatrix, transposed: true,
+        allFeatures, transposed: false)))
+    }
+    let allProbabilities = logSoftmax(predictionLayer(allFeatures))
+    let allLatentQ = nodeLatentLayer(allFeatures)
+
+    // Split up into the nodes and their neighbors.
+    let labelProbabilities = allProbabilities.gathering(atIndices: indexMap.nodeIndices)
+    let neighborLabelProbabilities = allProbabilities.gathering(atIndices: indexMap.neighborIndices)
+    let nodesLatentQ = allLatentQ.gathering(atIndices: indexMap.nodeIndices).expandingShape(at: 1)
+    let neighborsLatentQ = allLatentQ.gathering(atIndices: indexMap.neighborIndices)
+    let qualities = logSoftmax(
+      (nodesLatentQ + neighborsLatentQ).logSumExp(squeezingAxes: -1),
+      alongAxis: -2)
+
+    return GraphPredictions(
+      labelProbabilities: labelProbabilities,
+      neighborLabelProbabilities: neighborLabelProbabilities,
+      qualities: qualities,
+      qualitiesMask: indexMap.neighborsMask)
+  }
+
+  @differentiable
+  public func labelProbabilities(_ nodes: [Int32]) -> Tensor<Float> {
+    // We need features for all provided nodes and their neighbors.
+    let indexMap = withoutDerivative(at: nodes) { NodeIndexMap(nodes: $0, graph: graph) }
+    let projectionMatrices = indexMap.neighborProjectionMatrices(depth: hiddenUnitCounts.count)
+
+    // Compute features, label probabilities, and qualities for all requested nodes.
+    var allFeatures = graph.features.gathering(atIndices: indexMap.uniqueNodeIndices)
+    for i in 0..<hiddenUnitCounts.count {
+      allFeatures = leakyRelu(hiddenLayers[i](matmul(
+        projectionMatrices[i].adjacencyMatrix, transposed: true,
+        allFeatures, transposed: false)))
+    }
+    let allProbabilities = logSoftmax(predictionLayer(allFeatures))
+
+    // Split up the nodes from their neighbors.
+    return allProbabilities.gathering(atIndices: indexMap.nodeIndices)
   }
 
   public mutating func reset() {

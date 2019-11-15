@@ -14,6 +14,48 @@
 
 import TensorFlow
 
+@usableFromInline
+internal struct SparseTensor<Scalar: TensorFlowFloatingPoint> {
+  let indices: Tensor<Int32>
+  let values: Tensor<Scalar>
+  let shape: Tensor<Int64>
+
+  @usableFromInline
+  init(indices: Tensor<Int32>, values: Tensor<Scalar>, shape: Tensor<Int64>) {
+    self.indices = indices
+    self.values = values
+    self.shape = shape
+  }
+
+  @usableFromInline
+  @differentiable(wrt: dense, vjp: _vjpMatmul(withDense:adjointA:adjointB:))
+  func matmul(
+    withDense dense: Tensor<Scalar>,
+    adjointA: Bool = false,
+    adjointB: Bool = false
+  ) -> Tensor<Scalar> {
+    _Raw.sparseTensorDenseMatMul(
+      aIndices: indices,
+      aValues: values,
+      aShape: shape,
+      dense,
+      adjointA: adjointA,
+      adjointB: adjointB)
+  }
+
+  @usableFromInline
+  func _vjpMatmul(
+    withDense dense: Tensor<Scalar>,
+    adjointA: Bool = false,
+    adjointB: Bool = false
+  ) -> (Tensor<Scalar>, (Tensor<Scalar>) -> Tensor<Scalar>) {
+    (matmul(withDense: dense, adjointA: adjointA, adjointB: adjointB), { v in
+      let gradient = self.matmul(withDense: v, adjointA: !adjointA)
+      return adjointB ? gradient.transposed() : gradient
+    })
+  }
+}
+
 public struct NodeIndexMap {
   public let graph: Graph
 
@@ -32,19 +74,24 @@ public struct NodeIndexMap {
     var nodeIndices = [Int32]()
     var neighborIndices = [[Int32]](repeating: [], count: nodes.count)
     var uniqueNodeIndices = [Int32]()
+    var uniqueNodeIndicesMap = [Int32: Int32]()
     for (i, node) in nodes.enumerated() {
-      if let index = uniqueNodeIndices.firstIndex(of: node) {
-        nodeIndices.append(Int32(index))
+      if let index = uniqueNodeIndicesMap[node] {
+        nodeIndices.append(index)
       } else {
-        nodeIndices.append(Int32(uniqueNodeIndices.count))
+        let index = Int32(uniqueNodeIndices.count)
+        nodeIndices.append(index)
         uniqueNodeIndices.append(node)
+        uniqueNodeIndicesMap[node] = index
       }
       for neighbor in graph.neighbors[Int(node)] {
-        if let index = uniqueNodeIndices.firstIndex(of: neighbor) {
-          neighborIndices[i].append(Int32(index))
+        if let index = uniqueNodeIndicesMap[neighbor] {
+          neighborIndices[i].append(index)
         } else {
-          neighborIndices[i].append(Int32(uniqueNodeIndices.count))
+          let index = Int32(uniqueNodeIndices.count)
+          neighborIndices[i].append(index)
           uniqueNodeIndices.append(neighbor)
+          uniqueNodeIndicesMap[neighbor] = index
         }
       }
     }
@@ -69,37 +116,44 @@ public struct NodeIndexMap {
   }
 
   @inlinable
-  public func neighborProjectionMatrices(
+  internal func neighborProjectionMatrices(
     depth: Int
-  ) -> (nodeIndices: Tensor<Int32>, matrices: [Tensor<Float>]) {
-    var projectionMatrices = [Tensor<Float>]()
+  ) -> (nodeIndices: Tensor<Int32>, matrices: [SparseTensor<Float>]) {
+    var projectionMatrices = [SparseTensor<Float>]()
     projectionMatrices.reserveCapacity(depth)
     var previousIndices = uniqueNodeIndicesArray
+    var indicesMap = [Int32: Int32](
+      uniqueKeysWithValues: uniqueNodeIndicesArray.enumerated().map { ($1, Int32($0)) })
     for _ in 0..<depth {
       var currentIndices = previousIndices
-      var currentAdjacency = [[Float]](
-        repeating: [Float](
-          repeating: 0,
-          count: previousIndices.count),
-        count: previousIndices.count)
+      var indices = [Int32]()
+      var values = [Float]()
       for (pi, previousIndex) in previousIndices.enumerated() {
-        currentAdjacency[Int(pi)][Int(pi)] = 1
-        for neighbor in graph.neighbors[Int(previousIndex)] {
-          if let index = currentIndices.firstIndex(of: neighbor) {
-            currentAdjacency[Int(index)][Int(pi)] = 1
+        let neighbors = graph.neighbors[Int(previousIndex)]
+        let scale = Float(1) / Float(1 + neighbors.count)
+        indices.append(Int32(pi))
+        indices.append(Int32(pi))
+        values.append(scale)
+        for neighbor in neighbors {
+          if let index = indicesMap[neighbor] {
+            indices.append(index)
+            indices.append(Int32(pi))
+            values.append(scale)
           } else {
-            var newAdjacencyRow = [Float](repeating: 0, count: previousIndices.count)
-            newAdjacencyRow[Int(pi)] = 1
-            currentAdjacency.append(newAdjacencyRow)
+            let index = Int32(currentIndices.count)
+            indices.append(index)
+            indices.append(Int32(pi))
+            values.append(scale)
             currentIndices.append(neighbor)
+            indicesMap[neighbor] = index
           }
         }
       }
+      projectionMatrices.append(SparseTensor(
+        indices: Tensor<Int32>(shape: [indices.count / 2, 2], scalars: indices),
+        values: Tensor<Float>(values),
+        shape: Tensor<Int64>([Int64(currentIndices.count), Int64(previousIndices.count)])))
       previousIndices = currentIndices
-      let adjacencyMatrix = Tensor<Float>(
-        stacking: currentAdjacency.map(Tensor<Float>.init),
-        alongAxis: 0).transposed()
-      projectionMatrices.append(adjacencyMatrix / adjacencyMatrix.sum(alongAxes: 1))
     }
     return (nodeIndices: Tensor<Int32>(previousIndices), matrices: projectionMatrices.reversed())
   }
@@ -272,7 +326,9 @@ public struct GCNPredictor: GraphPredictor {
     // Compute features, label probabilities, and qualities for all requested nodes.
     var allFeatures = graph.features.gathering(atIndices: projectionMatrices.nodeIndices)
     for i in 0..<hiddenUnitCounts.count {
-      allFeatures = hiddenLayers[i](matmul(projectionMatrices.matrices[i], allFeatures))
+      allFeatures = hiddenLayers[i](projectionMatrices.matrices[i].matmul(
+        withDense: allFeatures,
+        adjointA: true))
     }
     let allProbabilities = logSoftmax(predictionLayer(allFeatures))
     let allLatentQ = nodeLatentLayer(allFeatures)
@@ -302,7 +358,9 @@ public struct GCNPredictor: GraphPredictor {
     // Compute features, label probabilities, and qualities for all requested nodes.
     var allFeatures = graph.features.gathering(atIndices: projectionMatrices.nodeIndices)
     for i in 0..<hiddenUnitCounts.count {
-      allFeatures = hiddenLayers[i](matmul(projectionMatrices.matrices[i], allFeatures))
+      allFeatures = hiddenLayers[i](projectionMatrices.matrices[i].matmul(
+        withDense: allFeatures,
+        adjointA: true))
     }
     let allProbabilities = logSoftmax(predictionLayer(allFeatures))
 

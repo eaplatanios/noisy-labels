@@ -102,7 +102,7 @@ where Optimizer.Model == Predictor {
     var batches = [Tensor<Float>]()
     for batch in Dataset(elements: Tensor<Int32>(nodeIndices)).batched(batchSize) {
       batches.append(expectedLabels.gathering(atIndices: batch))
-      // batches.append(predictor.labelProbabilities(batch))
+      // batches.append(predictor.labelProbabilities(batch.scalars))
     }
     if batches.count == 1 { return batches[0] }
     return Tensor<Float>(concatenating: batches, alongAxis: 0)

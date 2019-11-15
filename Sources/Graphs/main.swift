@@ -26,7 +26,7 @@ let graph = try Graph(loadFromDirectory: dataDirectory)
 //   confusionLatentSize: 4)
 let predictor = GCNPredictor(
   graph: graph,
-  hiddenUnitCounts: [16],
+  hiddenUnitCounts: [128],
   confusionLatentSize: 4)
 let optimizer = Adam(
   for: predictor,

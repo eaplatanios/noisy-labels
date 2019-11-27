@@ -24,10 +24,10 @@ let graph = try Graph(loadFromDirectory: dataDirectory)
 //   graph: graph,
 //   hiddenUnitCounts: [128],
 //   confusionLatentSize: 4)
-let predictor = GCNPredictor(
+let predictor = DecoupledGCNPredictor(
   graph: graph,
-  hiddenUnitCounts: [128],
-  confusionLatentSize: 4)
+  lHiddenUnitCounts: [128],
+  qHiddenUnitCounts: [128])
 let optimizer = Adam(
   for: predictor,
   learningRate: 1e-4,
@@ -44,7 +44,8 @@ var model = Model(
   batchSize: 128,
   useWarmStarting: false,
   mStepCount: 1000,
-  emStepCount: 100,
+  emStepCount: 5,
+  marginalStepCount: 1000,
   mStepLogCount: 100,
   emStepCallback: { dump(evaluate(model: $0, using: graph)) },
   verbose: true)

@@ -160,6 +160,7 @@ public struct NodeIndexMap {
 }
 
 public struct GraphPredictions: Differentiable {
+  // @noDerivative public var neighborIndices: Tensor<Int32>
   public var labelProbabilities: Tensor<Float>
   public var neighborLabelProbabilities: Tensor<Float>
   public var qualities: Tensor<Float>
@@ -168,11 +169,13 @@ public struct GraphPredictions: Differentiable {
   @inlinable
   @differentiable
   public init(
+    // neighborIndices: Tensor<Int32>,
     labelProbabilities: Tensor<Float>,
     neighborLabelProbabilities: Tensor<Float>,
     qualities: Tensor<Float>,
     qualitiesMask: Tensor<Float>
   ) {
+    // self.neighborIndices = neighborIndices
     self.labelProbabilities = labelProbabilities
     self.neighborLabelProbabilities = neighborLabelProbabilities
     self.qualities = qualities
@@ -244,6 +247,9 @@ public struct MLPPredictor: GraphPredictor {
     // Split up into the nodes and their neighbors.
     let labelProbabilities = allProbabilities.gathering(atIndices: indexMap.nodeIndices)
     let neighborLabelProbabilities = allProbabilities.gathering(atIndices: indexMap.neighborIndices)
+    // let neighborLabelProbabilities = withoutDerivative(at: indexMap) {
+    //   allProbabilities.gathering(atIndices: $0.neighborIndices)
+    // }
     let nodesLatentQ = allLatentQ.gathering(atIndices: indexMap.nodeIndices).expandingShape(at: 1)
     let neighborsLatentQ = allLatentQ.gathering(atIndices: indexMap.neighborIndices)
     let qualities = logSoftmax(
@@ -251,6 +257,7 @@ public struct MLPPredictor: GraphPredictor {
       alongAxis: -2)
 
     return GraphPredictions(
+      // neighborIndices: indexMap.neighborIndices,
       labelProbabilities: labelProbabilities,
       neighborLabelProbabilities: neighborLabelProbabilities,
       qualities: qualities,
@@ -339,6 +346,9 @@ public struct GCNPredictor: GraphPredictor {
     // Split up into the nodes and their neighbors.
     let labelProbabilities = allProbabilities.gathering(atIndices: indexMap.nodeIndices)
     let neighborLabelProbabilities = allProbabilities.gathering(atIndices: indexMap.neighborIndices)
+    // let neighborLabelProbabilities = withoutDerivative(at: indexMap) {
+    //   allProbabilities.gathering(atIndices: $0.neighborIndices)
+    // }
     let nodesLatentQ = allLatentQ.gathering(atIndices: indexMap.nodeIndices).expandingShape(at: 1)
     let neighborsLatentQ = allLatentQ.gathering(atIndices: indexMap.neighborIndices)
     let qualities = logSoftmax(
@@ -346,6 +356,7 @@ public struct GCNPredictor: GraphPredictor {
       alongAxis: -2)
 
     return GraphPredictions(
+      // neighborIndices: indexMap.neighborIndices,
       labelProbabilities: labelProbabilities,
       neighborLabelProbabilities: neighborLabelProbabilities,
       qualities: qualities,
@@ -459,6 +470,9 @@ public struct DecoupledGCNPredictor: GraphPredictor {
     let lOutput = logSoftmax(lOutputLayer(lFeatures))
     let labelProbabilities = lOutput.gathering(atIndices: indexMap.nodeIndices)
     let neighborLabelProbabilities = lOutput.gathering(atIndices: indexMap.neighborIndices)
+    // let neighborLabelProbabilities = withoutDerivative(at: indexMap) {
+    //   lOutput.gathering(atIndices: $0.neighborIndices)
+    // }
 
     // Compute the qualities.
     var qFeatures = graph.features.gathering(atIndices: indexMap.uniqueNodeIndices)
@@ -467,6 +481,7 @@ public struct DecoupledGCNPredictor: GraphPredictor {
     let qualities = logSoftmax(qOutput, alongAxis: -2)
 
     return GraphPredictions(
+      // neighborIndices: indexMap.neighborIndices,
       labelProbabilities: labelProbabilities,
       neighborLabelProbabilities: neighborLabelProbabilities,
       qualities: qualities,

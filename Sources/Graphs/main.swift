@@ -28,26 +28,29 @@ let predictor = DecoupledGCNPredictor(
   graph: graph,
   lHiddenUnitCounts: [128],
   qHiddenUnitCounts: [128])
-let optimizer = Adam(
-  for: predictor,
-  learningRate: 1e-4,
-  beta1: 0.9,
-  beta2: 0.99,
-  epsilon: 1e-8,
-  decay: 0)
+let optimizerFn = { () in
+  Adam(
+    for: predictor,
+    learningRate: 1e-3,
+    beta1: 0.9,
+    beta2: 0.999,
+    epsilon: 1e-8,
+    decay: 0)
+}
 var model = Model(
   predictor: predictor,
-  optimizer: optimizer,
+  optimizerFn: optimizerFn,
   entropyWeight: 0,
-  qualitiesRegularizationWeight: 1,
+  qualitiesRegularizationWeight: 0,
   randomSeed: 42,
   batchSize: 128,
   useWarmStarting: false,
   mStepCount: 1000,
   emStepCount: 5,
   marginalStepCount: 1000,
+  evaluationStepCount: 1,
   mStepLogCount: 100,
-  emStepCallback: { dump(evaluate(model: $0, using: graph)) },
+  emStepCallback: { dump(evaluate(model: $0, using: graph, usePrior: true)) },
   verbose: true)
 
 dump(evaluate(model: model, using: graph))

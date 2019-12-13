@@ -14,18 +14,31 @@
 
 import TensorFlow
 
+public struct Result {
+  public let trainAccuracy: Float
+  public let validationAccuracy: Float
+  public let testAccuracy: Float
+
+  public init(trainAccuracy: Float, validationAccuracy: Float, testAccuracy: Float) {
+    self.trainAccuracy = trainAccuracy
+    self.validationAccuracy = validationAccuracy
+    self.testAccuracy = testAccuracy
+  }
+}
+
 public func evaluate<P: GraphPredictor, O: Optimizer>(
   model: Model<P, O>,
-  using graph: Graph
-) -> (trainAccuracy: Float, validationAccuracy: Float, testAccuracy: Float) where O.Model == P {
+  using graph: Graph,
+  usePrior: Bool = false
+) -> Result where O.Model == P {
   func evaluate(_ indices: [Int32], _ labels: [Int]) -> Float {
-    let probabilities = model.labelProbabilities(for: indices)
+    let probabilities = model.labelProbabilities(for: indices, usePrior: usePrior)
     let predictions = probabilities.argmax(squeezingAxis: -1).scalars.map(Int.init)
     return zip(predictions, labels).map {
       $0 == $1 ? 1.0 : 0.0
     }.reduce(0, +) / Float(predictions.count)
   }
-  return (
+  return Result(
     trainAccuracy: evaluate(
       graph.trainNodes,
       graph.trainNodes.map { graph.labels[$0]! }),

@@ -41,10 +41,11 @@ where Dataset.Loader.Predictor: Equatable {
       withFeatures: learners.contains(where: { $0.value.requiresFeatures }))
   }
 
-  public func run(
+  public func run<G: RandomNumberGenerator>(
     callback: ((ExperimentResult) -> ())? = nil,
     runs: [ExperimentRun]? = nil,
-    parallelismLimit: Int? = nil
+    parallelismLimit: Int? = nil,
+    using generator: inout G
   ) {
     let runs = runs ?? dataset.runs
     let totalRunCount = runs.map { run in
@@ -70,10 +71,11 @@ where Dataset.Loader.Predictor: Equatable {
     for run in runs {
       switch run {
       case let .predictorSubsampling(predictorCount, repetitionCount):
-        // TODO: resetSeed()
         let predictorSamples = data.predictors.count <= predictorCount ?
           [[Predictor]](repeating: data.predictors, count: repetitionCount) :
-          (0..<repetitionCount).map { _ in sample(from: data.predictors, count: predictorCount) }
+          (0..<repetitionCount).map { _ in
+            sample(from: data.predictors, count: predictorCount, using: &generator)
+          }
         for (learnerName, learner) in learners {
           let queue = learner.supportsMultiThreading ? concurrentQueue : serialQueue
           for repetition in 0..<predictorSamples.count {
@@ -111,8 +113,7 @@ where Dataset.Loader.Predictor: Equatable {
         }
       case let .redundancy(maxRedundancy, repetitionCount):
         for _ in 0..<repetitionCount {
-          // TODO: resetSeed()
-          let filteredData = data.withMaxRedundancy(maxRedundancy)
+          let filteredData = data.withMaxRedundancy(maxRedundancy, using: &generator)
           for (learnerName, learner) in learners {
             let queue = learner.supportsMultiThreading ? concurrentQueue : serialQueue
             queue.async(group: dispatchGroup) { () in

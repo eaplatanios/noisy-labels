@@ -95,6 +95,10 @@ case .run: ()
 case _: throw Error.invalidCommand
 }
 
+let randomSeed: Int64 = 42
+let tensorFlowRandomSeed = convertToTensorFlowRandomSeed(randomSeed)
+var generator = PhiloxRandomNumberGenerator(seed: randomSeed)
+
 let datasetName: String! = parsedArguments.get(datasetArgument)
 if datasetName == nil { throw Error.datasetNotProvided }
 
@@ -102,30 +106,32 @@ func mmceLearner<Instance, Predictor, Label>(
   _ data: NoisyLabels.Data<Instance, Predictor, Label>,
   gamma: Float
 ) -> Learner {
-  let predictor = MinimaxConditionalEntropyPredictor(data: data, gamma: gamma)
-  let optimizer = Adam(
-    for: predictor,
-    learningRate: 1e-3,
-    beta1: 0.9,
-    beta2: 0.99,
-    epsilon: 1e-8,
-    decay: 0)
-  let model = EMModel(
-    predictor: predictor,
-    optimizer: optimizer,
-    entropyWeight: 0.0,
-    useSoftPredictions: false,
-    learningRateDecayFactor: 1.0)
-  return EMLearner(
-    for: model,
-    randomSeed: 42,
-    batchSize: 128,
-    useWarmStarting: true,
-    mStepCount: 1000,
-    emStepCount: 5,
-    marginalStepCount: 0,
-    mStepLogCount: 100,
-    verbose: false)
+  withRandomSeedForTensorFlow(tensorFlowRandomSeed) {
+    let predictor = MinimaxConditionalEntropyPredictor(data: data, gamma: gamma)
+    let optimizer = Adam(
+      for: predictor,
+      learningRate: 1e-3,
+      beta1: 0.9,
+      beta2: 0.99,
+      epsilon: 1e-8,
+      decay: 0)
+    let model = EMModel(
+      predictor: predictor,
+      optimizer: optimizer,
+      entropyWeight: 0.0,
+      useSoftPredictions: false,
+      learningRateDecayFactor: 1.0)
+    return EMLearner(
+      for: model,
+      randomSeed: randomSeed,
+      batchSize: 128,
+      useWarmStarting: true,
+      mStepCount: 1000,
+      emStepCount: 5,
+      marginalStepCount: 0,
+      mStepLogCount: 100,
+      verbose: false)
+  }
 }
 
 func twoStepMmceLearner<Instance, Predictor, Label>(
@@ -137,65 +143,67 @@ func twoStepMmceLearner<Instance, Predictor, Label>(
   confusionLatentSize: Int,
   gamma: Float
 ) -> Learner {
-  let aggregationPredictor = MinimaxConditionalEntropyPredictor(data: data, gamma: 0.25)
-  let aggregationOptimizer = Adam(
-    for: aggregationPredictor,
-    learningRate: 1e-3,
-    beta1: 0.9,
-    beta2: 0.99,
-    epsilon: 1e-8,
-    decay: 0)
-  let aggregationModel = EMModel(
-    predictor: aggregationPredictor,
-    optimizer: aggregationOptimizer,
-    entropyWeight: 0.0,
-    useSoftPredictions: false,
-    learningRateDecayFactor: 1.0)
-  let aggregationLearner = EMLearner(
-    for: aggregationModel,
-    randomSeed: 42,
-    batchSize: 128,
-    useWarmStarting: true,
-    mStepCount: 1000,
-    emStepCount: 5,
-    marginalStepCount: 0,
-    mStepLogCount: 100,
-    verbose: false)
-  let basePredictor = LNLPredictor(
-    data: data,
-    instanceEmbeddingSize: instanceEmbeddingSize,
-    predictorEmbeddingSize: predictorEmbeddingSize,
-    instanceHiddenUnitCounts: instanceHiddenUnitCounts,
-    predictorHiddenUnitCounts: predictorHiddenUnitCounts,
-    confusionLatentSize: confusionLatentSize,
-    gamma: gamma)
-  let baseOptimizer = Adam(
-    for: basePredictor,
-    learningRate: 1e-3,
-    beta1: 0.9,
-    beta2: 0.99,
-    epsilon: 1e-8,
-    decay: 0)
-  let baseModel = EMModel(
-    predictor: basePredictor,
-    optimizer: baseOptimizer,
-    entropyWeight: 0.01,
-    useSoftPredictions: true,
-    learningRateDecayFactor: 0.995)
-  let baseLearner = EMLearner(
-    for: baseModel,
-    randomSeed: 42,
-    batchSize: 512,
-    useWarmStarting: true,
-    mStepCount: 1000,
-    emStepCount: 1,
-    marginalStepCount: 0,
-    mStepLogCount: 100,
-    verbose: true)
-  return TwoStepLearner(
-    aggregationLearner: aggregationLearner,
-    baseLearner: baseLearner,
-    verbose: true)
+  withRandomSeedForTensorFlow(tensorFlowRandomSeed) {
+    let aggregationPredictor = MinimaxConditionalEntropyPredictor(data: data, gamma: 0.25)
+    let aggregationOptimizer = Adam(
+      for: aggregationPredictor,
+      learningRate: 1e-3,
+      beta1: 0.9,
+      beta2: 0.99,
+      epsilon: 1e-8,
+      decay: 0)
+    let aggregationModel = EMModel(
+      predictor: aggregationPredictor,
+      optimizer: aggregationOptimizer,
+      entropyWeight: 0.0,
+      useSoftPredictions: false,
+      learningRateDecayFactor: 1.0)
+    let aggregationLearner = EMLearner(
+      for: aggregationModel,
+      randomSeed: randomSeed,
+      batchSize: 128,
+      useWarmStarting: true,
+      mStepCount: 1000,
+      emStepCount: 5,
+      marginalStepCount: 0,
+      mStepLogCount: 100,
+      verbose: false)
+    let basePredictor = LNLPredictor(
+      data: data,
+      instanceEmbeddingSize: instanceEmbeddingSize,
+      predictorEmbeddingSize: predictorEmbeddingSize,
+      instanceHiddenUnitCounts: instanceHiddenUnitCounts,
+      predictorHiddenUnitCounts: predictorHiddenUnitCounts,
+      confusionLatentSize: confusionLatentSize,
+      gamma: gamma)
+    let baseOptimizer = Adam(
+      for: basePredictor,
+      learningRate: 1e-3,
+      beta1: 0.9,
+      beta2: 0.99,
+      epsilon: 1e-8,
+      decay: 0)
+    let baseModel = EMModel(
+      predictor: basePredictor,
+      optimizer: baseOptimizer,
+      entropyWeight: 0.01,
+      useSoftPredictions: true,
+      learningRateDecayFactor: 0.995)
+    let baseLearner = EMLearner(
+      for: baseModel,
+      randomSeed: randomSeed,
+      batchSize: 512,
+      useWarmStarting: true,
+      mStepCount: 1000,
+      emStepCount: 1,
+      marginalStepCount: 0,
+      mStepLogCount: 100,
+      verbose: true)
+    return TwoStepLearner(
+      aggregationLearner: aggregationLearner,
+      baseLearner: baseLearner,
+      verbose: true)
+  }
 }
 
 func twoStepMmceFeaturizedLearner<Instance, Predictor, Label>(
@@ -206,64 +214,66 @@ func twoStepMmceFeaturizedLearner<Instance, Predictor, Label>(
   confusionLatentSize: Int,
   gamma: Float
 ) -> Learner {
-  let aggregationPredictor = MinimaxConditionalEntropyPredictor(data: data, gamma: 0.25)
-  let aggregationOptimizer = Adam(
-    for: aggregationPredictor,
-    learningRate: 1e-3,
-    beta1: 0.9,
-    beta2: 0.99,
-    epsilon: 1e-8,
-    decay: 0)
-  let aggregationModel = EMModel(
-    predictor: aggregationPredictor,
-    optimizer: aggregationOptimizer,
-    entropyWeight: 0.0,
-    useSoftPredictions: false,
-    learningRateDecayFactor: 1.0)
-  let aggregationLearner = EMLearner(
-    for: aggregationModel,
-    randomSeed: 42,
-    batchSize: 128,
-    useWarmStarting: true,
-    mStepCount: 1000,
-    emStepCount: 5,
-    marginalStepCount: 0,
-    mStepLogCount: 100,
-    verbose: false)
-  let basePredictor = FeaturizedLNLPredictor(
-    data: data,
-    predictorEmbeddingSize: predictorEmbeddingSize,
-    instanceHiddenUnitCounts: instanceHiddenUnitCounts,
-    predictorHiddenUnitCounts: predictorHiddenUnitCounts,
-    confusionLatentSize: confusionLatentSize,
-    gamma: gamma)
-  let baseOptimizer = Adam(
-    for: basePredictor,
-    learningRate: 1e-3,
-    beta1: 0.9,
-    beta2: 0.99,
-    epsilon: 1e-8,
-    decay: 0)
-  let baseModel = EMModel(
-    predictor: basePredictor,
-    optimizer: baseOptimizer,
-    entropyWeight: 0.01,
-    useSoftPredictions: true,
-    learningRateDecayFactor: 0.995)
-  let baseLearner = EMLearner(
-    for: baseModel,
-    randomSeed: 42,
-    batchSize: 512,
-    useWarmStarting: true,
-    mStepCount: 1000,
-    emStepCount: 1,
-    marginalStepCount: 0,
-    mStepLogCount: 100,
-    verbose: true)
-  return TwoStepLearner(
-    aggregationLearner: aggregationLearner,
-    baseLearner: baseLearner,
-    verbose: true)
+  withRandomSeedForTensorFlow(tensorFlowRandomSeed) {
+    let aggregationPredictor = MinimaxConditionalEntropyPredictor(data: data, gamma: 0.25)
+    let aggregationOptimizer = Adam(
+      for: aggregationPredictor,
+      learningRate: 1e-3,
+      beta1: 0.9,
+      beta2: 0.99,
+      epsilon: 1e-8,
+      decay: 0)
+    let aggregationModel = EMModel(
+      predictor: aggregationPredictor,
+      optimizer: aggregationOptimizer,
+      entropyWeight: 0.0,
+      useSoftPredictions: false,
+      learningRateDecayFactor: 1.0)
+    let aggregationLearner = EMLearner(
+      for: aggregationModel,
+      randomSeed: randomSeed,
+      batchSize: 128,
+      useWarmStarting: true,
+      mStepCount: 1000,
+      emStepCount: 5,
+      marginalStepCount: 0,
+      mStepLogCount: 100,
+      verbose: false)
+    let basePredictor = FeaturizedLNLPredictor(
+      data: data,
+      predictorEmbeddingSize: predictorEmbeddingSize,
+      instanceHiddenUnitCounts: instanceHiddenUnitCounts,
+      predictorHiddenUnitCounts: predictorHiddenUnitCounts,
+      confusionLatentSize: confusionLatentSize,
+      gamma: gamma)
+    let baseOptimizer = Adam(
+      for: basePredictor,
+      learningRate: 1e-3,
+      beta1: 0.9,
+      beta2: 0.99,
+      epsilon: 1e-8,
+      decay: 0)
+    let baseModel = EMModel(
+      predictor: basePredictor,
+      optimizer: baseOptimizer,
+      entropyWeight: 0.01,
+      useSoftPredictions: true,
+      learningRateDecayFactor: 0.995)
+    let baseLearner = EMLearner(
+      for: baseModel,
+      randomSeed: randomSeed,
+      batchSize: 512,
+      useWarmStarting: true,
+      mStepCount: 1000,
+      emStepCount: 1,
+      marginalStepCount: 0,
+      mStepLogCount: 100,
+      verbose: true)
+    return TwoStepLearner(
+      aggregationLearner: aggregationLearner,
+      baseLearner: baseLearner,
+      verbose: true)
+  }
 }
 
 func lnlLearner<Instance, Predictor, Label>(
@@ -275,37 +285,39 @@ func lnlLearner<Instance, Predictor, Label>(
   confusionLatentSize: Int,
   gamma: Float
 ) -> Learner {
-  let predictor = LNLPredictor(
-    data: data,
-    instanceEmbeddingSize: instanceEmbeddingSize,
-    predictorEmbeddingSize: predictorEmbeddingSize,
-    instanceHiddenUnitCounts: instanceHiddenUnitCounts,
-    predictorHiddenUnitCounts: predictorHiddenUnitCounts,
-    confusionLatentSize: confusionLatentSize,
-    gamma: gamma)
-  let optimizer = Adam(
-    for: predictor,
-    learningRate: 1e-4,
-    beta1: 0.9,
-    beta2: 0.99,
-    epsilon: 1e-8,
-    decay: 0)
-  let model = EMModel(
-    predictor: predictor,
-    optimizer: optimizer,
-    entropyWeight: 0.01,
-    useSoftPredictions: true,
-    learningRateDecayFactor: 0.995)
-  return EMLearner(
-    for: model,
-    randomSeed: 42,
-    batchSize: 512,
-    useWarmStarting: true,
-    mStepCount: 1000,
-    emStepCount: 2,
-    marginalStepCount: 1000,
-    mStepLogCount: 100,
-    verbose: true)
+  withRandomSeedForTensorFlow(tensorFlowRandomSeed) {
+    let predictor = LNLPredictor(
+      data: data,
+      instanceEmbeddingSize: instanceEmbeddingSize,
+      predictorEmbeddingSize: predictorEmbeddingSize,
+      instanceHiddenUnitCounts: instanceHiddenUnitCounts,
+      predictorHiddenUnitCounts: predictorHiddenUnitCounts,
+      confusionLatentSize: confusionLatentSize,
+      gamma: gamma)
+    let optimizer = Adam(
+      for: predictor,
+      learningRate: 1e-4,
+      beta1: 0.9,
+      beta2: 0.99,
+      epsilon: 1e-8,
+      decay: 0)
+    let model = EMModel(
+      predictor: predictor,
+      optimizer: optimizer,
+      entropyWeight: 0.01,
+      useSoftPredictions: true,
+      learningRateDecayFactor: 0.995)
+    return EMLearner(
+      for: model,
+      randomSeed: randomSeed,
+      batchSize: 512,
+      useWarmStarting: true,
+      mStepCount: 1000,
+      emStepCount: 2,
+      marginalStepCount: 1000,
+      mStepLogCount: 100,
+      verbose: true)
+  }
 }
 
 func featurizedLNLLearner<Instance, Predictor, Label>(
@@ -316,36 +328,38 @@ func featurizedLNLLearner<Instance, Predictor, Label>(
   confusionLatentSize: Int,
   gamma: Float
 ) -> Learner {
-  let predictor = FeaturizedLNLPredictor(
-    data: data,
-    predictorEmbeddingSize: predictorEmbeddingSize,
-    instanceHiddenUnitCounts: instanceHiddenUnitCounts,
-    predictorHiddenUnitCounts: predictorHiddenUnitCounts,
-    confusionLatentSize: confusionLatentSize,
-    gamma: gamma)
-  let optimizer = Adam(
-    for: predictor,
-    learningRate: 1e-4,
-    beta1: 0.9,
-    beta2: 0.99,
-    epsilon: 1e-8,
-    decay: 0)
-  let model = EMModel(
-    predictor: predictor,
-    optimizer: optimizer,
-    entropyWeight: 0.0,
-    useSoftPredictions: true,
-    learningRateDecayFactor: 1.0)
-  return EMLearner(
-    for: model,
-    randomSeed: 42,
-    batchSize: 512,
-    useWarmStarting: true,
-    mStepCount: 1000,
-    emStepCount: 2,
-    marginalStepCount: 1000,
-    mStepLogCount: 100,
-    verbose: true)
+  withRandomSeedForTensorFlow(tensorFlowRandomSeed) {
+    let predictor = FeaturizedLNLPredictor(
+      data: data,
+      predictorEmbeddingSize: predictorEmbeddingSize,
+      instanceHiddenUnitCounts: instanceHiddenUnitCounts,
+      predictorHiddenUnitCounts: predictorHiddenUnitCounts,
+      confusionLatentSize: confusionLatentSize,
+      gamma: gamma)
+    let optimizer = Adam(
+      for: predictor,
+      learningRate: 1e-4,
+      beta1: 0.9,
+      beta2: 0.99,
+      epsilon: 1e-8,
+      decay: 0)
+    let model = EMModel(
+      predictor: predictor,
+      optimizer: optimizer,
+      entropyWeight: 0.0,
+      useSoftPredictions: true,
+      learningRateDecayFactor: 1.0)
+    return EMLearner(
+      for: model,
+      randomSeed: randomSeed,
+      batchSize: 512,
+      useWarmStarting: true,
+      mStepCount: 1000,
+      emStepCount: 2,
+      marginalStepCount: 1000,
+      mStepLogCount: 100,
+      verbose: true)
+  }
 }
 
 func decoupledLNLLearner<Instance, Predictor, Label>(
@@ -357,37 +371,39 @@ func decoupledLNLLearner<Instance, Predictor, Label>(
   confusionLatentSize: Int,
   gamma: Float
 ) -> Learner {
-  let predictor = DecoupledLNLPredictor(
-    data: data,
-    predictorEmbeddingSize: predictorEmbeddingSize,
-    instanceLHiddenUnitCounts: instanceLHiddenUnitCounts,
-    instanceQHiddenUnitCounts: instanceQHiddenUnitCounts,
-    predictorHiddenUnitCounts: predictorHiddenUnitCounts,
-    confusionLatentSize: confusionLatentSize,
-    gamma: gamma)
-  let optimizer = Adam(
-    for: predictor,
-    learningRate: 1e-3,
-    beta1: 0.9,
-    beta2: 0.99,
-    epsilon: 1e-8,
-    decay: 0)
-  let model = EMModel(
-    predictor: predictor,
-    optimizer: optimizer,
-    entropyWeight: 0.01,
-    useSoftPredictions: true,
-    learningRateDecayFactor: 1.0)
-  return EMLearner(
-    for: model,
-    randomSeed: 42,
-    batchSize: 128,
-    useWarmStarting: true,
-    mStepCount: 1000,
-    emStepCount: 5,
-    marginalStepCount: 0,
-    mStepLogCount: 100,
-    verbose: true)
+  withRandomSeedForTensorFlow(tensorFlowRandomSeed) {
+    let predictor = DecoupledLNLPredictor(
+      data: data,
+      predictorEmbeddingSize: predictorEmbeddingSize,
+      instanceLHiddenUnitCounts: instanceLHiddenUnitCounts,
+      instanceQHiddenUnitCounts: instanceQHiddenUnitCounts,
+      predictorHiddenUnitCounts: predictorHiddenUnitCounts,
+      confusionLatentSize: confusionLatentSize,
+      gamma: gamma)
+    let optimizer = Adam(
+      for: predictor,
+      learningRate: 1e-3,
+      beta1: 0.9,
+      beta2: 0.99,
+      epsilon: 1e-8,
+      decay: 0)
+    let model = EMModel(
+      predictor: predictor,
+      optimizer: optimizer,
+      entropyWeight: 0.01,
+      useSoftPredictions: true,
+      learningRateDecayFactor: 1.0)
+    return EMLearner(
+      for: model,
+      randomSeed: randomSeed,
+      batchSize: 128,
+      useWarmStarting: true,
+      mStepCount: 1000,
+      emStepCount: 5,
+      marginalStepCount: 0,
+      mStepLogCount: 100,
+      verbose: true)
+  }
 }
 
 func learners<Dataset: NoisyLabelsExperiments.Dataset>()
@@ -444,9 +460,9 @@ where Dataset.Loader.Predictor: Equatable {
       createFn: { data in
         featurizedLNLLearner(
           data,
-          predictorEmbeddingSize: 512,
-          instanceHiddenUnitCounts: [512],
-          predictorHiddenUnitCounts: [],
+          predictorEmbeddingSize: 16,
+          instanceHiddenUnitCounts: [16, 16, 16, 16],
+          predictorHiddenUnitCounts: [16, 16, 16, 16],
           confusionLatentSize: 1,
           gamma: 0.00)
       },
@@ -460,7 +476,7 @@ where Dataset.Loader.Predictor: Equatable {
     requiresFeatures: false,
     supportsMultiThreading: false)
   learners["MeTaL"] = Experiment<Dataset>.Learner(
-    createFn: { _ in MetalLearner(randomSeed: 42) },
+    createFn: { _ in MetalLearner(randomSeed: randomSeed) },
     requiresFeatures: false,
     supportsMultiThreading: false)
 #endif
@@ -477,13 +493,14 @@ where Dataset.Loader.Predictor: Equatable {
     callback: callback,
     runs: [
 //      .redundancy(maxRedundancy: 1, repetitionCount: 10),
-      .redundancy(maxRedundancy: 2, repetitionCount: 10),
-      .redundancy(maxRedundancy: 5, repetitionCount: 10),
-      .redundancy(maxRedundancy: 10, repetitionCount: 10),
-      .redundancy(maxRedundancy: 20, repetitionCount: 10),
+//      .redundancy(maxRedundancy: 2, repetitionCount: 10),
+//      .redundancy(maxRedundancy: 5, repetitionCount: 10),
+      .redundancy(maxRedundancy: 10, repetitionCount: 1),
+//      .redundancy(maxRedundancy: 20, repetitionCount: 10),
 //      .redundancy(maxRedundancy: 40, repetitionCount: 10),
     ],
-    parallelismLimit: parallelismLimit)
+    parallelismLimit: parallelismLimit,
+    using: &generator)
 }
 
 switch datasetName {

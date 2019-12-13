@@ -188,7 +188,7 @@ public struct EMLearner<
       var accumulatedNLL = Float(0.0)
       var accumulatedSteps = 0
       var datasetIterator = dataset.repeated()
-        // .shuffled(sampleCount: 10000, randomSeed: randomSeed)
+        .shuffled(sampleCount: 10000, randomSeed: randomSeed &+ Int64(emStepCount))
         .batched(batchSize).makeIterator()
       for step in 0..<marginalStepCount {
         accumulatedNLL += model.executeMarginalStep(using: datasetIterator.next()!)
@@ -206,7 +206,7 @@ public struct EMLearner<
       }
     }
 
-    // TODO: Do we really need this?
+    // TODO: Do we really need this? It depends on whether we just use the prior for predictions.
     // Final E-Step
     if verbose { logger.info("Running Final E-Step") }
     model.prepareForEStep()
@@ -228,9 +228,7 @@ public struct EMLearner<
     let instances = Tensor<Int32>(instances.map(Int32.init))
     var labelProbabilities = [[Tensor<Float>]]()
     for batch in Dataset(elements: instances).batched(batchSize) {
-      // TODO: Look into this.
-      // let predictions = model.labelProbabilities(batch)
-      let predictions = model.expectedLabels.map { exp($0.gathering(atIndices: batch)) }
+      let predictions = model.labelProbabilities(batch)
       if labelProbabilities.isEmpty {
         for p in predictions {
           labelProbabilities.append([p])

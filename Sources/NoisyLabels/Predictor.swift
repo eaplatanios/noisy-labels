@@ -458,7 +458,7 @@ public struct FeaturizedLNLPredictor: Predictor {
     let difficulties = difficultyLayers.differentiableMap(instances) { $1($0) }
     let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     let qualities = differentiableZip(difficulties, competences).differentiableMap {
-      logSoftmax($0.first + $0.second, alongAxis: -2).logSumExp(squeezingAxes: -1)
+      logSoftmax(($0.first + $0.second).logSumExp(squeezingAxes: -1), alongAxis: -2)
     }
     let alpha = self.alpha
     let beta = self.beta
@@ -499,7 +499,7 @@ public struct FeaturizedLNLPredictor: Predictor {
     let difficulties = difficultyLayers.differentiableMap(instances) { $1($0) }
     let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     return differentiableZip(difficulties, competences).differentiableMap {
-      logSoftmax($0.first + $0.second, alongAxis: -2).logSumExp(squeezingAxes: -1)
+      logSoftmax(($0.first + $0.second).logSumExp(squeezingAxes: -1), alongAxis: -2)
     }
   }
 
@@ -667,7 +667,7 @@ public struct DecoupledLNLPredictor: Predictor {
     let difficulties = difficultyLayers.differentiableMap(instancesQ) { $1($0) }
     let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     let qualities = differentiableZip(difficulties, competences).differentiableMap {
-      logSoftmax($0.first + $0.second, alongAxis: -2).logSumExp(squeezingAxes: -1)
+      logSoftmax(($0.first + $0.second).logSumExp(squeezingAxes: -1), alongAxis: -2)
     }
     let alpha = self.alpha
     let beta = self.beta
@@ -708,7 +708,7 @@ public struct DecoupledLNLPredictor: Predictor {
     let difficulties = difficultyLayers.differentiableMap(instances) { $1($0) }
     let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     return differentiableZip(difficulties, competences).differentiableMap {
-      logSoftmax($0.first + $0.second, alongAxis: -2).logSumExp(squeezingAxes: -1)
+      logSoftmax(($0.first + $0.second).logSumExp(squeezingAxes: -1), alongAxis: -2)
     }
   }
 

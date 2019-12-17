@@ -36,12 +36,19 @@ public extension Decodable {
 }
 
 @inlinable
-public func sample<T>(from array: [T], count: Int) -> [T] {
+public func sample<T, G: RandomNumberGenerator>(
+  from array: [T],
+  count: Int,
+  using generator: inout G
+) -> [T] {
   var a = array
   for i in 0..<count {
-    // TODO: !!!! Set the random seed.
-    let r = Int.random(in: i..<a.count)
+    let r = Int.random(in: i..<a.count, using: &generator)
     if i != r { a.swapAt(i, r) }
   }
   return Array(a[0..<count])
+}
+
+internal extension Array where Element == Float {
+  var mean: Float { reduce(0, { $0 + $1 }) / Float(count) }
 }

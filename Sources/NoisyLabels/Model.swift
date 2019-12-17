@@ -64,7 +64,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
     let labelMasks = self.labelMasks(for: data.labels)
     let qLogs = predictor.qualities(data.instances, data.predictors, data.labels)
     for l in 0..<labelCount {
-      let qLog = logSoftmax(qLogs[l].gathering(where: labelMasks[l]), alongAxis: 1)
+      let qLog = qLogs[l].gathering(where: labelMasks[l])
       let values = data.values.gathering(where: labelMasks[l])
       let yHat = useSoftPredictions && classCounts[l] == 2 ?
         Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
@@ -160,7 +160,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
       let yHat = useSoftPredictions && classCounts[l] == 2 ?
         Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
         Tensor<Float>(oneHotAtIndices: Tensor<Int32>(values), depth: classCounts[l])
-      let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -2, -1)
+      let qLogYHat = (qLog * yHat.expandingShape(at: 1)).sum(squeezingAxes: -1)
       let logLikelihood = (qLogYHat + hLog).logSumExp(squeezingAxes: -1).sum()
       let entropy = (exp(hLog) * hLog).sum()
       negativeLogLikelihood += entropyWeight * entropy - logLikelihood
@@ -169,7 +169,8 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
   }
 
   public func labelProbabilities(_ instances: Tensor<Int32>) -> [Tensor<Float>] {
-    predictor.labelProbabilities(instances).map(exp)
+    expectedLabels.map { $0.gathering(atIndices: instances) }
+//    predictor.labelProbabilities(instances).map(exp)
   }
 
   public func qualities(

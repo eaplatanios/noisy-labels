@@ -134,23 +134,25 @@ public struct Data<Instance, Predictor, Label> {
   }
 
   public var avgLabelsPerPredictor: Float {
-    var numLabels = 0
+    var labelCounts = [Float](repeating: 0, count: predictors.count)
     for l in 0..<labels.count {
-      for predictions in predictedLabels[l]!.values {
-        numLabels += predictions.instances.count
+      for (p, predictions) in predictedLabels[l]! {
+        labelCounts[p] += Float(predictions.instances.count)
       }
     }
-    return Float(numLabels) / Float(predictors.count)
+    return labelCounts.mean
   }
 
   public var avgLabelsPerItem: Float {
-    var numLabels = 0
+    var labelCounts = [Float](repeating: 0, count: instances.count)
     for l in 0..<labels.count {
       for predictions in predictedLabels[l]!.values {
-        numLabels += predictions.instances.count
+        for i in predictions.instances {
+          labelCounts[i] += 1
+        }
       }
     }
-    return Float(numLabels) / Float(instances.count)
+    return labelCounts.mean
   }
 
   public static func join(_ datasets: Data...) -> Data {
@@ -194,7 +196,8 @@ public struct Data<Instance, Predictor, Label> {
         if !trueLabels.keys.contains(l) {
           trueLabels[l] = [Int: Int]()
         }
-        for (iOld, trueLabel) in dataset.trueLabels[lOld]! {
+        // Note: The following sorting operation is necessary to guarantee reproducibility.
+        for (iOld, trueLabel) in dataset.trueLabels[lOld]!.sorted(by: { $0.key < $1.key }) {
           let instance = dataset.instances[iOld]
           let i = iIndices[iOld] ?? {
             let value = instances.count
@@ -212,7 +215,8 @@ public struct Data<Instance, Predictor, Label> {
         if !predictedLabels.keys.contains(l) {
           predictedLabels[l] = [Int: (instances: [Int], values: [Float])]()
         }
-        for (pOld, predictions) in dataset.predictedLabels[lOld]! {
+        // Note: The following sorting operation is necessary to guarantee reproducibility.
+        for (pOld, predictions) in dataset.predictedLabels[lOld]!.sorted(by: { $0.key < $1.key }) {
           let predictor = dataset.predictors[pOld]
           let p = pIndices[pOld] ?? {
             let value = predictors.count
@@ -266,8 +270,9 @@ public struct Data<Instance, Predictor, Label> {
     var predictors = [Int]()
     var labels = [Int]()
     var values = [Float]()
-    for (l, allPredictions) in self.predictedLabels {
-      for (p, predictions) in allPredictions {
+    // Note: The following sorting operations are necessary to guarantee reproducibility.
+    for (l, allPredictions) in self.predictedLabels.sorted(by: { $0.key < $1.key }) {
+      for (p, predictions) in allPredictions.sorted(by: { $0.key < $1.key }) {
         instances.append(contentsOf: predictions.instances)
         predictors.append(contentsOf: [Int](repeating: p, count: predictions.instances.count))
         labels.append(contentsOf: [Int](repeating: l, count: predictions.instances.count))
@@ -366,7 +371,8 @@ extension Data where Label: Equatable {
 
       // Filter the true labels.
       trueLabels[l] = [Int: Int]()
-      for (iOld, trueLabel) in self.trueLabels[lOld]! {
+      // Note: The following sorting operation is necessary to guarantee reproducibility.
+      for (iOld, trueLabel) in self.trueLabels[lOld]!.sorted(by: { $0.key < $1.key }) {
         let i = iIndices[iOld] ?? {
           let value = instances.count
           instances.append(self.instances[iOld])
@@ -381,7 +387,8 @@ extension Data where Label: Equatable {
 
       // Filter the predicted labels.
       predictedLabels[l] = [Int: (instances: [Int], values: [Float])]()
-      for (pOld, predictions) in self.predictedLabels[lOld]! {
+      // Note: The following sorting operation is necessary to guarantee reproducibility.
+      for (pOld, predictions) in self.predictedLabels[lOld]!.sorted(by: { $0.key < $1.key }) {
         let p = pIndices[pOld] ?? {
           let value = predictors.count
           predictors.append(self.predictors[pOld])
@@ -453,7 +460,8 @@ extension Data where Predictor: Equatable {
 
       // Filter the true labels.
       trueLabels[l] = [Int: Int]()
-      for (iOld, trueLabel) in self.trueLabels[l]! {
+      // Note: The following sorting operation is necessary to guarantee reproducibility.
+      for (iOld, trueLabel) in self.trueLabels[l]!.sorted(by: { $0.key < $1.key }) {
         let i: Int = {
           if keepInstances {
             return iOld
@@ -470,7 +478,8 @@ extension Data where Predictor: Equatable {
 
       // Filter the predicted labels.
       predictedLabels[l] = [Int: (instances: [Int], values: [Float])]()
-      for (pOld, predictions) in self.predictedLabels[l]! {
+      // Note: The following sorting operation is necessary to guarantee reproducibility.
+      for (pOld, predictions) in self.predictedLabels[l]!.sorted(by: { $0.key < $1.key }) {
         let predictor = self.predictors[pOld]
         if !predictors.contains(predictor) {
           continue
@@ -521,8 +530,10 @@ extension Data where Predictor: Equatable {
 }
 
 extension Data {
-  // TODO: !!!! Random seed.
-  public func withMaxRedundancy(_ maxRedundancy: Int) -> Data {
+  public func withMaxRedundancy<G: RandomNumberGenerator>(
+    _ maxRedundancy: Int,
+    using generator: inout G
+  ) -> Data {
     var pIndices = [Int: Int]()
     var newPredictors = [Predictor]()
     var predictedLabels = [Int: [Int: (instances: [Int], values: [Float])]]()
@@ -532,27 +543,33 @@ extension Data {
 
     // Create dictionary mapping from labels to dictionaries from instances to their annotations.
     var instanceAnnotations = [Int: [Int: [(predictor: Int, value: Float)]]]()
-    for (l, _) in labels.enumerated() {
+    for l in labels.indices {
       instanceAnnotations[l] = [Int: [(predictor: Int, value: Float)]]()
       for i in self.instances.indices {
         instanceAnnotations[l]![i] = [(predictor: Int, value: Float)]()
       }
-      for (pOld, predictions) in self.predictedLabels[l]! {
+      // Note: The following sorting operation is necessary to guarantee reproducibility.
+      for (pOld, predictions) in self.predictedLabels[l]!.sorted(by: { $0.key < $1.key }) {
         for (i, value) in zip(predictions.instances, predictions.values) {
           instanceAnnotations[l]![i]!.append((predictor: pOld, value: value))
         }
       }
 
       // Discard some annotations to enforce the requested redundancy limit.
-      for (i, annotations) in instanceAnnotations[l]! {
+      // Note: The following sorting operation is necessary to guarantee reproducibility.
+      for (i, annotations) in instanceAnnotations[l]!.sorted(by: { $0.key < $1.key }) {
         if annotations.count > maxRedundancy {
-          instanceAnnotations[l]![i] = sample(from: annotations, count: maxRedundancy)
+          instanceAnnotations[l]![i] = sample(
+            from: annotations,
+            count: maxRedundancy,
+            using: &generator)
         }
       }
 
       // Filter the predicted labels.
       predictedLabels[l] = [Int: (instances: [Int], values: [Float])]()
-      for (i, annotations) in instanceAnnotations[l]! {
+      // Note: The following sorting operation is necessary to guarantee reproducibility.
+      for (i, annotations) in instanceAnnotations[l]!.sorted(by: { $0.key < $1.key }) {
         for (pOld, value) in annotations {
           let predictor = self.predictors[pOld]
           let p = pIndices[pOld] ?? {

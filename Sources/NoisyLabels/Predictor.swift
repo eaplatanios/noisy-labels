@@ -44,20 +44,17 @@ public struct Predictions: Differentiable {
   public var labelProbabilities: [Tensor<Float>]
   public var qualities: [Tensor<Float>]
   public var regularizationTerm: Tensor<Float>
-  @noDerivative public let includePredictionsPrior: Bool
 
   @inlinable
   @differentiable
   public init(
     labelProbabilities: [Tensor<Float>],
     qualities: [Tensor<Float>],
-    regularizationTerm: Tensor<Float>,
-    includePredictionsPrior: Bool
+    regularizationTerm: Tensor<Float>
   ) {
     self.labelProbabilities = labelProbabilities
     self.qualities = qualities
     self.regularizationTerm = regularizationTerm
-    self.includePredictionsPrior = includePredictionsPrior
   }
 }
 
@@ -89,7 +86,7 @@ public struct MinimaxConditionalEntropyPredictor: Predictor {
     self.predictorCount = data.predictors.count
     self.labelCount = data.labels.count
     self.classCounts = data.classCounts
-    self.alpha = 0.5 * gamma * pow(Float(2 * labelCount), 2.0)
+    self.alpha = 0.5 * gamma * pow(Float(labelCount), 2.0)
     self.beta = alpha * data.avgLabelsPerPredictor / data.avgLabelsPerItem
     let instanceCount = data.instances.count
     let predictorCount = data.predictors.count
@@ -119,8 +116,7 @@ public struct MinimaxConditionalEntropyPredictor: Predictor {
     return Predictions(
       labelProbabilities: labelProbabilities(instances),
       qualities: qualities,
-      regularizationTerm: regularizationTerm,
-      includePredictionsPrior: false)
+      regularizationTerm: regularizationTerm)
   }
 
   @inlinable
@@ -157,8 +153,7 @@ public struct LNLPredictor: Predictor {
   @noDerivative public let predictorCount: Int
   @noDerivative public let labelCount: Int
   @noDerivative public let classCounts: [Int]
-  @noDerivative public let alpha: Float
-  @noDerivative public let beta: Float
+  @noDerivative public let gamma: Float
   @noDerivative public let adjustFeaturesMagnitude: Bool
   @noDerivative public let instanceEmbeddingSize: Int?
   @noDerivative public let predictorEmbeddingSize: Int?
@@ -188,8 +183,7 @@ public struct LNLPredictor: Predictor {
     self.predictorCount = data.predictors.count
     self.labelCount = data.labels.count
     self.classCounts = data.classCounts
-    self.alpha = 0.5 * gamma * pow(Float(2 * labelCount), 2.0)
-    self.beta = alpha * data.avgLabelsPerPredictor / data.avgLabelsPerItem
+    self.gamma = gamma / data.avgLabelsPerItem
     self.adjustFeaturesMagnitude = adjustFeaturesMagnitude
     self.instanceEmbeddingSize = instanceEmbeddingSize
     self.predictorEmbeddingSize = predictorEmbeddingSize
@@ -262,20 +256,14 @@ public struct LNLPredictor: Predictor {
     let difficulties = difficultyLayers.differentiableMap(instances) { $1($0) }
     let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     let qualities = differentiableZip(difficulties, competences).differentiableMap {
-      logSoftmax($0.first + $0.second, alongAxis: -2).logSumExp(squeezingAxes: -1)
+      logSoftmax(($0.first + $0.second).logSumExp(squeezingAxes: -1), alongAxis: -1)
     }
-    let alpha = self.alpha
-    let beta = self.beta
-    let regularizationTerms = differentiableZip(
-      difficulties.differentiableMap{ $0.squared().sum() },
-      competences.differentiableMap{ $0.squared().sum() }
-    ).differentiableMap { beta * $0.first + alpha * $0.second }
+    let regularizationTerms = qualities.differentiableMap { $0.squared().sum() }
     let regularizationTerm = regularizationTerms.differentiableReduce(Tensor(0.0), { $0 + $1 })
     return Predictions(
       labelProbabilities: labelProbabilities,
       qualities: qualities,
-      regularizationTerm: regularizationTerm,
-      includePredictionsPrior: true)
+      regularizationTerm: gamma * regularizationTerm)
   }
 
   @inlinable
@@ -303,7 +291,7 @@ public struct LNLPredictor: Predictor {
     let difficulties = difficultyLayers.differentiableMap(instances) { $1($0) }
     let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     return differentiableZip(difficulties, competences).differentiableMap {
-      logSoftmax($0.first + $0.second, alongAxis: -2).logSumExp(squeezingAxes: -1)
+      logSoftmax(($0.first + $0.second).logSumExp(squeezingAxes: -1), alongAxis: -1)
     }
   }
 
@@ -360,8 +348,7 @@ public struct FeaturizedLNLPredictor: Predictor {
   @noDerivative public let predictorCount: Int
   @noDerivative public let labelCount: Int
   @noDerivative public let classCounts: [Int]
-  @noDerivative public let alpha: Float
-  @noDerivative public let beta: Float
+  @noDerivative public let gamma: Float
   @noDerivative public let adjustFeaturesMagnitude: Bool
   @noDerivative public let predictorEmbeddingSize: Int
   @noDerivative public let instanceHiddenUnitCounts: [Int]
@@ -389,8 +376,7 @@ public struct FeaturizedLNLPredictor: Predictor {
     self.predictorCount = data.predictors.count
     self.labelCount = data.labels.count
     self.classCounts = data.classCounts
-    self.alpha = 0.5 * gamma * pow(Float(2 * labelCount), 2.0)
-    self.beta = alpha * data.avgLabelsPerPredictor / data.avgLabelsPerItem
+    self.gamma = gamma / data.avgLabelsPerItem
     self.adjustFeaturesMagnitude = adjustFeaturesMagnitude
     self.predictorEmbeddingSize = predictorEmbeddingSize
     self.instanceHiddenUnitCounts = instanceHiddenUnitCounts
@@ -458,20 +444,14 @@ public struct FeaturizedLNLPredictor: Predictor {
     let difficulties = difficultyLayers.differentiableMap(instances) { $1($0) }
     let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     let qualities = differentiableZip(difficulties, competences).differentiableMap {
-      logSoftmax($0.first + $0.second, alongAxis: -2).logSumExp(squeezingAxes: -1)
+      logSoftmax(($0.first + $0.second).logSumExp(squeezingAxes: -1), alongAxis: -1)
     }
-    let alpha = self.alpha
-    let beta = self.beta
-    let regularizationTerms = differentiableZip(
-      difficulties.differentiableMap{ $0.squared().sum() },
-      competences.differentiableMap{ $0.squared().sum() }
-    ).differentiableMap { beta * $0.first + alpha * $0.second }
+    let regularizationTerms = qualities.differentiableMap { $0.squared().sum() }
     let regularizationTerm = regularizationTerms.differentiableReduce(Tensor(0.0), { $0 + $1 })
     return Predictions(
       labelProbabilities: labelProbabilities,
       qualities: qualities,
-      regularizationTerm: regularizationTerm,
-      includePredictionsPrior: true)
+      regularizationTerm: gamma * regularizationTerm)
   }
 
   @inlinable
@@ -499,7 +479,7 @@ public struct FeaturizedLNLPredictor: Predictor {
     let difficulties = difficultyLayers.differentiableMap(instances) { $1($0) }
     let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     return differentiableZip(difficulties, competences).differentiableMap {
-      logSoftmax($0.first + $0.second, alongAxis: -2).logSumExp(squeezingAxes: -1)
+      logSoftmax(($0.first + $0.second).logSumExp(squeezingAxes: -1), alongAxis: -1)
     }
   }
 
@@ -550,8 +530,7 @@ public struct DecoupledLNLPredictor: Predictor {
   @noDerivative public let predictorCount: Int
   @noDerivative public let labelCount: Int
   @noDerivative public let classCounts: [Int]
-  @noDerivative public let alpha: Float
-  @noDerivative public let beta: Float
+  @noDerivative public let gamma: Float
   @noDerivative public let adjustFeaturesMagnitude: Bool
   @noDerivative public let predictorEmbeddingSize: Int
   @noDerivative public let instanceLHiddenUnitCounts: [Int]
@@ -582,8 +561,7 @@ public struct DecoupledLNLPredictor: Predictor {
     self.predictorCount = data.predictors.count
     self.labelCount = data.labels.count
     self.classCounts = data.classCounts
-    self.alpha = 0.5 * gamma * pow(Float(2 * labelCount), 2.0)
-    self.beta = alpha * data.avgLabelsPerPredictor / data.avgLabelsPerItem
+    self.gamma = gamma / data.avgLabelsPerItem
     self.adjustFeaturesMagnitude = adjustFeaturesMagnitude
     self.predictorEmbeddingSize = predictorEmbeddingSize
     self.instanceLHiddenUnitCounts = instanceLHiddenUnitCounts
@@ -667,20 +645,14 @@ public struct DecoupledLNLPredictor: Predictor {
     let difficulties = difficultyLayers.differentiableMap(instancesQ) { $1($0) }
     let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     let qualities = differentiableZip(difficulties, competences).differentiableMap {
-      logSoftmax($0.first + $0.second, alongAxis: -2).logSumExp(squeezingAxes: -1)
+      logSoftmax(($0.first + $0.second).logSumExp(squeezingAxes: -1), alongAxis: -2)
     }
-    let alpha = self.alpha
-    let beta = self.beta
-    let regularizationTerms = differentiableZip(
-      difficulties.differentiableMap{ $0.squared().sum() },
-      competences.differentiableMap{ $0.squared().sum() }
-    ).differentiableMap { beta * $0.first + alpha * $0.second }
+    let regularizationTerms = qualities.differentiableMap { $0.squared().sum() }
     let regularizationTerm = regularizationTerms.differentiableReduce(Tensor(0.0), { $0 + $1 })
     return Predictions(
       labelProbabilities: labelProbabilities,
       qualities: qualities,
-      regularizationTerm: regularizationTerm,
-      includePredictionsPrior: true)
+      regularizationTerm: gamma * regularizationTerm)
   }
 
   @inlinable
@@ -708,7 +680,7 @@ public struct DecoupledLNLPredictor: Predictor {
     let difficulties = difficultyLayers.differentiableMap(instances) { $1($0) }
     let competences = competenceLayers.differentiableMap(predictors) { $1($0) }
     return differentiableZip(difficulties, competences).differentiableMap {
-      logSoftmax($0.first + $0.second, alongAxis: -2).logSumExp(squeezingAxes: -1)
+      logSoftmax(($0.first + $0.second).logSumExp(squeezingAxes: -1), alongAxis: -2)
     }
   }
 

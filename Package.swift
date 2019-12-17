@@ -18,8 +18,8 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-package-manager.git", from: "0.4.0")
   ],
   targets: [
-    .target(name: "NoisyLabels", dependencies: ["Logging", "ZIPFoundation"]),
-    .target(name: "Graphs", dependencies: ["Logging", "ZIPFoundation"]),
+    .target(name: "NoisyLabels", dependencies: ["Logging", "Progress", "ZIPFoundation"]),
+    .target(name: "Graphs", dependencies: ["Logging", "Progress", "ZIPFoundation"]),
     .target(name: "NoisyLabelsExperiments", dependencies: ["NoisyLabels", "Progress", "SPMUtility"]),
   ]
 )

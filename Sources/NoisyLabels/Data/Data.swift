@@ -134,23 +134,25 @@ public struct Data<Instance, Predictor, Label> {
   }
 
   public var avgLabelsPerPredictor: Float {
-    var numLabels = 0
+    var labelCounts = [Float](repeating: 0, count: predictors.count)
     for l in 0..<labels.count {
-      for predictions in predictedLabels[l]!.values {
-        numLabels += predictions.instances.count
+      for (p, predictions) in predictedLabels[l]! {
+        labelCounts[p] += Float(predictions.instances.count)
       }
     }
-    return Float(numLabels) / Float(predictors.count)
+    return labelCounts.mean
   }
 
   public var avgLabelsPerItem: Float {
-    var numLabels = 0
+    var labelCounts = [Float](repeating: 0, count: instances.count)
     for l in 0..<labels.count {
       for predictions in predictedLabels[l]!.values {
-        numLabels += predictions.instances.count
+        for i in predictions.instances {
+          labelCounts[i] += 1
+        }
       }
     }
-    return Float(numLabels) / Float(instances.count)
+    return labelCounts.mean
   }
 
   public static func join(_ datasets: Data...) -> Data {

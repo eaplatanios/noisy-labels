@@ -25,7 +25,7 @@ where Dataset.Loader.Predictor: Equatable {
 
   public let dataDir: URL
   public let dataset: Dataset
-  public let learners: [String: Learner]
+  public let learners: [(String, Learner)]
 
   internal let data: NoisyLabels.Data<Instance, Predictor, Label>
   internal let concurrentQueue = DispatchQueue(label: "Noisy Labels", attributes: .concurrent)
@@ -33,12 +33,12 @@ where Dataset.Loader.Predictor: Equatable {
   internal let dispatchGroup = DispatchGroup()
   internal let progressBarDispatchQueue = DispatchQueue(label: "Progress Bar")
 
-  public init(dataDir: URL, dataset: Dataset, learners: [String: Learner]) throws {
+  public init(dataDir: URL, dataset: Dataset, learners: [(String, Learner)]) throws {
     self.dataDir = dataDir
     self.dataset = dataset
     self.learners = learners
     self.data = try dataset.loader(dataDir).load(
-      withFeatures: learners.contains(where: { $0.value.requiresFeatures }))
+      withFeatures: learners.contains(where: { $0.1.requiresFeatures }))
   }
 
   public func run<G: RandomNumberGenerator>(

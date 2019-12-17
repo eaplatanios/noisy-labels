@@ -48,3 +48,7 @@ public func sample<T, G: RandomNumberGenerator>(
   }
   return Array(a[0..<count])
 }
+
+internal extension Array where Element == Float {
+  var mean: Float { reduce(0, { $0 + $1 }) / Float(count) }
+}

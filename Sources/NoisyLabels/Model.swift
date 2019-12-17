@@ -64,7 +64,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
     let labelMasks = self.labelMasks(for: data.labels)
     let qLogs = predictor.qualities(data.instances, data.predictors, data.labels)
     for l in 0..<labelCount {
-      let qLog = logSoftmax(qLogs[l].gathering(where: labelMasks[l]), alongAxis: 1)
+      let qLog = qLogs[l].gathering(where: labelMasks[l])
       let values = data.values.gathering(where: labelMasks[l])
       let yHat = useSoftPredictions && classCounts[l] == 2 ?
         Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
@@ -100,9 +100,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
         qualities: predictions.qualities
       ).differentiableMap { parameters -> Tensor<Float> in
         let hLog = parameters.labelProbabilities.gathering(where: parameters.labelMask)
-        let qLog = logSoftmax(
-          parameters.qualities.gathering(where: parameters.labelMask),
-          alongAxis: 1)
+        let qLog = parameters.qualities.gathering(where: parameters.labelMask)
         let values = data.values.gathering(where: parameters.labelMask)
         let classCount = hLog.shape[1]
         let yHat = { useSoftPredictions && classCount == 2 ?
@@ -134,9 +132,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
         qualities: predictions.qualities
       ).differentiableMap { parameters -> Tensor<Float> in
         let hLog = parameters.labelProbabilities.gathering(where: parameters.labelMask)
-        let qLog = logSoftmax(
-          parameters.qualities.gathering(where: parameters.labelMask),
-          alongAxis: 1)
+        let qLog = parameters.qualities.gathering(where: parameters.labelMask)
         let values = data.values.gathering(where: parameters.labelMask)
         let classCount = hLog.shape[1]
         let yHat = { useSoftPredictions && classCount == 2 ?
@@ -159,7 +155,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
     var negativeLogLikelihood = predictions.regularizationTerm
     for l in 0..<labelCount {
       let hLog = predictions.labelProbabilities[l].gathering(where: labelMasks[l])
-      let qLog = logSoftmax(predictions.qualities[l].gathering(where: labelMasks[l]), alongAxis: 1)
+      let qLog = predictions.qualities[l].gathering(where: labelMasks[l])
       let values = data.values.gathering(where: labelMasks[l])
       let yHat = useSoftPredictions && classCounts[l] == 2 ?
         Tensor<Float>(stacking: [1.0 - values, values], alongAxis: -1) :
@@ -186,7 +182,7 @@ where Optimizer.Model == Predictor, Optimizer.Scalar == Float {
     let predictions = predictor(instances, predictors, labels)
     return (0..<labelCount).map { l -> Tensor<Float> in
       let hLog = predictions.labelProbabilities[l].gathering(where: labelMasks[l])
-      let qLog = logSoftmax(predictions.qualities[l].gathering(where: labelMasks[l]), alongAxis: 1)
+      let qLog = predictions.qualities[l].gathering(where: labelMasks[l])
       let qLogHLog = _Raw.matrixDiagPart(qLog) + hLog
       return qLogHLog.logSumExp(squeezingAxes: -1)
     }

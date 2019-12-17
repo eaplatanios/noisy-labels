@@ -96,17 +96,25 @@ case _: throw Error.invalidCommand
 }
 
 let randomSeed: Int64 = 42
-let tensorFlowRandomSeed = convertToTensorFlowRandomSeed(randomSeed)
 var generator = PhiloxRandomNumberGenerator(seed: randomSeed)
 
 let datasetName: String! = parsedArguments.get(datasetArgument)
 if datasetName == nil { throw Error.datasetNotProvided }
 
+var currentTensorFlowRandomSeed = randomSeed
+func tensorFlowRandomSeed() -> (graph: Int32, op: Int32) {
+  let hash = (randomSeed &+ currentTensorFlowRandomSeed).bytes().sha512()
+  currentTensorFlowRandomSeed += 1
+  let graph = Int32(bytes: [hash[0], hash[1], hash[2], hash[3]], startingAt: 0)
+  let op = Int32(bytes: [hash[4], hash[5], hash[6], hash[7]], startingAt: 0)
+  return (graph: graph, op: op)
+}
+
 func mmceLearner<Instance, Predictor, Label>(
   _ data: NoisyLabels.Data<Instance, Predictor, Label>,
   gamma: Float
 ) -> Learner {
-  withRandomSeedForTensorFlow(tensorFlowRandomSeed) {
+  withRandomSeedForTensorFlow(tensorFlowRandomSeed()) {
     let predictor = MinimaxConditionalEntropyPredictor(data: data, gamma: gamma)
     let optimizer = Adam(
       for: predictor,
@@ -143,7 +151,7 @@ func twoStepMmceLearner<Instance, Predictor, Label>(
   confusionLatentSize: Int,
   gamma: Float
 ) -> Learner {
-  withRandomSeedForTensorFlow(tensorFlowRandomSeed) {
+  withRandomSeedForTensorFlow(tensorFlowRandomSeed()) {
     let aggregationPredictor = MinimaxConditionalEntropyPredictor(data: data, gamma: 0.25)
     let aggregationOptimizer = Adam(
       for: aggregationPredictor,
@@ -214,7 +222,7 @@ func twoStepMmceFeaturizedLearner<Instance, Predictor, Label>(
   confusionLatentSize: Int,
   gamma: Float
 ) -> Learner {
-  withRandomSeedForTensorFlow(tensorFlowRandomSeed) {
+  withRandomSeedForTensorFlow(tensorFlowRandomSeed()) {
     let aggregationPredictor = MinimaxConditionalEntropyPredictor(data: data, gamma: 0.25)
     let aggregationOptimizer = Adam(
       for: aggregationPredictor,
@@ -285,7 +293,7 @@ func lnlLearner<Instance, Predictor, Label>(
   confusionLatentSize: Int,
   gamma: Float
 ) -> Learner {
-  withRandomSeedForTensorFlow(tensorFlowRandomSeed) {
+  withRandomSeedForTensorFlow(tensorFlowRandomSeed()) {
     let predictor = LNLPredictor(
       data: data,
       instanceEmbeddingSize: instanceEmbeddingSize,
@@ -328,7 +336,7 @@ func featurizedLNLLearner<Instance, Predictor, Label>(
   confusionLatentSize: Int,
   gamma: Float
 ) -> Learner {
-  withRandomSeedForTensorFlow(tensorFlowRandomSeed) {
+  withRandomSeedForTensorFlow(tensorFlowRandomSeed()) {
     let predictor = FeaturizedLNLPredictor(
       data: data,
       predictorEmbeddingSize: predictorEmbeddingSize,
@@ -352,7 +360,7 @@ func featurizedLNLLearner<Instance, Predictor, Label>(
     return EMLearner(
       for: model,
       randomSeed: randomSeed,
-      batchSize: 512,
+      batchSize: 128,
       useWarmStarting: true,
       mStepCount: 1000,
       emStepCount: 2,
@@ -371,7 +379,7 @@ func decoupledLNLLearner<Instance, Predictor, Label>(
   confusionLatentSize: Int,
   gamma: Float
 ) -> Learner {
-  withRandomSeedForTensorFlow(tensorFlowRandomSeed) {
+  withRandomSeedForTensorFlow(tensorFlowRandomSeed()) {
     let predictor = DecoupledLNLPredictor(
       data: data,
       predictorEmbeddingSize: predictorEmbeddingSize,
@@ -406,19 +414,18 @@ func decoupledLNLLearner<Instance, Predictor, Label>(
   }
 }
 
-func learners<Dataset: NoisyLabelsExperiments.Dataset>()
--> [String: Experiment<Dataset>.Learner]
+func learners<Dataset: NoisyLabelsExperiments.Dataset>() -> [(String, Experiment<Dataset>.Learner)]
 where Dataset.Loader.Predictor: Equatable {
-  var learners: [String: Experiment<Dataset>.Learner] = [
-//    "MAJ": Experiment<Dataset>.Learner(
-//      createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
-//      requiresFeatures: false,
-//      supportsMultiThreading: true),
-//    "MMCE": Experiment<Dataset>.Learner(
+  var learners: [(String, Experiment<Dataset>.Learner)] = [
+    ("MAJ", Experiment<Dataset>.Learner(
+      createFn: { _ in MajorityVoteLearner(useSoftMajorityVote: false) },
+      requiresFeatures: false,
+      supportsMultiThreading: true)),
+//    ("MMCE", Experiment<Dataset>.Learner(
 //      createFn: { data in mmceLearner(data, gamma: 0.25) },
 //      requiresFeatures: false,
-//      supportsMultiThreading: true),
-//    "MMCE-ME": Experiment<Dataset>.Learner(
+//      supportsMultiThreading: true)),
+//    ("MMCE-ME", Experiment<Dataset>.Learner(
 //      createFn: { data in
 //        twoStepMmceLearner(
 //          data,
@@ -430,8 +437,8 @@ where Dataset.Loader.Predictor: Equatable {
 //          gamma: 0.00)
 //      },
 //      requiresFeatures: true,
-//      supportsMultiThreading: true),
-//    "MMCE-M": Experiment<Dataset>.Learner(
+//      supportsMultiThreading: true)),
+//    ("MMCE-M", Experiment<Dataset>.Learner(
 //      createFn: { data in
 //        twoStepMmceFeaturizedLearner(
 //          data,
@@ -442,8 +449,8 @@ where Dataset.Loader.Predictor: Equatable {
 //          gamma: 0.00)
 //      },
 //      requiresFeatures: true,
-//      supportsMultiThreading: true),
-//    "LNL-E": Experiment<Dataset>.Learner(
+//      supportsMultiThreading: true)),
+//    ("LNL-E", Experiment<Dataset>.Learner(
 //      createFn: { data in
 //        lnlLearner(
 //          data,
@@ -455,8 +462,8 @@ where Dataset.Loader.Predictor: Equatable {
 //          gamma: 0.00)
 //      },
 //      requiresFeatures: false,
-//      supportsMultiThreading: true),
-    "LNL": Experiment<Dataset>.Learner(
+//      supportsMultiThreading: true)),
+    ("LNL", Experiment<Dataset>.Learner(
       createFn: { data in
         featurizedLNLLearner(
           data,
@@ -464,10 +471,10 @@ where Dataset.Loader.Predictor: Equatable {
           instanceHiddenUnitCounts: [16, 16, 16, 16],
           predictorHiddenUnitCounts: [16, 16, 16, 16],
           confusionLatentSize: 1,
-          gamma: 0.00)
+          gamma: 0.1)
       },
       requiresFeatures: true,
-      supportsMultiThreading: true)
+      supportsMultiThreading: true))
   ]
 
 #if SNORKEL
@@ -492,12 +499,12 @@ where Dataset.Loader.Predictor: Equatable {
   experiment.run(
     callback: callback,
     runs: [
-//      .redundancy(maxRedundancy: 1, repetitionCount: 10),
-//      .redundancy(maxRedundancy: 2, repetitionCount: 10),
-//      .redundancy(maxRedundancy: 5, repetitionCount: 10),
-      .redundancy(maxRedundancy: 10, repetitionCount: 1),
-//      .redundancy(maxRedundancy: 20, repetitionCount: 10),
-//      .redundancy(maxRedundancy: 40, repetitionCount: 10),
+//      .redundancy(maxRedundancy: 1, repetitionCount: 1),
+      .redundancy(maxRedundancy: 2, repetitionCount: 3),
+      .redundancy(maxRedundancy: 5, repetitionCount: 3),
+      .redundancy(maxRedundancy: 10, repetitionCount: 3),
+      .redundancy(maxRedundancy: 20, repetitionCount: 3),
+//      .redundancy(maxRedundancy: 40, repetitionCount: 1),
     ],
     parallelismLimit: parallelismLimit,
     using: &generator)

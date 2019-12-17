@@ -43,7 +43,7 @@ public struct MajorityVoteLearner: Learner {
     for l in 0..<data.labels.count {
       var values = [Float](repeating: 0.0, count: instanceCount)
       var counts = [Int](repeating: 0, count: instanceCount)
-      for predictions in data.predictedLabels[l]!.values {
+      for predictions in data.predictedLabels[l]!.sorted(by: { $0.key < $1.key }).map({ $0.1 }) {
         for (i, v) in zip(predictions.instances, predictions.values) {
           values[i] += useSoftMajorityVote ? v : (v >= 0.5 ? 1.0 : 0.0)
           counts[i] += 1
@@ -65,7 +65,7 @@ public struct MajorityVoteLearner: Learner {
         count: labelCount),
       count: instanceCount)
     for l in 0..<labelCount {
-      for (p, predictions) in data.predictedLabels[l]! {
+      for (p, predictions) in data.predictedLabels[l]!.sorted(by: { $0.key < $1.key }) {
         for (i, v) in zip(predictions.instances, predictions.values) {
           if (v >= 0.5) == (estimatedLabelProbabilities[l][i] >= 0.5) {
             estimatedQualities[i][l][p] = 1.0

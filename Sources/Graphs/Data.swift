@@ -115,8 +115,9 @@ extension Graph {
     self.nodeCount = features.count
     self.featureCount = features[0].count
     self.classCount = classCount
+    let ff: [Tensor<Float>] = features.map { f in Tensor<Float>(shape: [f.count], scalars: f) }
     self.features = Tensor<Float>(
-      stacking: features.map(Tensor<Float>.init),
+      stacking: ff,
       alongAxis: 0)
     self.neighbors = neighbors
     self.labels = labels

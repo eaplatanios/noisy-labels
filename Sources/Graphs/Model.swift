@@ -29,6 +29,7 @@ where Optimizer.Model == Predictor {
   public let marginalStepCount: Int?
   public let evaluationStepCount: Int
   public let mStepLogCount: Int?
+  public let mConvergenceEvaluationCount: Int?
   public let emStepCallback: (Model) -> Void
   public let verbose: Bool
 
@@ -53,6 +54,7 @@ where Optimizer.Model == Predictor {
     marginalStepCount: Int? = nil,
     evaluationStepCount: Int = 1,
     mStepLogCount: Int? = 100,
+    mConvergenceEvaluationCount: Int? = 10,
     emStepCallback: @escaping (Model) -> Void = { _ in },
     verbose: Bool = false
   ) {
@@ -69,6 +71,7 @@ where Optimizer.Model == Predictor {
     self.marginalStepCount = marginalStepCount
     self.evaluationStepCount = evaluationStepCount
     self.mStepLogCount = mStepLogCount
+    self.mConvergenceEvaluationCount = mConvergenceEvaluationCount
     self.emStepCallback = emStepCallback
     self.verbose = verbose
     self.eStepAccumulator = Tensor<Float>(zeros: [predictor.nodeCount, predictor.classCount])
@@ -95,7 +98,12 @@ where Optimizer.Model == Predictor {
     for emStep in 0..<emStepCount {
       // M-Step
       if verbose { logger.info("Iteration \(emStep) - Running M-Step") }
-      performMStep(data: allUnlabeledData, emStep: emStep)
+      performMStep(
+        data: allUnlabeledData,
+        emStep: emStep,
+        eStepLabeledData: labeledData,
+        eStepUnlabeledData: unlabeledData,
+        eStepUnlabeledNodeIndices: unlabeledNodeIndices)
 
       // E-Step
       if verbose { logger.info("Iteration \(emStep) - Running E-Step") }
@@ -109,7 +117,10 @@ where Optimizer.Model == Predictor {
 
     performMarginalStep(
       labeledData: labeledData,
-      unlabeledData: unlabeledData)
+      unlabeledData: unlabeledData,
+      eStepLabeledData: labeledData,
+      eStepUnlabeledData: unlabeledData,
+      eStepUnlabeledNodeIndices: unlabeledNodeIndices)
     performEStep(
       labeledData: labeledData,
       unlabeledData: unlabeledData,
@@ -214,13 +225,13 @@ where Optimizer.Model == Predictor {
     if let unlabeledData = unlabeledData {
       for batch in unlabeledData.batched(batchSize) {
         let predictions = predictor(batch.scalars)
-        let qualities = predictions.qualities                                                       // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-        let qualitiesMask = predictions.qualitiesMask                                               // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-        let qLog = logSoftmax(qualities, alongAxis: 2)                                              // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+        let qLog = predictions.qualities                                                            // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+        let qLogMask = predictions.qualitiesMask                                                    // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
         // TODO: What if we want to use the expected labels directly?
-        let neighborValues = exp(predictions.neighborLabelProbabilities)                            // [BatchSize, MaxNeighborCount, ClassCount]
+        // let neighborValues = exp(predictions.neighborLabelProbabilities)                            // [BatchSize, MaxNeighborCount, ClassCount]
+        let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)
         let yHat = neighborValues.expandingShape(at: 2)                                             // [BatchSize, MaxNeighborCount, 1, ClassCount]
-        let mask = qualitiesMask.expandingShape(at: -1)                                             // [BatchSize, MaxNeighborCount, 1]
+        let mask = qLogMask.expandingShape(at: -1)                                                  // [BatchSize, MaxNeighborCount, 1]
         let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)          // [BatchSize, ClassCount]
         eStepAccumulator = _Raw.tensorScatterAdd(
           eStepAccumulator,
@@ -295,7 +306,14 @@ where Optimizer.Model == Predictor {
     predictor = bestPredictor
   }
 
-  private mutating func performMStep(data: Dataset<Tensor<Int32>>, emStep: Int) {
+  private mutating func performMStep(
+    data: Dataset<Tensor<Int32>>,
+    emStep: Int,
+    eStepLabeledData: Dataset<LabeledData>,
+    eStepUnlabeledData: Dataset<Tensor<Int32>>?,
+    eStepUnlabeledNodeIndices: Dataset<Tensor<Int32>>
+  ) {
+    var convergenceStepCount = 0
     bestResult = nil
     if !useWarmStarting {
       predictor.reset()
@@ -316,21 +334,23 @@ where Optimizer.Model == Predictor {
           predictor -> Tensor<Float> in
           let predictions = predictor(batch.scalars)
           let hLog = predictions.labelProbabilities
-          let qualities = predictions.qualities                                                     // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-          let qualitiesMask = predictions.qualitiesMask                                             // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-          let qLog = logSoftmax(qualities, alongAxis: 2)                                            // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-          let neighborValues = exp(predictions.neighborLabelProbabilities)                          // [BatchSize, MaxNeighborCount, ClassCount]
-          // let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)
+          let qLog = predictions.qualities                                                          // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          let qLogMask = predictions.qualitiesMask                                                  // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          // let neighborValues = exp(predictions.neighborLabelProbabilities)                          // [BatchSize, MaxNeighborCount, ClassCount]
+          let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)
           let yHat = neighborValues.expandingShape(at: 2)                                           // [BatchSize, MaxNeighborCount, 1, ClassCount]
-          let mask = qualitiesMask.expandingShape(at: -1)                                           // [BatchSize, MaxNeighborCount, 1]
+          let mask = qLogMask.expandingShape(at: -1)                                                // [BatchSize, MaxNeighborCount, 1]
           let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)        // [BatchSize, ClassCount]
           let yExpected = expectedLabels.gathering(atIndices: batch)
-          let maskedQ = qualities * mask.expandingShape(at: -1)
-          let qualitiesRegularizer = maskedQ[0..., 0..., 0, 0] + maskedQ[0..., 0..., 1, 1]
-          return entropyWeight * (exp(hLog) * hLog).sum() -
+          let maskedQEntropy = exp(qLog) * qLog * mask.expandingShape(at: -1)
+          let qEntropy = qualitiesRegularizationWeight * maskedQEntropy.sum()
+          let hEntropy = entropyWeight * (exp(hLog) * hLog).sum()
+          let compilerBug = predictions.neighborLabelProbabilities.sum() * 0.0
+          return compilerBug +
+            hEntropy +
+            qEntropy -
             (yExpected * hLog).sum() -
-            (yExpected * qLogYHat).sum() -
-            qualitiesRegularizationWeight * qualitiesRegularizer.sum()
+            (yExpected * qLogYHat).sum()
         }
         optimizer.update(&predictor, along: gradient)
         accumulatedNLL += negativeLogLikelihood.scalarized()
@@ -347,29 +367,48 @@ where Optimizer.Model == Predictor {
         }
       }
       if mStep % evaluationStepCount == 0 {
-        let result = evaluate(model: self, using: predictor.graph, usePrior: true)
+        // Run the E step.
+        var modelCopy = self
+        modelCopy.performEStep(
+          labeledData: eStepLabeledData,
+          unlabeledData: eStepUnlabeledData,
+          unlabeledNodeIndices: eStepUnlabeledNodeIndices)
+
+        let result = evaluate(model: modelCopy, using: predictor.graph, usePrior: false)
         if let bestResult = self.bestResult {
           if result.validationAccuracy > bestResult.validationAccuracy {
+            logger.info("Best predictor accuracy: \(result.validationAccuracy)")
             self.bestPredictor = predictor
             self.bestResult = result
+            convergenceStepCount = 0
+          } else {
+            convergenceStepCount += 1
+            if let c = self.mConvergenceEvaluationCount, convergenceStepCount > c {
+              predictor = bestPredictor
+              return
+            }
           }
         } else {
           self.bestPredictor = predictor
           self.bestResult = result
         }
       }
-      // if mStep % 10 == 0 {
-      //   dump(evaluate(model: self, using: predictor.graph, usePrior: true))
-      // }
+    //  if mStep % 10 == 0 {
+    //    dump(evaluate(model: self, using: predictor.graph, usePrior: false))
+    //  }
     }
     predictor = bestPredictor
   }
 
   private mutating func performMarginalStep(
     labeledData: Dataset<LabeledData>,
-    unlabeledData: Dataset<Tensor<Int32>>
+    unlabeledData: Dataset<Tensor<Int32>>,
+    eStepLabeledData: Dataset<LabeledData>,
+    eStepUnlabeledData: Dataset<Tensor<Int32>>?,
+    eStepUnlabeledNodeIndices: Dataset<Tensor<Int32>>
   ) {
     guard let marginalStepCount = self.marginalStepCount else { return }
+    var convergenceStepCount = 0
     bestResult = nil
     // if !useWarmStarting {
     //   predictor.reset()
@@ -388,33 +427,6 @@ where Optimizer.Model == Predictor {
       .prefetched(count: 10)
       .makeIterator()
     for mStep in 0..<marginalStepCount {
-      let labeledBatch = labeledDataIterator.next()!
-      withLearningPhase(.training) {
-        let (negativeLogLikelihood, gradient) = predictor.valueWithGradient {
-          [expectedLabels, entropyWeight, qualitiesRegularizationWeight]
-          predictor -> Tensor<Float> in
-          let predictions = predictor(labeledBatch.nodeIndices.scalars)
-          let hLog = predictions.labelProbabilities
-          let qualities = predictions.qualities                                                     // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-          let qualitiesMask = predictions.qualitiesMask                                             // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-          let qLog = logSoftmax(qualities, alongAxis: 2)                                            // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-          let neighborValues = exp(predictions.neighborLabelProbabilities)                          // [BatchSize, MaxNeighborCount, ClassCount]
-          // let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)
-          let yHat = neighborValues.expandingShape(at: 2)                                           // [BatchSize, MaxNeighborCount, 1, ClassCount]
-          let mask = qualitiesMask.expandingShape(at: -1)                                           // [BatchSize, MaxNeighborCount, 1]
-          let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)        // [BatchSize, ClassCount]
-          let yExpected = expectedLabels.gathering(atIndices: labeledBatch.nodeIndices)
-          let logLikelihood = (yExpected * (qLogYHat + hLog)).sum()
-          let maskedQ = qualities * mask.expandingShape(at: -1)
-          let qualitiesRegularizer = maskedQ[0..., 0..., 0, 0] + maskedQ[0..., 0..., 1, 1]
-          return entropyWeight * (exp(hLog) * hLog).sum() -
-            logLikelihood -
-            qualitiesRegularizationWeight * qualitiesRegularizer.sum()
-        }
-        optimizer.update(&predictor, along: gradient)
-        accumulatedNLL += negativeLogLikelihood.scalarized()
-        accumulatedSteps += 1
-      }
       let unlabeledBatch = unlabeledDataIterator.next()!
       withLearningPhase(.training) {
         let (negativeLogLikelihood, gradient) = predictor.valueWithGradient {
@@ -422,20 +434,22 @@ where Optimizer.Model == Predictor {
           predictor -> Tensor<Float> in
           let predictions = predictor(unlabeledBatch.scalars)
           let hLog = predictions.labelProbabilities
-          let qualities = predictions.qualities                                                     // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-          let qualitiesMask = predictions.qualitiesMask                                             // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-          let qLog = logSoftmax(qualities, alongAxis: 2)                                            // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-          let neighborValues = exp(predictions.neighborLabelProbabilities)                          // [BatchSize, MaxNeighborCount, ClassCount]
-          // let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)
+          let qLog = predictions.qualities                                                          // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          let qLogMask = predictions.qualitiesMask                                                  // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          // let neighborValues = exp(predictions.neighborLabelProbabilities)                       // [BatchSize, MaxNeighborCount, ClassCount]
+          let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)
           let yHat = neighborValues.expandingShape(at: 2)                                           // [BatchSize, MaxNeighborCount, 1, ClassCount]
-          let mask = qualitiesMask.expandingShape(at: -1)                                           // [BatchSize, MaxNeighborCount, 1]
+          let mask = qLogMask.expandingShape(at: -1)                                                // [BatchSize, MaxNeighborCount, 1]
           let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)        // [BatchSize, ClassCount]
           let logLikelihood = (qLogYHat + hLog).logSumExp(squeezingAxes: -1).sum()
-          let maskedQ = qualities * mask.expandingShape(at: -1)
-          let qualitiesRegularizer = maskedQ[0..., 0..., 0, 0] + maskedQ[0..., 0..., 1, 1]
-          return entropyWeight * (exp(hLog) * hLog).sum() -
-            logLikelihood -
-            qualitiesRegularizationWeight * qualitiesRegularizer.sum()
+          let maskedQEntropy = exp(qLog) * qLog * mask.expandingShape(at: -1)
+          let qEntropy = qualitiesRegularizationWeight * maskedQEntropy.sum()
+          let hEntropy = entropyWeight * (exp(hLog) * hLog).sum()
+          let compilerBug = predictions.neighborLabelProbabilities.sum() * 0.0
+          return compilerBug +
+            hEntropy +
+            qEntropy -
+            logLikelihood
         }
         optimizer.update(&predictor, along: gradient)
         accumulatedNLL += negativeLogLikelihood.scalarized()
@@ -451,21 +465,63 @@ where Optimizer.Model == Predictor {
           }
         }
       }
+      let labeledBatch = labeledDataIterator.next()!
+      withLearningPhase(.training) {
+        let (negativeLogLikelihood, gradient) = predictor.valueWithGradient {
+          [expectedLabels, entropyWeight, qualitiesRegularizationWeight]
+          predictor -> Tensor<Float> in
+          let predictions = predictor(labeledBatch.nodeIndices.scalars)
+          let hLog = predictions.labelProbabilities
+          let qLog = predictions.qualities                                                          // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          let qLogMask = predictions.qualitiesMask                                                  // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          // let neighborValues = exp(predictions.neighborLabelProbabilities)                       // [BatchSize, MaxNeighborCount, ClassCount]
+          let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)
+          let yHat = neighborValues.expandingShape(at: 2)                                           // [BatchSize, MaxNeighborCount, 1, ClassCount]
+          let mask = qLogMask.expandingShape(at: -1)                                                // [BatchSize, MaxNeighborCount, 1]
+          let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)        // [BatchSize, ClassCount]
+          let yExpected = expectedLabels.gathering(atIndices: labeledBatch.nodeIndices)
+          let logLikelihood = (yExpected * (qLogYHat + hLog)).sum()
+          let maskedQEntropy = exp(qLog) * qLog * mask.expandingShape(at: -1)
+          let qEntropy = qualitiesRegularizationWeight * maskedQEntropy.sum()
+          let hEntropy = entropyWeight * (exp(hLog) * hLog).sum()
+          let compilerBug = predictions.neighborLabelProbabilities.sum() * 0.0
+          return compilerBug +
+            hEntropy +
+            qEntropy -
+            logLikelihood
+        }
+        optimizer.update(&predictor, along: gradient)
+        accumulatedNLL += negativeLogLikelihood.scalarized()
+        accumulatedSteps += 1
+      }
+
+      // Run the E step.
+      performEStep(
+        labeledData: eStepLabeledData,
+        unlabeledData: eStepUnlabeledData,
+        unlabeledNodeIndices: eStepUnlabeledNodeIndices)
+
       if mStep % evaluationStepCount == 0 {
-        let result = evaluate(model: self, using: predictor.graph, usePrior: true)
+        // Perform evaluation.
+        let result = evaluate(model: self, using: predictor.graph, usePrior: false)
         if let bestResult = self.bestResult {
           if result.validationAccuracy > bestResult.validationAccuracy {
+            logger.info("Best predictor accuracy: \(result.validationAccuracy)")
             self.bestPredictor = predictor
             self.bestResult = result
+            convergenceStepCount = 0
+          } else {
+            convergenceStepCount += 1
+            if let c = self.mConvergenceEvaluationCount, convergenceStepCount > c {
+              predictor = bestPredictor
+              return
+            }
           }
         } else {
           self.bestPredictor = predictor
           self.bestResult = result
         }
       }
-      // if mStep % 10 == 0 {
-      //   dump(evaluate(model: self, using: predictor.graph, usePrior: true))
-      // }
     }
     predictor = bestPredictor
   }

@@ -160,7 +160,7 @@ public struct NodeIndexMap {
 }
 
 public struct GraphPredictions: Differentiable {
-  // @noDerivative public var neighborIndices: Tensor<Int32>
+  @noDerivative public var neighborIndices: Tensor<Int32>
   public var labelProbabilities: Tensor<Float>
   public var neighborLabelProbabilities: Tensor<Float>
   public var qualities: Tensor<Float>
@@ -169,13 +169,13 @@ public struct GraphPredictions: Differentiable {
   @inlinable
   @differentiable
   public init(
-    // neighborIndices: Tensor<Int32>,
+    neighborIndices: Tensor<Int32>,
     labelProbabilities: Tensor<Float>,
     neighborLabelProbabilities: Tensor<Float>,
     qualities: Tensor<Float>,
     qualitiesMask: Tensor<Float>
   ) {
-    // self.neighborIndices = neighborIndices
+    self.neighborIndices = neighborIndices
     self.labelProbabilities = labelProbabilities
     self.neighborLabelProbabilities = neighborLabelProbabilities
     self.qualities = qualities
@@ -206,7 +206,7 @@ public struct MLPPredictor: GraphPredictor {
   @noDerivative public let hiddenUnitCounts: [Int]
   @noDerivative public let confusionLatentSize: Int
 
-  public var hiddenLayers: [Dense<Float>]
+  public var hiddenLayers: [Sequential<Dropout<Float>, Dense<Float>>]
   public var predictionLayer: Dense<Float>
   public var nodeLatentLayer: Sequential<Dense<Float>, Reshape<Float>>
 
@@ -216,12 +216,15 @@ public struct MLPPredictor: GraphPredictor {
     self.confusionLatentSize = confusionLatentSize
 
     var inputSize = graph.featureCount
-    self.hiddenLayers = [Dense<Float>]()
+    self.hiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
     for hiddenUnitCount in hiddenUnitCounts {
-      self.hiddenLayers.append(Dense<Float>(
-        inputSize: inputSize,
-        outputSize: hiddenUnitCount,
-        activation: { leakyRelu($0) }))
+      self.hiddenLayers.append(Sequential {
+        Dropout<Float>(probability: 0.5)
+        Dense<Float>(
+          inputSize: inputSize,
+          outputSize: hiddenUnitCount,
+          activation: gelu)
+      })
       inputSize = hiddenUnitCount
     }
     let C = Int32(graph.classCount)
@@ -257,7 +260,7 @@ public struct MLPPredictor: GraphPredictor {
       alongAxis: -2)
 
     return GraphPredictions(
-      // neighborIndices: indexMap.neighborIndices,
+      neighborIndices: indexMap.neighborIndices,
       labelProbabilities: labelProbabilities,
       neighborLabelProbabilities: neighborLabelProbabilities,
       qualities: qualities,
@@ -274,12 +277,15 @@ public struct MLPPredictor: GraphPredictor {
 
   public mutating func reset() {
     var inputSize = graph.featureCount
-    self.hiddenLayers = [Dense<Float>]()
+    self.hiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
     for hiddenUnitCount in hiddenUnitCounts {
-      self.hiddenLayers.append(Dense<Float>(
-        inputSize: inputSize,
-        outputSize: hiddenUnitCount,
-        activation: { leakyRelu($0) }))
+      self.hiddenLayers.append(Sequential {
+        Dropout<Float>(probability: 0.5)
+        Dense<Float>(
+          inputSize: inputSize,
+          outputSize: hiddenUnitCount,
+          activation: gelu)
+      })
       inputSize = hiddenUnitCount
     }
     let C = Int32(graph.classCount)
@@ -297,7 +303,7 @@ public struct GCNPredictor: GraphPredictor {
   @noDerivative public let hiddenUnitCounts: [Int]
   @noDerivative public let confusionLatentSize: Int
 
-  public var hiddenLayers: [Sequential<Dropout<Float>, DenseNoBias<Float>>]
+  public var hiddenLayers: [Sequential<Dropout<Float>, Dense<Float>>]
   public var predictionLayer: Dense<Float>
   public var nodeLatentLayer: Sequential<Dense<Float>, Reshape<Float>>
 
@@ -307,14 +313,14 @@ public struct GCNPredictor: GraphPredictor {
     self.confusionLatentSize = confusionLatentSize
 
     var inputSize = graph.featureCount
-    self.hiddenLayers = [Sequential<Dropout<Float>, DenseNoBias<Float>>]()
+    self.hiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
     for hiddenUnitCount in hiddenUnitCounts {
       self.hiddenLayers.append(Sequential {
         Dropout<Float>(probability: 0.5)
-        DenseNoBias<Float>(
+        Dense<Float>(
           inputSize: inputSize,
           outputSize: hiddenUnitCount,
-          activation: { leakyRelu($0) })
+          activation: gelu)
       })
       inputSize = hiddenUnitCount
     }
@@ -346,8 +352,8 @@ public struct GCNPredictor: GraphPredictor {
     // Split up into the nodes and their neighbors.
     let labelProbabilities = allProbabilities.gathering(atIndices: indexMap.nodeIndices)
     let neighborLabelProbabilities = allProbabilities.gathering(atIndices: indexMap.neighborIndices)
-    // let neighborLabelProbabilities = withoutDerivative(at: indexMap) {
-    //   allProbabilities.gathering(atIndices: $0.neighborIndices)
+    // let neighborLabelProbabilities = withoutDerivative(at: allProbabilities) {
+    //   $0.gathering(atIndices: indexMap.neighborIndices)
     // }
     let nodesLatentQ = allLatentQ.gathering(atIndices: indexMap.nodeIndices).expandingShape(at: 1)
     let neighborsLatentQ = allLatentQ.gathering(atIndices: indexMap.neighborIndices)
@@ -356,7 +362,7 @@ public struct GCNPredictor: GraphPredictor {
       alongAxis: -2)
 
     return GraphPredictions(
-      // neighborIndices: indexMap.neighborIndices,
+      neighborIndices: indexMap.neighborIndices,
       labelProbabilities: labelProbabilities,
       neighborLabelProbabilities: neighborLabelProbabilities,
       qualities: qualities,
@@ -384,14 +390,14 @@ public struct GCNPredictor: GraphPredictor {
 
   public mutating func reset() {
     var inputSize = graph.featureCount
-    self.hiddenLayers = [Sequential<Dropout<Float>, DenseNoBias<Float>>]()
+    self.hiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
     for hiddenUnitCount in hiddenUnitCounts {
       self.hiddenLayers.append(Sequential {
         Dropout<Float>(probability: 0.5)
-        DenseNoBias<Float>(
+        Dense<Float>(
           inputSize: inputSize,
           outputSize: hiddenUnitCount,
-          activation: { leakyRelu($0) })
+          activation: gelu)
       })
       inputSize = hiddenUnitCount
     }
@@ -410,8 +416,8 @@ public struct DecoupledGCNPredictor: GraphPredictor {
   @noDerivative public let lHiddenUnitCounts: [Int]
   @noDerivative public let qHiddenUnitCounts: [Int]
 
-  public var lHiddenLayers: [Sequential<Dropout<Float>, DenseNoBias<Float>>]
-  public var qHiddenLayers: [Sequential<Dropout<Float>, DenseNoBias<Float>>]
+  public var lHiddenLayers: [Sequential<Dropout<Float>, Dense<Float>>]
+  public var qHiddenLayers: [Sequential<Dropout<Float>, Dense<Float>>]
   public var lOutputLayer: Dense<Float>
   public var qOutputLayer: Sequential<Dense<Float>, Reshape<Float>>
 
@@ -421,27 +427,27 @@ public struct DecoupledGCNPredictor: GraphPredictor {
     self.qHiddenUnitCounts = qHiddenUnitCounts
 
     var lInputSize = graph.featureCount
-    self.lHiddenLayers = [Sequential<Dropout<Float>, DenseNoBias<Float>>]()
+    self.lHiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
     for hiddenUnitCount in (lHiddenUnitCounts + [graph.classCount]) {
       self.lHiddenLayers.append(Sequential {
         Dropout<Float>(probability: 0.5)
-        DenseNoBias<Float>(
+        Dense<Float>(
           inputSize: lInputSize,
           outputSize: hiddenUnitCount,
-          activation: { leakyRelu($0) })
+          activation: gelu)
       })
       lInputSize = hiddenUnitCount
     }
 
     var qInputSize = graph.featureCount
-    self.qHiddenLayers = [Sequential<Dropout<Float>, DenseNoBias<Float>>]()
+    self.qHiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
     for hiddenUnitCount in qHiddenUnitCounts {
       self.qHiddenLayers.append(Sequential {
         Dropout<Float>(probability: 0.5)
-        DenseNoBias<Float>(
+        Dense<Float>(
           inputSize: qInputSize,
           outputSize: hiddenUnitCount,
-          activation: { leakyRelu($0) })
+          activation: gelu)
       })
       qInputSize = hiddenUnitCount
     }
@@ -470,8 +476,8 @@ public struct DecoupledGCNPredictor: GraphPredictor {
     let lOutput = logSoftmax(lOutputLayer(lFeatures))
     let labelProbabilities = lOutput.gathering(atIndices: indexMap.nodeIndices)
     let neighborLabelProbabilities = lOutput.gathering(atIndices: indexMap.neighborIndices)
-    // let neighborLabelProbabilities = withoutDerivative(at: indexMap) {
-    //   lOutput.gathering(atIndices: $0.neighborIndices)
+    // let neighborLabelProbabilities = withoutDerivative(at: lOutput) {
+    //   $0.gathering(atIndices: indexMap.neighborIndices)
     // }
 
     // Compute the qualities.
@@ -481,7 +487,7 @@ public struct DecoupledGCNPredictor: GraphPredictor {
     let qualities = logSoftmax(qOutput, alongAxis: -2)
 
     return GraphPredictions(
-      // neighborIndices: indexMap.neighborIndices,
+      neighborIndices: indexMap.neighborIndices,
       labelProbabilities: labelProbabilities,
       neighborLabelProbabilities: neighborLabelProbabilities,
       qualities: qualities,
@@ -507,27 +513,27 @@ public struct DecoupledGCNPredictor: GraphPredictor {
 
   public mutating func reset() {
     var lInputSize = graph.featureCount
-    self.lHiddenLayers = [Sequential<Dropout<Float>, DenseNoBias<Float>>]()
+    self.lHiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
     for hiddenUnitCount in lHiddenUnitCounts {
       self.lHiddenLayers.append(Sequential {
         Dropout<Float>(probability: 0.5)
-        DenseNoBias<Float>(
+        Dense<Float>(
           inputSize: lInputSize,
           outputSize: hiddenUnitCount,
-          activation: { leakyRelu($0) })
+          activation: gelu)
       })
       lInputSize = hiddenUnitCount
     }
 
     var qInputSize = graph.featureCount
-    self.qHiddenLayers = [Sequential<Dropout<Float>, DenseNoBias<Float>>]()
+    self.qHiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
     for hiddenUnitCount in qHiddenUnitCounts {
       self.qHiddenLayers.append(Sequential {
         Dropout<Float>(probability: 0.5)
-        DenseNoBias<Float>(
+        Dense<Float>(
           inputSize: qInputSize,
           outputSize: hiddenUnitCount,
-          activation: { leakyRelu($0) })
+          activation: gelu)
       })
       qInputSize = hiddenUnitCount
     }

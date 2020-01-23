@@ -20,23 +20,28 @@ let workingDirectory = URL(fileURLWithPath: FileManager.default.currentDirectory
 let dataDirectory = workingDirectory.appendingPathComponent("data").appendingPathComponent("cora")
 
 let graph = try Graph(loadFromDirectory: dataDirectory)
-// let predictor = MLPPredictor(
-//   graph: graph,
-//   hiddenUnitCounts: [128],
-//   confusionLatentSize: 4)
-let predictor = DecoupledGCNPredictor(
-  graph: graph,
-  lHiddenUnitCounts: [128],
-  qHiddenUnitCounts: [128])
+let predictor = MLPPredictor(
+   graph: graph,
+   hiddenUnitCounts: [16],
+   confusionLatentSize: 1)
+// let predictor = GCNPredictor(
+//    graph: graph,
+//    hiddenUnitCounts: [1024],
+//    confusionLatentSize: 1)
+// let predictor = DecoupledGCNPredictor(
+//  graph: graph,
+//  lHiddenUnitCounts: [16],
+//  qHiddenUnitCounts: [])
 let optimizerFn = { () in
   Adam(
     for: predictor,
-    learningRate: 1e-3,
+    learningRate: 1e-2,
     beta1: 0.9,
-    beta2: 0.999,
+    beta2: 0.99,
     epsilon: 1e-8,
     decay: 0)
 }
+
 var model = Model(
   predictor: predictor,
   optimizerFn: optimizerFn,
@@ -46,11 +51,12 @@ var model = Model(
   batchSize: 128,
   useWarmStarting: false,
   mStepCount: 1000,
-  emStepCount: 5,
-  marginalStepCount: 1000,
+  emStepCount: 100,
+  marginalStepCount: 10000,
   evaluationStepCount: 1,
   mStepLogCount: 100,
-  emStepCallback: { dump(evaluate(model: $0, using: graph, usePrior: true)) },
+  mConvergenceEvaluationCount: 100,
+  emStepCallback: { dump(evaluate(model: $0, using: graph, usePrior: false)) },
   verbose: true)
 
 dump(evaluate(model: model, using: graph))

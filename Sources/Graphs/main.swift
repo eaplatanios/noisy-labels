@@ -20,18 +20,19 @@ let workingDirectory = URL(fileURLWithPath: FileManager.default.currentDirectory
 let dataDirectory = workingDirectory.appendingPathComponent("data").appendingPathComponent("cora")
 
 let graph = try Graph(loadFromDirectory: dataDirectory)
-let predictor = MLPPredictor(
-   graph: graph,
-   hiddenUnitCounts: [16],
-   confusionLatentSize: 1)
-// let predictor = GCNPredictor(
+// let predictor = MLPPredictor(
 //    graph: graph,
-//    hiddenUnitCounts: [1024],
+//    hiddenUnitCounts: [128],
 //    confusionLatentSize: 1)
+let predictor = GCNPredictor(
+   graph: graph,
+   hiddenUnitCounts: [8],
+   confusionLatentSize: 256)
 // let predictor = DecoupledGCNPredictor(
-//  graph: graph,
-//  lHiddenUnitCounts: [16],
-//  qHiddenUnitCounts: [])
+//   graph: graph,
+//   lHiddenUnitCounts: [16],
+//   qHiddenUnitCounts: [128, 64, 32])
+
 let optimizerFn = { () in
   Adam(
     for: predictor,
@@ -42,22 +43,66 @@ let optimizerFn = { () in
     decay: 0)
 }
 
+var bestEvaluationResult: Result? = nil
+var bestPriorEvaluationResult: Result? = nil
+var emStepCallbackInvocationsWithoutImprovement = 0
+var emStepCallbackInvocationsWithoutPriorImprovement = 0
+func emStepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) {
+  let evaluationResult = evaluate(model: model, using: graph, usePrior: false)
+  if let bestResult = bestEvaluationResult {
+    if evaluationResult.validationAccuracy > bestResult.validationAccuracy ||
+      (evaluationResult.validationAccuracy == bestResult.validationAccuracy &&
+       evaluationResult.testAccuracy > bestResult.testAccuracy) {
+      emStepCallbackInvocationsWithoutImprovement = 0
+      bestEvaluationResult = evaluationResult
+    } else {
+      emStepCallbackInvocationsWithoutImprovement += 1
+    }
+  } else {
+    bestEvaluationResult = evaluationResult
+  }
+  let priorEvaluationResult = evaluate(model: model, using: graph, usePrior: true)
+  if let bestResult = bestPriorEvaluationResult {
+    if priorEvaluationResult.validationAccuracy > bestResult.validationAccuracy ||
+      (priorEvaluationResult.validationAccuracy == bestResult.validationAccuracy &&
+       priorEvaluationResult.testAccuracy > bestResult.testAccuracy) {
+      emStepCallbackInvocationsWithoutPriorImprovement = 0
+      bestPriorEvaluationResult = priorEvaluationResult
+    } else {
+      emStepCallbackInvocationsWithoutPriorImprovement += 1
+    }
+  } else {
+    bestPriorEvaluationResult = priorEvaluationResult
+  }
+  logger.info("Current Evaluation Result: \(evaluationResult)")
+  logger.info("Current Prior Evaluation Result: \(priorEvaluationResult)")
+  logger.info("Best Evaluation Result: \(bestEvaluationResult)")
+  logger.info("Best Prior Evaluation Result: \(bestPriorEvaluationResult)")
+  if emStepCallbackInvocationsWithoutImprovement > 0 {
+    logger.info("Evaluation result has not improved in \(emStepCallbackInvocationsWithoutImprovement) EM-step callback invocations.")
+  }
+  if emStepCallbackInvocationsWithoutPriorImprovement > 0 {
+    logger.info("Prior evaluation result has not improved in \(emStepCallbackInvocationsWithoutPriorImprovement) EM-step callback invocations.")
+  }
+}
+
 var model = Model(
   predictor: predictor,
   optimizerFn: optimizerFn,
   entropyWeight: 0,
   qualitiesRegularizationWeight: 0,
   randomSeed: 42,
-  batchSize: 128,
+  batchSize: 32,
   useWarmStarting: false,
+  useThresholdedExpectations: false,
   mStepCount: 1000,
   emStepCount: 100,
   marginalStepCount: 10000,
   evaluationStepCount: 1,
   mStepLogCount: 100,
   mConvergenceEvaluationCount: 100,
-  emStepCallback: { dump(evaluate(model: $0, using: graph, usePrior: false)) },
+  emStepCallback: { emStepCallback(model: $0) },
   verbose: true)
 
-dump(evaluate(model: model, using: graph))
+dump(bestEvaluationResult)
 model.train(using: graph)

@@ -24,6 +24,7 @@ where Optimizer.Model == Predictor {
   public let randomSeed: Int64
   public let batchSize: Int
   public let useWarmStarting: Bool
+  public let useThresholdedExpectations: Bool
   public let mStepCount: Int
   public let emStepCount: Int
   public let marginalStepCount: Int?
@@ -48,7 +49,8 @@ where Optimizer.Model == Predictor {
     qualitiesRegularizationWeight: Float,
     randomSeed: Int64,
     batchSize: Int = 128,
-    useWarmStarting: Bool = true,
+    useWarmStarting: Bool = false,
+    useThresholdedExpectations: Bool = false,
     mStepCount: Int = 1000,
     emStepCount: Int = 100,
     marginalStepCount: Int? = nil,
@@ -66,6 +68,7 @@ where Optimizer.Model == Predictor {
     self.randomSeed = randomSeed
     self.batchSize = batchSize
     self.useWarmStarting = useWarmStarting
+    self.useThresholdedExpectations = useThresholdedExpectations
     self.mStepCount = mStepCount
     self.emStepCount = emStepCount
     self.marginalStepCount = marginalStepCount
@@ -246,6 +249,9 @@ where Optimizer.Model == Predictor {
         updates: predictor.labelProbabilities(batch.scalars))
     }
     expectedLabels = exp(logSoftmax(eStepAccumulator, alongAxis: -1))
+    expectedLabels = useThresholdedExpectations ?
+      Tensor<Float>(expectedLabels .== expectedLabels.max(alongAxes: -1)) :
+      expectedLabels
   }
 
   private mutating func performMStep(data: Dataset<LabeledData>, emStep: Int) {
@@ -264,7 +270,7 @@ where Optimizer.Model == Predictor {
     for mStep in 0..<mStepCount {
       let batch = dataIterator.next()!
       withLearningPhase(.training) {
-        let (loss, gradient) = predictor.valueWithGradient { predictor -> Tensor<Float> in
+        let (loss, gradient) = valueWithGradient(at: predictor) { predictor -> Tensor<Float> in
            let predictions = predictor(batch.nodeIndices.scalars)
            let crossEntropy = softmaxCrossEntropy(
              logits: predictions.labelProbabilities,
@@ -329,7 +335,7 @@ where Optimizer.Model == Predictor {
     for mStep in 0..<mStepCount {
       let batch = dataIterator.next()!
       withLearningPhase(.training) {
-        let (negativeLogLikelihood, gradient) = predictor.valueWithGradient {
+        let (negativeLogLikelihood, gradient) = valueWithGradient(at: predictor) {
           [expectedLabels, entropyWeight, qualitiesRegularizationWeight]
           predictor -> Tensor<Float> in
           let predictions = predictor(batch.scalars)
@@ -429,7 +435,7 @@ where Optimizer.Model == Predictor {
     for mStep in 0..<marginalStepCount {
       let unlabeledBatch = unlabeledDataIterator.next()!
       withLearningPhase(.training) {
-        let (negativeLogLikelihood, gradient) = predictor.valueWithGradient {
+        let (negativeLogLikelihood, gradient) = valueWithGradient(at: predictor) {
           [expectedLabels, entropyWeight, qualitiesRegularizationWeight]
           predictor -> Tensor<Float> in
           let predictions = predictor(unlabeledBatch.scalars)

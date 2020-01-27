@@ -20,27 +20,29 @@ let workingDirectory = URL(fileURLWithPath: FileManager.default.currentDirectory
 let dataDirectory = workingDirectory.appendingPathComponent("data").appendingPathComponent("cora")
 
 let graph = try Graph(loadFromDirectory: dataDirectory)
-// let predictor = MLPPredictor(
-//    graph: graph,
-//    hiddenUnitCounts: [128],
-//    confusionLatentSize: 1)
-let predictor = GCNPredictor(
+let predictor = MLPPredictor(
    graph: graph,
-   hiddenUnitCounts: [8],
-   confusionLatentSize: 256)
+   hiddenUnitCounts: [128],
+   confusionLatentSize: 1)
+// let predictor = GCNPredictor(
+//    graph: graph,
+//    hiddenUnitCounts: [1024],
+//    confusionLatentSize: 1)
 // let predictor = DecoupledGCNPredictor(
 //   graph: graph,
-//   lHiddenUnitCounts: [16],
-//   qHiddenUnitCounts: [128, 64, 32])
+//   lHiddenUnitCounts: [128],
+//   qHiddenUnitCounts: [128],
+//   confusionLatentSize: 1)
 
 let optimizerFn = { () in
+  // RProp(for: predictor)
   Adam(
     for: predictor,
     learningRate: 1e-2,
     beta1: 0.9,
     beta2: 0.99,
     epsilon: 1e-8,
-    decay: 0)
+    decay: 0.01)
 }
 
 var bestEvaluationResult: Result? = nil
@@ -92,12 +94,14 @@ var model = Model(
   entropyWeight: 0,
   qualitiesRegularizationWeight: 0,
   randomSeed: 42,
-  batchSize: 32,
+  batchSize: 128,
   useWarmStarting: false,
   useThresholdedExpectations: false,
+  labelSmoothing: 0.5,
+  // resultAccumulator: MovingAverageAccumulator(weight: 0.5),
   mStepCount: 1000,
   emStepCount: 100,
-  marginalStepCount: 10000,
+  marginalStepCount: 1000,
   evaluationStepCount: 1,
   mStepLogCount: 100,
   mConvergenceEvaluationCount: 100,

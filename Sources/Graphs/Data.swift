@@ -62,7 +62,7 @@ public struct Graph {
   public var allUnlabeledData: Tensor<Int32> {
     Tensor<Int32>(trainNodes + validationNodes + testNodes)
   }
-  
+
   public var unlabeledNodeIndices: Tensor<Int32> {
     Tensor<Int32>(validationNodes + testNodes)
   }
@@ -118,6 +118,10 @@ extension Graph {
     let ff: [Tensor<Float>] = features.map { f in Tensor<Float>(shape: [f.count], scalars: f) }
     self.features = Tensor<Float>(
       stacking: ff,
+      // stacking: ff.map { f -> Tensor<Float> in
+      //   let sum = f.sum()
+      //   return f / sum.replacing(with: Tensor<Float>(onesLike: sum), where: sum .== 0)
+      // },
       alongAxis: 0)
     self.neighbors = neighbors
     self.labels = labels

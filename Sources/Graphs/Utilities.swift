@@ -24,7 +24,7 @@ public func logSoftmax<T: TensorFlowFloatingPoint>(
   _ x: Tensor<T>,
   alongAxis axis: Int
 ) -> Tensor<T> {
-  x - x.logSumExp(alongAxes: Tensor<Int32>(Int32(axis)))
+  x - x.logSumExp(alongAxes: axis)
 }
 
 /// Returns the log-softmax of the specified tensor element-wise.
@@ -34,7 +34,7 @@ public func logSoftmax<T: TensorFlowFloatingPoint>(
   _ x: Tensor<T>,
   squeezingAxis axis: Int
 ) -> Tensor<T> {
-  x - x.logSumExp(squeezingAxes: Tensor<Int32>(Int32(axis)))
+  x - x.logSumExp(squeezingAxes: axis)
 }
 
 public extension Tensor where Scalar: TensorFlowFloatingPoint {

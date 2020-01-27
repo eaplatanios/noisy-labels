@@ -26,6 +26,22 @@ public struct Result {
   }
 }
 
+extension Result {
+  public func scaled(by scale: Float) -> Result {
+    Result(
+      trainAccuracy: trainAccuracy * scale,
+      validationAccuracy: validationAccuracy * scale,
+      testAccuracy: testAccuracy * scale)
+  }
+
+  public func adding(_ result: Result) -> Result {
+    Result(
+      trainAccuracy: trainAccuracy + result.trainAccuracy,
+      validationAccuracy: validationAccuracy + result.validationAccuracy,
+      testAccuracy: testAccuracy + result.testAccuracy)
+  }
+}
+
 public func evaluate<P: GraphPredictor, O: Optimizer>(
   model: Model<P, O>,
   using graph: Graph,

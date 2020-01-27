@@ -25,14 +25,17 @@ where Optimizer.Model == Predictor {
   public let batchSize: Int
   public let useWarmStarting: Bool
   public let useThresholdedExpectations: Bool
+  public let labelSmoothing: Float
   public let mStepCount: Int
   public let emStepCount: Int
   public let marginalStepCount: Int?
-  public let evaluationStepCount: Int
+  public let evaluationStepCount: Int?
   public let mStepLogCount: Int?
   public let mConvergenceEvaluationCount: Int?
   public let emStepCallback: (Model) -> Void
   public let verbose: Bool
+
+  public var resultAccumulator: Accumulator
 
   public var predictor: Predictor
   public var optimizer: Optimizer
@@ -51,15 +54,18 @@ where Optimizer.Model == Predictor {
     batchSize: Int = 128,
     useWarmStarting: Bool = false,
     useThresholdedExpectations: Bool = false,
+    labelSmoothing: Float = 0.0,
+    resultAccumulator: Accumulator = ExactAccumulator(),
     mStepCount: Int = 1000,
     emStepCount: Int = 100,
     marginalStepCount: Int? = nil,
-    evaluationStepCount: Int = 1,
+    evaluationStepCount: Int? = 1,
     mStepLogCount: Int? = 100,
     mConvergenceEvaluationCount: Int? = 10,
     emStepCallback: @escaping (Model) -> Void = { _ in },
     verbose: Bool = false
   ) {
+    self.resultAccumulator = resultAccumulator
     self.predictor = predictor
     self.optimizer = optimizerFn()
     self.optimizerFn = optimizerFn
@@ -69,6 +75,7 @@ where Optimizer.Model == Predictor {
     self.batchSize = batchSize
     self.useWarmStarting = useWarmStarting
     self.useThresholdedExpectations = useThresholdedExpectations
+    self.labelSmoothing = labelSmoothing
     self.mStepCount = mStepCount
     self.emStepCount = emStepCount
     self.marginalStepCount = marginalStepCount
@@ -203,6 +210,9 @@ where Optimizer.Model == Predictor {
     }
 
     expectedLabels = eStepAccumulator
+    expectedLabels = useThresholdedExpectations ?
+      Tensor<Float>(expectedLabels .== expectedLabels.max(alongAxes: -1)) :
+      expectedLabels
   }
 
   private mutating func performEStep(
@@ -213,9 +223,10 @@ where Optimizer.Model == Predictor {
     eStepAccumulator = Tensor<Float>(zeros: [predictor.nodeCount, predictor.classCount])
 
     // Set the labeled node labels to their true labels.
+    var labeledAccumulator = eStepAccumulator
     for batch in labeledData.batched(batchSize) {
-      eStepAccumulator = _Raw.tensorScatterAdd(
-        eStepAccumulator,
+      labeledAccumulator = _Raw.tensorScatterAdd(
+        labeledAccumulator,
         indices: batch.nodeIndices.expandingShape(at: -1),
         updates: Tensor<Float>(
           oneHotAtIndices: batch.nodeLabels,
@@ -225,6 +236,7 @@ where Optimizer.Model == Predictor {
     }
 
     // Compute expectations for the labels of the unlabeled nodes.
+    var unlabeledAccumulator = eStepAccumulator
     if let unlabeledData = unlabeledData {
       for batch in unlabeledData.batched(batchSize) {
         let predictions = predictor(batch.scalars)
@@ -236,19 +248,24 @@ where Optimizer.Model == Predictor {
         let yHat = neighborValues.expandingShape(at: 2)                                             // [BatchSize, MaxNeighborCount, 1, ClassCount]
         let mask = qLogMask.expandingShape(at: -1)                                                  // [BatchSize, MaxNeighborCount, 1]
         let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)          // [BatchSize, ClassCount]
-        eStepAccumulator = _Raw.tensorScatterAdd(
-          eStepAccumulator,
+        unlabeledAccumulator = _Raw.tensorScatterAdd(
+          unlabeledAccumulator,
           indices: batch.expandingShape(at: -1),
           updates: qLogYHat)
       }
     }
     for batch in unlabeledNodeIndices.batched(batchSize) {
-      eStepAccumulator = _Raw.tensorScatterAdd(
-        eStepAccumulator,
+      unlabeledAccumulator = _Raw.tensorScatterAdd(
+        unlabeledAccumulator,
         indices: batch.expandingShape(at: -1),
         updates: predictor.labelProbabilities(batch.scalars))
     }
-    expectedLabels = exp(logSoftmax(eStepAccumulator, alongAxis: -1))
+    eStepAccumulator = labeledAccumulator + unlabeledAccumulator
+    labeledAccumulator = exp(logSoftmax(labeledAccumulator, alongAxis: -1))
+    unlabeledAccumulator = exp(logSoftmax(unlabeledAccumulator, alongAxis: -1))
+    unlabeledAccumulator = (1 - labelSmoothing) * unlabeledAccumulator +
+      labelSmoothing / Float(unlabeledAccumulator.shape[unlabeledAccumulator.rank - 1])
+    expectedLabels = labeledAccumulator + unlabeledAccumulator
     expectedLabels = useThresholdedExpectations ?
       Tensor<Float>(expectedLabels .== expectedLabels.max(alongAxes: -1)) :
       expectedLabels
@@ -256,6 +273,7 @@ where Optimizer.Model == Predictor {
 
   private mutating func performMStep(data: Dataset<LabeledData>, emStep: Int) {
     bestResult = nil
+    resultAccumulator.reset()
     if !useWarmStarting {
       predictor.reset()
       optimizer = optimizerFn()
@@ -269,18 +287,20 @@ where Optimizer.Model == Predictor {
       .makeIterator()
     for mStep in 0..<mStepCount {
       let batch = dataIterator.next()!
+      let labels = (1 - labelSmoothing) * Tensor<Float>(
+        oneHotAtIndices: batch.nodeLabels,
+        depth: predictor.classCount
+      ) + labelSmoothing / Float(predictor.classCount)
       withLearningPhase(.training) {
         let (loss, gradient) = valueWithGradient(at: predictor) { predictor -> Tensor<Float> in
-           let predictions = predictor(batch.nodeIndices.scalars)
-           let crossEntropy = softmaxCrossEntropy(
-             logits: predictions.labelProbabilities,
-             labels: batch.nodeLabels)
-           return crossEntropy +
-             predictions.neighborLabelProbabilities.sum() * 0.0 +
-             predictions.qualities.sum() * 0.0
-           // softmaxCrossEntropy(
-           //   logits: predictor.labelProbabilities(batch.nodeIndices.scalars),
-           //   labels: batch.nodeLabels)
+          let predictions = predictor(batch.nodeIndices.scalars)
+          let crossEntropy = softmaxCrossEntropy(
+            logits: predictions.labelProbabilities,
+            probabilities: labels)
+          let loss = crossEntropy +
+            predictions.neighborLabelProbabilities.sum() * 0.0 +
+            predictions.qualities.sum() * 0.0
+          return loss / Float(predictions.labelProbabilities.shape[0])
         }
         optimizer.update(&predictor, along: gradient)
         accumulatedLoss += loss.scalarized()
@@ -296,8 +316,9 @@ where Optimizer.Model == Predictor {
           }
         }
       }
-      if mStep % evaluationStepCount == 0 {
-        let result = evaluate(model: self, using: predictor.graph, usePrior: true)
+      if let c = evaluationStepCount, mStep % c == 0 {
+        let result = resultAccumulator.update(
+          with: evaluate(model: self, using: predictor.graph, usePrior: true))
         if let bestResult = self.bestResult {
           if result.validationAccuracy > bestResult.validationAccuracy {
             self.bestPredictor = predictor
@@ -309,7 +330,9 @@ where Optimizer.Model == Predictor {
         }
       }
     }
-    predictor = bestPredictor
+    if evaluationStepCount != nil {
+      predictor = bestPredictor
+    }
   }
 
   private mutating func performMStep(
@@ -321,6 +344,7 @@ where Optimizer.Model == Predictor {
   ) {
     var convergenceStepCount = 0
     bestResult = nil
+    resultAccumulator.reset()
     if !useWarmStarting {
       predictor.reset()
       optimizer = optimizerFn()
@@ -352,11 +376,12 @@ where Optimizer.Model == Predictor {
           let qEntropy = qualitiesRegularizationWeight * maskedQEntropy.sum()
           let hEntropy = entropyWeight * (exp(hLog) * hLog).sum()
           let compilerBug = predictions.neighborLabelProbabilities.sum() * 0.0
-          return compilerBug +
+          let loss = compilerBug +
             hEntropy +
             qEntropy -
             (yExpected * hLog).sum() -
             (yExpected * qLogYHat).sum()
+          return loss / Float(predictions.labelProbabilities.shape[0])
         }
         optimizer.update(&predictor, along: gradient)
         accumulatedNLL += negativeLogLikelihood.scalarized()
@@ -372,7 +397,7 @@ where Optimizer.Model == Predictor {
           }
         }
       }
-      if mStep % evaluationStepCount == 0 {
+      if let c = evaluationStepCount, mStep % c == 0 {
         // Run the E step.
         var modelCopy = self
         modelCopy.performEStep(
@@ -380,10 +405,11 @@ where Optimizer.Model == Predictor {
           unlabeledData: eStepUnlabeledData,
           unlabeledNodeIndices: eStepUnlabeledNodeIndices)
 
-        let result = evaluate(model: modelCopy, using: predictor.graph, usePrior: false)
+        let evaluationResult = evaluate(model: modelCopy, using: predictor.graph, usePrior: false)
+        let result = resultAccumulator.update(with: evaluationResult)
         if let bestResult = self.bestResult {
           if result.validationAccuracy > bestResult.validationAccuracy {
-            logger.info("Best predictor accuracy: \(result.validationAccuracy)")
+            logger.info("Best predictor accuracy: \(evaluationResult.validationAccuracy) | \(result.validationAccuracy)")
             self.bestPredictor = predictor
             self.bestResult = result
             convergenceStepCount = 0
@@ -403,7 +429,9 @@ where Optimizer.Model == Predictor {
     //    dump(evaluate(model: self, using: predictor.graph, usePrior: false))
     //  }
     }
-    predictor = bestPredictor
+    if evaluationStepCount != nil {
+      predictor = bestPredictor
+    }
   }
 
   private mutating func performMarginalStep(
@@ -416,6 +444,7 @@ where Optimizer.Model == Predictor {
     guard let marginalStepCount = self.marginalStepCount else { return }
     var convergenceStepCount = 0
     bestResult = nil
+    resultAccumulator.reset()
     // if !useWarmStarting {
     //   predictor.reset()
     //   optimizer = optimizerFn()
@@ -452,10 +481,11 @@ where Optimizer.Model == Predictor {
           let qEntropy = qualitiesRegularizationWeight * maskedQEntropy.sum()
           let hEntropy = entropyWeight * (exp(hLog) * hLog).sum()
           let compilerBug = predictions.neighborLabelProbabilities.sum() * 0.0
-          return compilerBug +
+          let loss = compilerBug +
             hEntropy +
             qEntropy -
             logLikelihood
+          return loss / Float(predictions.labelProbabilities.shape[0])
         }
         optimizer.update(&predictor, along: gradient)
         accumulatedNLL += negativeLogLikelihood.scalarized()
@@ -491,10 +521,11 @@ where Optimizer.Model == Predictor {
           let qEntropy = qualitiesRegularizationWeight * maskedQEntropy.sum()
           let hEntropy = entropyWeight * (exp(hLog) * hLog).sum()
           let compilerBug = predictions.neighborLabelProbabilities.sum() * 0.0
-          return compilerBug +
+          let loss = compilerBug +
             hEntropy +
             qEntropy -
             logLikelihood
+          return loss / Float(predictions.labelProbabilities.shape[0])
         }
         optimizer.update(&predictor, along: gradient)
         accumulatedNLL += negativeLogLikelihood.scalarized()
@@ -507,9 +538,10 @@ where Optimizer.Model == Predictor {
         unlabeledData: eStepUnlabeledData,
         unlabeledNodeIndices: eStepUnlabeledNodeIndices)
 
-      if mStep % evaluationStepCount == 0 {
+      if let c = evaluationStepCount, mStep % c == 0 {
         // Perform evaluation.
-        let result = evaluate(model: self, using: predictor.graph, usePrior: false)
+        let result = resultAccumulator.update(
+          with: evaluate(model: self, using: predictor.graph, usePrior: false))
         if let bestResult = self.bestResult {
           if result.validationAccuracy > bestResult.validationAccuracy {
             logger.info("Best predictor accuracy: \(result.validationAccuracy)")
@@ -529,6 +561,39 @@ where Optimizer.Model == Predictor {
         }
       }
     }
-    predictor = bestPredictor
+    if evaluationStepCount != nil {
+      predictor = bestPredictor
+    }
+  }
+}
+
+public protocol Accumulator {
+  mutating func reset()
+  mutating func update(with result: Result) -> Result
+}
+
+public struct ExactAccumulator: Accumulator {
+  public init() {}
+  public mutating func reset() {}
+  public mutating func update(with result: Result) -> Result { result }
+}
+
+public struct MovingAverageAccumulator: Accumulator {
+  public let weight: Float
+  private var accumulated: Result? = nil
+
+  public init(weight: Float) {
+    self.weight = weight
+  }
+
+  public mutating func reset() { accumulated = nil }
+
+  public mutating func update(with result: Result) -> Result {
+    if let a = accumulated {
+      accumulated = a.scaled(by: 1 - weight).adding(result.scaled(by: weight))
+    } else {
+      accumulated = result
+    }
+    return accumulated!
   }
 }

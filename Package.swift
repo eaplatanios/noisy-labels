@@ -19,7 +19,7 @@ let package = Package(
   ],
   targets: [
     .target(name: "NoisyLabels", dependencies: ["Logging", "Progress", "ZIPFoundation"]),
-    .target(name: "Graphs", dependencies: ["Logging", "Progress", "ZIPFoundation"]),
+    .target(name: "Graphs", dependencies: ["Logging", "Progress", "SPMUtility", "ZIPFoundation"]),
     .target(name: "NoisyLabelsExperiments", dependencies: ["NoisyLabels", "Progress", "SPMUtility"]),
   ]
 )

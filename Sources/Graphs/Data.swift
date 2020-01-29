@@ -111,18 +111,43 @@ extension Graph {
       }
     }
 
+    // trainNodes = trainNodes + validationNodes[0..<250]
+    // validationNodes = [Int32](validationNodes[250...])
+
     logger.info("Graph / Initializing")
+
+    // let featureVectors = features.map { f in Tensor<Float>(shape: [f.count], scalars: f) }
+    // let featureMoments = Tensor<Float>(
+    //   stacking: [Tensor<Float>](featureVectors.enumerated().filter {
+    //     (trainNodes + validationNodes).contains(Int32($0.offset))
+    //   }.map { $0.element }),
+    //   alongAxis: 0).moments(alongAxes: 0)
+    // let featuresMean = featureMoments.mean
+    // let featuresStd = sqrt(featureMoments.variance).replacing(
+    //   with: Tensor<Float>(onesLike: featureMoments.variance),
+    //   where: featureMoments.variance .== 0)
+    // self.features = (Tensor<Float>(stacking: featureVectors, alongAxis: 0) - featuresMean) / featuresStd
+    
+    let featureVectors = features.map { f in Tensor<Float>(shape: [f.count], scalars: f) }
+    self.features = Tensor<Float>(stacking: featureVectors, alongAxis: 0)
+    // self.features = Tensor<Float>(
+    //   stacking: featureVectors.map { f -> Tensor<Float> in
+    //     let sum = sqrt(f.squared().sum())
+    //     return f / sum.replacing(with: Tensor<Float>(onesLike: sum), where: sum .== 0)
+    //   },
+    //   alongAxis: 0)
+
     self.nodeCount = features.count
     self.featureCount = features[0].count
     self.classCount = classCount
-    let ff: [Tensor<Float>] = features.map { f in Tensor<Float>(shape: [f.count], scalars: f) }
-    self.features = Tensor<Float>(
-      stacking: ff,
-      // stacking: ff.map { f -> Tensor<Float> in
-      //   let sum = f.sum()
-      //   return f / sum.replacing(with: Tensor<Float>(onesLike: sum), where: sum .== 0)
-      // },
-      alongAxis: 0)
+    // let ff: [Tensor<Float>] = features.map { f in Tensor<Float>(shape: [f.count], scalars: f) }
+    // self.features = Tensor<Float>(
+    //   stacking: ff,
+    //   // stacking: ff.map { f -> Tensor<Float> in
+    //   //   let sum = f.sum()
+    //   //   return f / sum.replacing(with: Tensor<Float>(onesLike: sum), where: sum .== 0)
+    //   // },
+    //   alongAxis: 0)
     self.neighbors = neighbors
     self.labels = labels
     self.trainNodes = trainNodes

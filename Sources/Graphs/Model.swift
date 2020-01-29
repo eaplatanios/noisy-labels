@@ -232,7 +232,7 @@ where Optimizer.Model == Predictor {
           oneHotAtIndices: batch.nodeLabels,
           depth: predictor.classCount,
           onValue: 0,
-          offValue: -999999))
+          offValue: -100000000))
     }
 
     // Compute expectations for the labels of the unlabeled nodes.
@@ -242,9 +242,7 @@ where Optimizer.Model == Predictor {
         let predictions = predictor(batch.scalars)
         let qLog = predictions.qualities                                                            // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
         let qLogMask = predictions.qualitiesMask                                                    // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-        // TODO: What if we want to use the expected labels directly?
-        // let neighborValues = exp(predictions.neighborLabelProbabilities)                            // [BatchSize, MaxNeighborCount, ClassCount]
-        let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)
+        let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)       // [BatchSize, MaxNeighborCount, ClassCount]
         let yHat = neighborValues.expandingShape(at: 2)                                             // [BatchSize, MaxNeighborCount, 1, ClassCount]
         let mask = qLogMask.expandingShape(at: -1)                                                  // [BatchSize, MaxNeighborCount, 1]
         let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)          // [BatchSize, ClassCount]
@@ -297,9 +295,7 @@ where Optimizer.Model == Predictor {
           let crossEntropy = softmaxCrossEntropy(
             logits: predictions.labelProbabilities,
             probabilities: labels)
-          let loss = crossEntropy +
-            predictions.neighborLabelProbabilities.sum() * 0.0 +
-            predictions.qualities.sum() * 0.0
+          let loss = crossEntropy + predictions.qualities.sum() * 0.0
           return loss / Float(predictions.labelProbabilities.shape[0])
         }
         optimizer.update(&predictor, along: gradient)
@@ -366,8 +362,7 @@ where Optimizer.Model == Predictor {
           let hLog = predictions.labelProbabilities
           let qLog = predictions.qualities                                                          // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
           let qLogMask = predictions.qualitiesMask                                                  // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-          // let neighborValues = exp(predictions.neighborLabelProbabilities)                          // [BatchSize, MaxNeighborCount, ClassCount]
-          let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)
+          let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)     // [BatchSize, MaxNeighborCount, ClassCount]
           let yHat = neighborValues.expandingShape(at: 2)                                           // [BatchSize, MaxNeighborCount, 1, ClassCount]
           let mask = qLogMask.expandingShape(at: -1)                                                // [BatchSize, MaxNeighborCount, 1]
           let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)        // [BatchSize, ClassCount]
@@ -375,12 +370,7 @@ where Optimizer.Model == Predictor {
           let maskedQEntropy = exp(qLog) * qLog * mask.expandingShape(at: -1)
           let qEntropy = qualitiesRegularizationWeight * maskedQEntropy.sum()
           let hEntropy = entropyWeight * (exp(hLog) * hLog).sum()
-          let compilerBug = predictions.neighborLabelProbabilities.sum() * 0.0
-          let loss = compilerBug +
-            hEntropy +
-            qEntropy -
-            (yExpected * hLog).sum() -
-            (yExpected * qLogYHat).sum()
+          let loss = hEntropy + qEntropy - (yExpected * hLog).sum() - (yExpected * qLogYHat).sum()
           return loss / Float(predictions.labelProbabilities.shape[0])
         }
         optimizer.update(&predictor, along: gradient)
@@ -425,9 +415,6 @@ where Optimizer.Model == Predictor {
           self.bestResult = result
         }
       }
-    //  if mStep % 10 == 0 {
-    //    dump(evaluate(model: self, using: predictor.graph, usePrior: false))
-    //  }
     }
     if evaluationStepCount != nil {
       predictor = bestPredictor
@@ -445,10 +432,6 @@ where Optimizer.Model == Predictor {
     var convergenceStepCount = 0
     bestResult = nil
     resultAccumulator.reset()
-    // if !useWarmStarting {
-    //   predictor.reset()
-    //   optimizer = optimizerFn()
-    // }
     var accumulatedNLL = Float(0.0)
     var accumulatedSteps = 0
     var labeledDataIterator = labeledData.repeated()
@@ -471,8 +454,7 @@ where Optimizer.Model == Predictor {
           let hLog = predictions.labelProbabilities
           let qLog = predictions.qualities                                                          // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
           let qLogMask = predictions.qualitiesMask                                                  // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-          // let neighborValues = exp(predictions.neighborLabelProbabilities)                       // [BatchSize, MaxNeighborCount, ClassCount]
-          let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)
+          let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)     // [BatchSize, MaxNeighborCount, ClassCount]
           let yHat = neighborValues.expandingShape(at: 2)                                           // [BatchSize, MaxNeighborCount, 1, ClassCount]
           let mask = qLogMask.expandingShape(at: -1)                                                // [BatchSize, MaxNeighborCount, 1]
           let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)        // [BatchSize, ClassCount]
@@ -480,11 +462,7 @@ where Optimizer.Model == Predictor {
           let maskedQEntropy = exp(qLog) * qLog * mask.expandingShape(at: -1)
           let qEntropy = qualitiesRegularizationWeight * maskedQEntropy.sum()
           let hEntropy = entropyWeight * (exp(hLog) * hLog).sum()
-          let compilerBug = predictions.neighborLabelProbabilities.sum() * 0.0
-          let loss = compilerBug +
-            hEntropy +
-            qEntropy -
-            logLikelihood
+          let loss = hEntropy + qEntropy - logLikelihood
           return loss / Float(predictions.labelProbabilities.shape[0])
         }
         optimizer.update(&predictor, along: gradient)
@@ -503,15 +481,14 @@ where Optimizer.Model == Predictor {
       }
       let labeledBatch = labeledDataIterator.next()!
       withLearningPhase(.training) {
-        let (negativeLogLikelihood, gradient) = predictor.valueWithGradient {
+        let (negativeLogLikelihood, gradient) = valueWithGradient(at: predictor) {
           [expectedLabels, entropyWeight, qualitiesRegularizationWeight]
           predictor -> Tensor<Float> in
           let predictions = predictor(labeledBatch.nodeIndices.scalars)
           let hLog = predictions.labelProbabilities
           let qLog = predictions.qualities                                                          // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
           let qLogMask = predictions.qualitiesMask                                                  // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-          // let neighborValues = exp(predictions.neighborLabelProbabilities)                       // [BatchSize, MaxNeighborCount, ClassCount]
-          let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)
+          let neighborValues = expectedLabels.gathering(atIndices: predictions.neighborIndices)     // [BatchSize, MaxNeighborCount, ClassCount]
           let yHat = neighborValues.expandingShape(at: 2)                                           // [BatchSize, MaxNeighborCount, 1, ClassCount]
           let mask = qLogMask.expandingShape(at: -1)                                                // [BatchSize, MaxNeighborCount, 1]
           let qLogYHat = ((qLog * yHat).sum(squeezingAxes: -1) * mask).sum(squeezingAxes: 1)        // [BatchSize, ClassCount]
@@ -520,11 +497,7 @@ where Optimizer.Model == Predictor {
           let maskedQEntropy = exp(qLog) * qLog * mask.expandingShape(at: -1)
           let qEntropy = qualitiesRegularizationWeight * maskedQEntropy.sum()
           let hEntropy = entropyWeight * (exp(hLog) * hLog).sum()
-          let compilerBug = predictions.neighborLabelProbabilities.sum() * 0.0
-          let loss = compilerBug +
-            hEntropy +
-            qEntropy -
-            logLikelihood
+          let loss = hEntropy + qEntropy - logLikelihood
           return loss / Float(predictions.labelProbabilities.shape[0])
         }
         optimizer.update(&predictor, along: gradient)

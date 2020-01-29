@@ -16,27 +16,6 @@ import Foundation
 import SPMUtility
 import TensorFlow
 
-extension Float: ArgumentKind {
-  public init(argument: String) throws {
-    guard let float = Float(argument) else {
-      throw ArgumentConversionError.typeMismatch(value: argument, expectedType: Float.self)
-    }
-
-    self = float
-  }
-
-  public static let completion: ShellCompletion = .none
-}
-
-enum ModelName: String, StringEnumArgument {
-  case mlp = "mlp"
-  case decoupledMLP = "decoupled-mlp"
-  case gcn = "gcn"
-  case decoupledGCN = "decoupled-gcn"
-
-  public static let completion: ShellCompletion = .none
-}
-
 // The first argument is always the executable, and so we drop it.
 let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
 
@@ -78,95 +57,123 @@ let dropout: OptionArgument<Float> = parser.add(
   shortName: "-dr",
   kind: Float.self,
   usage: "Dropout rate.")
+let seed: OptionArgument<Int> = parser.add(
+  option: "--seed",
+  shortName: "-s",
+  kind: Int.self,
+  usage: "Random seed.")
 
 let parsedArguments = try! parser.parse(arguments)
 
-let workingDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-  .appendingPathComponent("temp")
-let dataDirectory = workingDirectory
-  .appendingPathComponent("data")
-  .appendingPathComponent(parsedArguments.get(dataset)!)
-let graph = try Graph(loadFromDirectory: dataDirectory)
+try withRandomSeedForTensorFlow(Int64(parsedArguments.get(seed) ?? 123456789)) {
+  let workingDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    .appendingPathComponent("temp")
+  let dataDirectory = workingDirectory
+    .appendingPathComponent("data")
+    .appendingPathComponent(parsedArguments.get(dataset)!)
+  let graph = try Graph(loadFromDirectory: dataDirectory)
 
-func runExperiment<Predictor: GraphPredictor>(predictor: Predictor)
-where Predictor.TangentVector: VectorProtocol & PointwiseMultiplicative & ElementaryFunctions,
-      Predictor.TangentVector.VectorSpaceScalar == Float {
-  var bestEvaluationResult: Result? = nil
-  var bestPriorEvaluationResult: Result? = nil
-  var emStepCallbackInvocationsWithoutImprovement = 0
-  var emStepCallbackInvocationsWithoutPriorImprovement = 0
-  func emStepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) {
-    let evaluationResult = evaluate(model: model, using: graph, usePrior: false)
-    if let bestResult = bestEvaluationResult {
-      if evaluationResult.validationAccuracy > bestResult.validationAccuracy ||
-        (evaluationResult.validationAccuracy == bestResult.validationAccuracy &&
-        evaluationResult.testAccuracy > bestResult.testAccuracy) {
-        emStepCallbackInvocationsWithoutImprovement = 0
+  func runExperiment<Predictor: GraphPredictor>(predictor: Predictor)
+  where Predictor.TangentVector: VectorProtocol & PointwiseMultiplicative & ElementaryFunctions,
+        Predictor.TangentVector.VectorSpaceScalar == Float {
+    var bestEvaluationResult: Result? = nil
+    var bestPriorEvaluationResult: Result? = nil
+    var emStepCallbackInvocationsWithoutImprovement = 0
+    var emStepCallbackInvocationsWithoutPriorImprovement = 0
+    func emStepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) {
+      let evaluationResult = evaluate(model: model, using: graph, usePrior: false)
+      if let bestResult = bestEvaluationResult {
+        if evaluationResult.validationAccuracy > bestResult.validationAccuracy ||
+          (evaluationResult.validationAccuracy == bestResult.validationAccuracy &&
+          evaluationResult.testAccuracy > bestResult.testAccuracy) {
+          emStepCallbackInvocationsWithoutImprovement = 0
+          bestEvaluationResult = evaluationResult
+        } else {
+          emStepCallbackInvocationsWithoutImprovement += 1
+        }
+      } else {
         bestEvaluationResult = evaluationResult
-      } else {
-        emStepCallbackInvocationsWithoutImprovement += 1
       }
-    } else {
-      bestEvaluationResult = evaluationResult
-    }
-    let priorEvaluationResult = evaluate(model: model, using: graph, usePrior: true)
-    if let bestResult = bestPriorEvaluationResult {
-      if priorEvaluationResult.validationAccuracy > bestResult.validationAccuracy ||
-        (priorEvaluationResult.validationAccuracy == bestResult.validationAccuracy &&
-        priorEvaluationResult.testAccuracy > bestResult.testAccuracy) {
-        emStepCallbackInvocationsWithoutPriorImprovement = 0
+      let priorEvaluationResult = evaluate(model: model, using: graph, usePrior: true)
+      if let bestResult = bestPriorEvaluationResult {
+        if priorEvaluationResult.validationAccuracy > bestResult.validationAccuracy ||
+          (priorEvaluationResult.validationAccuracy == bestResult.validationAccuracy &&
+          priorEvaluationResult.testAccuracy > bestResult.testAccuracy) {
+          emStepCallbackInvocationsWithoutPriorImprovement = 0
+          bestPriorEvaluationResult = priorEvaluationResult
+        } else {
+          emStepCallbackInvocationsWithoutPriorImprovement += 1
+        }
+      } else {
         bestPriorEvaluationResult = priorEvaluationResult
-      } else {
-        emStepCallbackInvocationsWithoutPriorImprovement += 1
       }
-    } else {
-      bestPriorEvaluationResult = priorEvaluationResult
+      logger.info("Configuration: \(configuration())")
+      logger.info("Current Evaluation Result: \(evaluationResult)")
+      logger.info("Current Prior Evaluation Result: \(priorEvaluationResult)")
+      logger.info("Best Evaluation Result: \(String(describing: bestEvaluationResult))")
+      logger.info("Best Prior Evaluation Result: \(String(describing: bestPriorEvaluationResult))")
+      if emStepCallbackInvocationsWithoutImprovement > 0 {
+        logger.info("Evaluation result has not improved in \(emStepCallbackInvocationsWithoutImprovement) EM-step callback invocations.")
+      }
+      if emStepCallbackInvocationsWithoutPriorImprovement > 0 {
+        logger.info("Prior evaluation result has not improved in \(emStepCallbackInvocationsWithoutPriorImprovement) EM-step callback invocations.")
+      }
     }
-    logger.info("Configuration: \(configuration())")
-    logger.info("Current Evaluation Result: \(evaluationResult)")
-    logger.info("Current Prior Evaluation Result: \(priorEvaluationResult)")
-    logger.info("Best Evaluation Result: \(String(describing: bestEvaluationResult))")
-    logger.info("Best Prior Evaluation Result: \(String(describing: bestPriorEvaluationResult))")
-    if emStepCallbackInvocationsWithoutImprovement > 0 {
-      logger.info("Evaluation result has not improved in \(emStepCallbackInvocationsWithoutImprovement) EM-step callback invocations.")
+
+    let optimizerFn = { () in
+      Adam<Predictor>(
+        for: predictor,
+        learningRate: 1e-2,
+        beta1: 0.9,
+        beta2: 0.99,
+        epsilon: 1e-8,
+        decay: 0)
     }
-    if emStepCallbackInvocationsWithoutPriorImprovement > 0 {
-      logger.info("Prior evaluation result has not improved in \(emStepCallbackInvocationsWithoutPriorImprovement) EM-step callback invocations.")
-    }
+
+    var model = Model(
+      predictor: predictor,
+      optimizerFn: optimizerFn,
+      entropyWeight: 0,
+      qualitiesRegularizationWeight: 0,
+      randomSeed: 42,
+      batchSize: parsedArguments.get(batchSize) ?? 128,
+      useWarmStarting: false,
+      useThresholdedExpectations: false,
+      labelSmoothing: parsedArguments.get(labelSmoothing) ?? 0.5,
+      // resultAccumulator: MovingAverageAccumulator(weight: 0.5),
+      mStepCount: 1000,
+      emStepCount: 100,
+      marginalStepCount: 1000,
+      evaluationStepCount: 1,
+      mStepLogCount: 100,
+      mConvergenceEvaluationCount: 500,
+      emStepCallback: { emStepCallback(model: $0) },
+      verbose: true)
+
+    dump(bestEvaluationResult)
+    model.train(using: graph)
   }
 
-  let optimizerFn = { () in
-    Adam<Predictor>(
-      for: predictor,
-      learningRate: 1e-2,
-      beta1: 0.9,
-      beta2: 0.99,
-      epsilon: 1e-8,
-      decay: 0)
+  switch parsedArguments.get(model)! {
+  case .mlp: runExperiment(predictor: MLPPredictor(
+    graph: graph,
+    hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+    dropout: parsedArguments.get(dropout) ?? 0.5))
+  case .decoupledMLP: runExperiment(predictor: DecoupledMLPPredictorV2(
+    graph: graph,
+    lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+    qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
+    dropout: parsedArguments.get(dropout) ?? 0.5))
+  case .gcn: runExperiment(predictor: GCNPredictor(
+    graph: graph,
+    hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+    dropout: parsedArguments.get(dropout) ?? 0.5))
+  case .decoupledGCN: runExperiment(predictor: DecoupledGCNPredictorV2(
+    graph: graph,
+    lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+    qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
+    dropout: parsedArguments.get(dropout) ?? 0.5))
   }
-
-  var model = Model(
-    predictor: predictor,
-    optimizerFn: optimizerFn,
-    entropyWeight: 0,
-    qualitiesRegularizationWeight: 0,
-    randomSeed: 42,
-    batchSize: parsedArguments.get(batchSize) ?? 128,
-    useWarmStarting: false,
-    useThresholdedExpectations: false,
-    labelSmoothing: parsedArguments.get(labelSmoothing) ?? 0.5,
-    // resultAccumulator: MovingAverageAccumulator(weight: 0.5),
-    mStepCount: 1000,
-    emStepCount: 100,
-    marginalStepCount: 1000,
-    evaluationStepCount: 1,
-    mStepLogCount: 100,
-    mConvergenceEvaluationCount: 500,
-    emStepCallback: { emStepCallback(model: $0) },
-    verbose: true)
-
-  dump(bestEvaluationResult)
-  model.train(using: graph)
 }
 
 func configuration() -> String {
@@ -178,26 +185,27 @@ func configuration() -> String {
   configuration = "\(configuration):bs-\(parsedArguments.get(batchSize) ?? 128)"
   configuration = "\(configuration):ls-\(parsedArguments.get(labelSmoothing) ?? 0.5)"
   configuration = "\(configuration):dr-\(parsedArguments.get(dropout) ?? 0.5)"
+  configuration = "\(configuration):s-\(parsedArguments.get(seed) ?? 123456789)"
   return configuration
 }
 
-switch parsedArguments.get(model)! {
-case .mlp: runExperiment(predictor: MLPPredictor(
-   graph: graph,
-   hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-   dropout: parsedArguments.get(dropout) ?? 0.5))
-case .decoupledMLP: runExperiment(predictor: DecoupledMLPPredictorV2(
-   graph: graph,
-   lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-   qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
-   dropout: parsedArguments.get(dropout) ?? 0.5))
-case .gcn: runExperiment(predictor: GCNPredictor(
-   graph: graph,
-   hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-   dropout: parsedArguments.get(dropout) ?? 0.5))
-case .decoupledGCN: runExperiment(predictor: DecoupledGCNPredictorV2(
-   graph: graph,
-   lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-   qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
-   dropout: parsedArguments.get(dropout) ?? 0.5))
+extension Float: ArgumentKind {
+  public init(argument: String) throws {
+    guard let float = Float(argument) else {
+      throw ArgumentConversionError.typeMismatch(value: argument, expectedType: Float.self)
+    }
+
+    self = float
+  }
+
+  public static let completion: ShellCompletion = .none
+}
+
+enum ModelName: String, StringEnumArgument {
+  case mlp = "mlp"
+  case decoupledMLP = "decoupled-mlp"
+  case gcn = "gcn"
+  case decoupledGCN = "decoupled-gcn"
+
+  public static let completion: ShellCompletion = .none
 }

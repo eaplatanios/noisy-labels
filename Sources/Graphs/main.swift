@@ -57,6 +57,11 @@ let dropout: OptionArgument<Float> = parser.add(
   shortName: "-dr",
   kind: Float.self,
   usage: "Dropout rate.")
+let targetBadEdgeProportion: OptionArgument<Float> = parser.add(
+  option: "--target-bad-edge-proportion",
+  shortName: "-tbep",
+  kind: Float.self,
+  usage: "Target bad edge proportion.")
 let seed: OptionArgument<Int> = parser.add(
   option: "--seed",
   shortName: "-s",
@@ -65,13 +70,21 @@ let seed: OptionArgument<Int> = parser.add(
 
 let parsedArguments = try! parser.parse(arguments)
 
-try withRandomSeedForTensorFlow(Int64(parsedArguments.get(seed) ?? 123456789)) {
+let randomSeed = Int64(parsedArguments.get(seed) ?? 123456789)
+var generator = PhiloxRandomNumberGenerator(seed: randomSeed)
+try withRandomSeedForTensorFlow(randomSeed) {
   let workingDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
     .appendingPathComponent("temp")
   let dataDirectory = workingDirectory
     .appendingPathComponent("data")
     .appendingPathComponent(parsedArguments.get(dataset)!)
-  let graph = try Graph(loadFromDirectory: dataDirectory)
+  var graph = try Graph(loadFromDirectory: dataDirectory)
+
+  if let targetBadEdgeProportion = parsedArguments.get(targetBadEdgeProportion) {
+    graph = graph.corrupted(
+      targetBadEdgeProportion: targetBadEdgeProportion,
+      using: &generator)
+  }
 
   func runExperiment<Predictor: GraphPredictor>(predictor: Predictor)
   where Predictor.TangentVector: VectorProtocol & PointwiseMultiplicative & ElementaryFunctions,
@@ -174,19 +187,23 @@ try withRandomSeedForTensorFlow(Int64(parsedArguments.get(seed) ?? 123456789)) {
     qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
     dropout: parsedArguments.get(dropout) ?? 0.5))
   }
-}
 
-func configuration() -> String {
-  var configuration = "\(parsedArguments.get(dataset)!):\(parsedArguments.get(model)!)"
-  configuration = "\(configuration):lh-\(parsedArguments.get(lHiddenUnitCounts)!.map(String.init).joined(separator: "-"))"
-  if let qHiddenUnitCounts = parsedArguments.get(qHiddenUnitCounts) {
-    configuration = "\(configuration):qh-\(qHiddenUnitCounts.map(String.init).joined(separator: "-"))"
+  func configuration() -> String {
+    var configuration = "\(parsedArguments.get(dataset)!):\(parsedArguments.get(model)!)"
+    configuration = "\(configuration):bep-\(graph.badEdgeProportion)"
+    if let targetBadEdgeProportion = parsedArguments.get(targetBadEdgeProportion) {
+      configuration = "\(configuration):tbep-\(targetBadEdgeProportion)"
+    }
+    configuration = "\(configuration):lh-\(parsedArguments.get(lHiddenUnitCounts)!.map(String.init).joined(separator: "-"))"
+    if let qHiddenUnitCounts = parsedArguments.get(qHiddenUnitCounts) {
+      configuration = "\(configuration):qh-\(qHiddenUnitCounts.map(String.init).joined(separator: "-"))"
+    }
+    configuration = "\(configuration):bs-\(parsedArguments.get(batchSize) ?? 128)"
+    configuration = "\(configuration):ls-\(parsedArguments.get(labelSmoothing) ?? 0.5)"
+    configuration = "\(configuration):dr-\(parsedArguments.get(dropout) ?? 0.5)"
+    configuration = "\(configuration):s-\(parsedArguments.get(seed) ?? 123456789)"
+    return configuration
   }
-  configuration = "\(configuration):bs-\(parsedArguments.get(batchSize) ?? 128)"
-  configuration = "\(configuration):ls-\(parsedArguments.get(labelSmoothing) ?? 0.5)"
-  configuration = "\(configuration):dr-\(parsedArguments.get(dropout) ?? 0.5)"
-  configuration = "\(configuration):s-\(parsedArguments.get(seed) ?? 123456789)"
-  return configuration
 }
 
 extension Float: ArgumentKind {

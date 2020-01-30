@@ -156,6 +156,81 @@ extension Graph {
   }
 }
 
+extension Graph {
+  fileprivate struct Edge: Hashable {
+    let source: Int32
+    let target: Int32
+
+    public init(_ source: Int32, _ target: Int32) {
+      if source < target {
+        self.source = source
+        self.target = target
+      } else {
+        self.source = target
+        self.target = source
+      }
+    }
+  }
+
+  public var badEdgeProportion: Float {
+    var edges = Set<Edge>()
+    var badEdgeCount = 0
+    for (node, neighbors) in neighbors.enumerated() {
+      let node = Int32(node)
+      for neighbor in neighbors {
+        let edge = Edge(node, neighbor)
+        if !edges.contains(edge) && labels[edge.source] != labels[edge.target] {
+          badEdgeCount += 1
+        }
+        edges.insert(edge)
+      }
+    }
+    return Float(badEdgeCount) / Float(edges.count)
+   }
+
+  public func corrupted<T: RandomNumberGenerator>(
+    targetBadEdgeProportion: Float,
+    using generator: inout T
+  ) -> Graph {
+    var edges = Set<Edge>()
+    var badEdgeCount = 0
+    for (node, neighbors) in neighbors.enumerated() {
+      let node = Int32(node)
+      for neighbor in neighbors {
+        let edge = Edge(node, neighbor)
+        if !edges.contains(edge) && labels[edge.source] != labels[edge.target] {
+          badEdgeCount += 1
+        }
+        edges.insert(edge)
+      }
+    }
+    while Float(badEdgeCount) / Float(edges.count) < targetBadEdgeProportion {
+      let source = Int32.random(in: 0..<Int32(nodeCount), using: &generator)
+      let target = Int32.random(in: 0..<Int32(nodeCount), using: &generator)
+      let edge = Edge(source, target)
+      if !edges.contains(edge) && labels[edge.source] != labels[edge.target] {
+        edges.insert(edge)
+        badEdgeCount += 1
+      }
+    }
+    var neighbors = [[Int32]](repeating: [], count: nodeCount)
+    for edge in edges {
+      neighbors[Int(edge.source)].append(edge.target)
+      neighbors[Int(edge.target)].append(edge.source)
+    }
+    return Graph(
+      nodeCount: nodeCount,
+      featureCount: featureCount,
+      classCount: classCount,
+      features: features,
+      neighbors: neighbors,
+      labels: labels,
+      trainNodes: trainNodes,
+      validationNodes: validationNodes,
+      testNodes: testNodes)
+  }
+}
+
 fileprivate func parse(tsvFileAt fileURL: URL) throws -> [[String]] {
   try Data(contentsOf: fileURL).withUnsafeBytes {
     $0.split(separator: UInt8(ascii: "\n")).map {

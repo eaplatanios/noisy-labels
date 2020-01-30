@@ -28,7 +28,7 @@ internal struct SparseTensor<Scalar: TensorFlowFloatingPoint> {
   }
 
   @usableFromInline
-  @differentiable(wrt: dense, vjp: _vjpMatmul(withDense:adjointA:adjointB:))
+  @differentiable//(wrt: dense, vjp: _vjpMatmul(withDense:adjointA:adjointB:))
   func matmul(
     withDense dense: Tensor<Scalar>,
     adjointA: Bool = false,
@@ -44,7 +44,7 @@ internal struct SparseTensor<Scalar: TensorFlowFloatingPoint> {
   }
 
   @usableFromInline
-  // @derivative(of: matmul)
+  @derivative(of: matmul)
   func _vjpMatmul(
     withDense dense: Tensor<Scalar>,
     adjointA: Bool = false,

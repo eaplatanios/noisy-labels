@@ -159,7 +159,7 @@ try withRandomSeedForTensorFlow(randomSeed) {
       marginalStepCount: 1000,
       evaluationStepCount: 1,
       mStepLogCount: 100,
-      mConvergenceEvaluationCount: 500,
+      mConvergenceEvaluationCount: 100,
       emStepCallback: { emStepCallback(model: $0) },
       verbose: true)
 

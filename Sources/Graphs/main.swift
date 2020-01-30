@@ -57,6 +57,11 @@ let dropout: OptionArgument<Float> = parser.add(
   shortName: "-dr",
   kind: Float.self,
   usage: "Dropout rate.")
+let splitProportions: OptionArgument<[Float]> = parser.add(
+  option: "--split-proportions",
+  shortName: "-sp",
+  kind: [Float].self,
+  usage: "Data set split proportions.")
 let targetBadEdgeProportion: OptionArgument<Float> = parser.add(
   option: "--target-bad-edge-proportion",
   shortName: "-tbep",
@@ -79,6 +84,17 @@ try withRandomSeedForTensorFlow(randomSeed) {
     .appendingPathComponent("data")
     .appendingPathComponent(parsedArguments.get(dataset)!)
   var graph = try Graph(loadFromDirectory: dataDirectory)
+
+  if let splitProportions = parsedArguments.get(splitProportions) {
+    assert(splitProportions.count == 2, """
+      The split proportions must be two numbers between 0 and 1 that correspond 
+      to the train data and validation data proportions, respectively.
+      """)
+    graph = graph.split(
+      trainProportion: splitProportions[0],
+      validationProportion: splitProportions[1],
+      using: &generator)
+  }
 
   if let targetBadEdgeProportion = parsedArguments.get(targetBadEdgeProportion) {
     graph = graph.corrupted(
@@ -190,6 +206,9 @@ try withRandomSeedForTensorFlow(randomSeed) {
 
   func configuration() -> String {
     var configuration = "\(parsedArguments.get(dataset)!):\(parsedArguments.get(model)!)"
+    if let splitProportions = parsedArguments.get(splitProportions) {
+      configuration = "\(configuration):sp-\(splitProportions[0])-\(splitProportions[1])"
+    }
     configuration = "\(configuration):bep-\(graph.badEdgeProportion)"
     if let targetBadEdgeProportion = parsedArguments.get(targetBadEdgeProportion) {
       configuration = "\(configuration):tbep-\(targetBadEdgeProportion)"

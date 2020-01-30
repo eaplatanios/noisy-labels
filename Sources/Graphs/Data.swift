@@ -127,7 +127,7 @@ extension Graph {
     //   with: Tensor<Float>(onesLike: featureMoments.variance),
     //   where: featureMoments.variance .== 0)
     // self.features = (Tensor<Float>(stacking: featureVectors, alongAxis: 0) - featuresMean) / featuresStd
-    
+
     let featureVectors = features.map { f in Tensor<Float>(shape: [f.count], scalars: f) }
     self.features = Tensor<Float>(stacking: featureVectors, alongAxis: 0)
     // self.features = Tensor<Float>(
@@ -157,6 +157,30 @@ extension Graph {
 }
 
 extension Graph {
+  public func split<T: RandomNumberGenerator>(
+    trainProportion: Float,
+    validationProportion: Float,
+    using generator: inout T
+  ) -> Graph {
+    assert(0 < trainProportion + validationProportion && trainProportion + validationProportion < 1)
+    let nodes = (trainNodes + validationNodes + testNodes).shuffled(using: &generator)
+    let trainCount = Int(trainProportion * Float(nodes.count))
+    let validationCount = Int(validationProportion * Float(nodes.count))
+    let trainNodes = [Int32](nodes[0..<trainCount])
+    let validationNodes = [Int32](nodes[trainCount..<(trainCount + validationCount)])
+    let testNodes = [Int32](nodes[(trainCount + validationCount)...])
+    return Graph(
+      nodeCount: nodeCount,
+      featureCount: featureCount,
+      classCount: classCount,
+      features: features,
+      neighbors: neighbors,
+      labels: labels,
+      trainNodes: trainNodes,
+      validationNodes: validationNodes,
+      testNodes: testNodes)
+  }
+
   fileprivate struct Edge: Hashable {
     let source: Int32
     let target: Int32

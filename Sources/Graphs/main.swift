@@ -183,9 +183,9 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
     let optimizerFn = { () in
       Adam<Predictor>(
         for: predictor,
-        learningRate: 1e-2,
+        learningRate: 1e-3,
         beta1: 0.9,
-        beta2: 0.99,
+        beta2: 0.999,
         epsilon: 1e-8,
         decay: 0)
     }
@@ -201,9 +201,9 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       useThresholdedExpectations: false,
       labelSmoothing: parsedArguments.get(labelSmoothing) ?? 0.5,
       resultAccumulator: ExactAccumulator(),
-      mStepCount: 1000,
+      mStepCount: 500,
       emStepCount: 100,
-      marginalStepCount: 1000,
+      marginalStepCount: 0,
       evaluationStepCount: 10,
       mStepLogCount: 100,
       mConvergenceEvaluationCount: 10,

@@ -102,6 +102,8 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
   randomSeed: Int64,
   using generator: inout G
 ) -> (
+  firstPosteriorResult: Result,
+  firstPriorResult: Result,
   posteriorResult: Result,
   priorResult: Result
 ) where Predictor.TangentVector: VectorProtocol & PointwiseMultiplicative & ElementaryFunctions,
@@ -125,6 +127,8 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
         using: &generator)
     }
 
+    var firstEvaluationResult: Result? = nil
+    var firstPriorEvaluationResult: Result? = nil
     var bestEvaluationResult: Result? = nil
     var bestPriorEvaluationResult: Result? = nil
     var emStepCallbackInvocationsWithoutImprovement = 0
@@ -132,6 +136,7 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
 
     func emStepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) -> Bool {
       let evaluationResult = evaluate(model: model, using: graph, usePrior: false)
+      if firstEvaluationResult == nil { firstEvaluationResult = evaluationResult }
       if let bestResult = bestEvaluationResult {
         if evaluationResult.validationAccuracy > bestResult.validationAccuracy ||
           (evaluationResult.validationAccuracy == bestResult.validationAccuracy &&
@@ -145,6 +150,7 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
         bestEvaluationResult = evaluationResult
       }
       let priorEvaluationResult = evaluate(model: model, using: graph, usePrior: true)
+      if firstPriorEvaluationResult == nil { firstPriorEvaluationResult = priorEvaluationResult }
       if let bestResult = bestPriorEvaluationResult {
         if priorEvaluationResult.validationAccuracy > bestResult.validationAccuracy ||
           (priorEvaluationResult.validationAccuracy == bestResult.validationAccuracy &&
@@ -204,36 +210,56 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       emStepCallback: { emStepCallback(model: $0) },
       verbose: true)
     model.train(using: graph)
-    return (posteriorResult: bestEvaluationResult!, priorResult: bestPriorEvaluationResult!)
+    return (
+      firstPosteriorResult: firstEvaluationResult!,
+      firstPriorResult: firstPriorEvaluationResult!,
+      posteriorResult: bestEvaluationResult!,
+      priorResult: bestPriorEvaluationResult!)
   }
 }
 
 @discardableResult
 func runExperiments<Predictor: GraphPredictor>(predictor: (Graph) -> Predictor) -> (
+  firstPosteriorResultMean: Result,
+  firstPosteriorResultStandardDeviation: Result,
+  firstPriorResultMean: Result,
+  firstPriorResultStandardDeviation: Result,
   posteriorResultMean: Result,
   posteriorResultStandardDeviation: Result,
   priorResultMean: Result,
   priorResultStandardDeviation: Result
 ) where Predictor.TangentVector: VectorProtocol & PointwiseMultiplicative & ElementaryFunctions,
         Predictor.TangentVector.VectorSpaceScalar == Float {
+  var firstPosteriorResults = [Result]()
+  var firstPriorResults = [Result]()
   var posteriorResults = [Result]()
   var priorResults = [Result]()
   for run in 0..<(parsedArguments.get(runCount) ?? 1) {
     logger.info("Starting run \(run)")
     let randomSeed = Int64(parsedArguments.get(seed) ?? 123456789) &+ Int64(run)
     var generator = PhiloxRandomNumberGenerator(seed: randomSeed)
-    let (posteriorResult, priorResult) = runExperiment(
+    let (firstPosteriorResult, firstPriorResult, posteriorResult, priorResult) = runExperiment(
       predictor: predictor,
       randomSeed: randomSeed,
       using: &generator)
+    firstPosteriorResults.append(firstPosteriorResult)
+    firstPriorResults.append(firstPriorResult)
     posteriorResults.append(posteriorResult)
     priorResults.append(priorResult)
+    logger.info("First posterior results moments: \(firstPosteriorResults.moments)")
+    logger.info("First prior results moments: \(firstPriorResults.moments)")
     logger.info("Posterior results moments: \(posteriorResults.moments)")
     logger.info("Prior results moments: \(priorResults.moments)")
   }
+  let firstPosteriorMoments = firstPosteriorResults.moments
+  let firstPriorMoments = firstPriorResults.moments
   let posteriorMoments = posteriorResults.moments
   let priorMoments = priorResults.moments
   return (
+    firstPosteriorResultMean: firstPosteriorMoments.mean,
+    firstPosteriorResultStandardDeviation: firstPosteriorMoments.standardDeviation,
+    firstPriorResultMean: firstPriorMoments.mean,
+    firstPriorResultStandardDeviation: firstPriorMoments.standardDeviation,
     posteriorResultMean: posteriorMoments.mean,
     posteriorResultStandardDeviation: posteriorMoments.standardDeviation,
     priorResultMean: priorMoments.mean,

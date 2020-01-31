@@ -16,7 +16,7 @@ import Foundation
 import SPMUtility
 import TensorFlow
 
-// Example command: swift run -c release Graphs -r 10 -emc 5 --dataset citeseer --model decoupled-mlp --l-hidden 128 --q-hidden 128 -ls 0 -tbep 0.2 -sp 0.05 0.1
+// Example command: swift run -c release Graphs -r 5 -emc 5 --dataset citeseer --model decoupled-mlp --l-hidden 128 --q-hidden 128 -ls 0 -tbep 0.2 -sp 0.05 0.1
 
 // The first argument is always the executable, and so we drop it.
 let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
@@ -204,9 +204,9 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       mStepCount: 1000,
       emStepCount: 100,
       marginalStepCount: 1000,
-      evaluationStepCount: 1,
+      evaluationStepCount: 10,
       mStepLogCount: 100,
-      mConvergenceEvaluationCount: 100,
+      mConvergenceEvaluationCount: 10,
       emStepCallback: { emStepCallback(model: $0) },
       verbose: true)
     model.train(using: graph)
@@ -280,7 +280,7 @@ case .gcn: runExperiments(predictor: { GCNPredictor(
   graph: $0,
   hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
   dropout: parsedArguments.get(dropout) ?? 0.5) })
-case .decoupledGCN: runExperiments(predictor: { DecoupledGCNPredictorV2(
+case .decoupledGCN: runExperiments(predictor: { DecoupledGCNPredictorV3(
   graph: $0,
   lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
   qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,

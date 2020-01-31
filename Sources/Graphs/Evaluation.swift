@@ -42,6 +42,20 @@ extension Result {
   }
 }
 
+extension Array where Element == Result {
+  var moments: (mean: Result, standardDeviation: Result) {
+    let mean = Result(
+      trainAccuracy: self.map { $0.trainAccuracy }.mean,
+      validationAccuracy: self.map { $0.validationAccuracy }.mean,
+      testAccuracy: self.map { $0.testAccuracy }.mean)
+    let standardDeviation = Result(
+      trainAccuracy: self.map { $0.trainAccuracy }.standardDeviation,
+      validationAccuracy: self.map { $0.validationAccuracy }.standardDeviation,
+      testAccuracy: self.map { $0.testAccuracy }.standardDeviation)
+    return (mean: mean, standardDeviation: standardDeviation)
+  }
+}
+
 public func evaluate<P: GraphPredictor, O: Optimizer>(
   model: Model<P, O>,
   using graph: Graph,

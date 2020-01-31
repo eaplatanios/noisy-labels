@@ -17,6 +17,15 @@ import TensorFlow
 
 internal let logger = Logger(label: "Graphs")
 
+internal extension Array where Element == Float {
+  var mean: Float { reduce(0, { $0 + $1 }) / Float(count) }
+  var standardDeviation: Element {
+    let mean = reduce(0, { $0 + $1 }) / Float(count)
+    let variance = map { ($0 - mean) * ($0 - mean) }
+    return TensorFlow.sqrt(variance.mean)
+  }
+}
+
 /// Returns the log-softmax of the specified tensor element-wise.
 @inlinable
 @differentiable

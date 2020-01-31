@@ -32,7 +32,7 @@ where Optimizer.Model == Predictor {
   public let evaluationStepCount: Int?
   public let mStepLogCount: Int?
   public let mConvergenceEvaluationCount: Int?
-  public let emStepCallback: (Model) -> Void
+  public let emStepCallback: (Model) -> Bool
   public let verbose: Bool
 
   public var resultAccumulator: Accumulator
@@ -62,7 +62,7 @@ where Optimizer.Model == Predictor {
     evaluationStepCount: Int? = 1,
     mStepLogCount: Int? = 100,
     mConvergenceEvaluationCount: Int? = 10,
-    emStepCallback: @escaping (Model) -> Void = { _ in },
+    emStepCallback: @escaping (Model) -> Bool = { _ in false },
     verbose: Bool = false
   ) {
     self.resultAccumulator = resultAccumulator
@@ -122,7 +122,7 @@ where Optimizer.Model == Predictor {
         unlabeledData: unlabeledData,
         unlabeledNodeIndices: unlabeledNodeIndices)
       
-      emStepCallback(self)
+      if emStepCallback(self) { break }
     }
 
     performMarginalStep(

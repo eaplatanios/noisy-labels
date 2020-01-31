@@ -16,6 +16,8 @@ import Foundation
 import SPMUtility
 import TensorFlow
 
+// Example command: swift run -c release Graphs -r 10 -emc 5 --dataset citeseer --model decoupled-mlp --l-hidden 128 --q-hidden 128 -ls 0 -tbep 0.2 -sp 0.05 0.1
+
 // The first argument is always the executable, and so we drop it.
 let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
 
@@ -67,6 +69,16 @@ let targetBadEdgeProportion: OptionArgument<Float> = parser.add(
   shortName: "-tbep",
   kind: Float.self,
   usage: "Target bad edge proportion.")
+let emConvergence: OptionArgument<Int> = parser.add(
+  option: "--em-convergence",
+  shortName: "-emc",
+  kind: Int.self,
+  usage: "Maximum number of EM steps without improvement on the validation set performance.")
+let runCount: OptionArgument<Int> = parser.add(
+  option: "--run-count",
+  shortName: "-r",
+  kind: Int.self,
+  usage: "Number of runs.")
 let seed: OptionArgument<Int> = parser.add(
   option: "--seed",
   shortName: "-s",
@@ -75,41 +87,50 @@ let seed: OptionArgument<Int> = parser.add(
 
 let parsedArguments = try! parser.parse(arguments)
 
-let randomSeed = Int64(parsedArguments.get(seed) ?? 123456789)
-var generator = PhiloxRandomNumberGenerator(seed: randomSeed)
-try withRandomSeedForTensorFlow(randomSeed) {
-  let workingDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-    .appendingPathComponent("temp")
-  let dataDirectory = workingDirectory
-    .appendingPathComponent("data")
-    .appendingPathComponent(parsedArguments.get(dataset)!)
-  var graph = try Graph(loadFromDirectory: dataDirectory)
+let workingDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+  .appendingPathComponent("temp")
+let dataDirectory = workingDirectory
+  .appendingPathComponent("data")
+  .appendingPathComponent(parsedArguments.get(dataset)!)
+let originalGraph = try Graph(loadFromDirectory: dataDirectory)
+let emStepCount = 100
+let emConvergenceStepCount = parsedArguments.get(emConvergence) ?? emStepCount
 
-  if let splitProportions = parsedArguments.get(splitProportions) {
-    assert(splitProportions.count == 2, """
-      The split proportions must be two numbers between 0 and 1 that correspond 
-      to the train data and validation data proportions, respectively.
-      """)
-    graph = graph.split(
-      trainProportion: splitProportions[0],
-      validationProportion: splitProportions[1],
-      using: &generator)
-  }
-
-  if let targetBadEdgeProportion = parsedArguments.get(targetBadEdgeProportion) {
-    graph = graph.corrupted(
-      targetBadEdgeProportion: targetBadEdgeProportion,
-      using: &generator)
-  }
-
-  func runExperiment<Predictor: GraphPredictor>(predictor: Predictor)
-  where Predictor.TangentVector: VectorProtocol & PointwiseMultiplicative & ElementaryFunctions,
+@discardableResult
+func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
+  predictor: (Graph) -> Predictor,
+  randomSeed: Int64,
+  using generator: inout G
+) -> (
+  posteriorResult: Result,
+  priorResult: Result
+) where Predictor.TangentVector: VectorProtocol & PointwiseMultiplicative & ElementaryFunctions,
         Predictor.TangentVector.VectorSpaceScalar == Float {
+  withRandomSeedForTensorFlow(randomSeed) {
+    var graph = originalGraph
+    if let splitProportions = parsedArguments.get(splitProportions) {
+      assert(splitProportions.count == 2, """
+        The split proportions must be two numbers between 0 and 1 that correspond 
+        to the train data and validation data proportions, respectively.
+        """)
+      graph = graph.split(
+        trainProportion: splitProportions[0],
+        validationProportion: splitProportions[1],
+        using: &generator)
+    }
+
+    if let targetBadEdgeProportion = parsedArguments.get(targetBadEdgeProportion) {
+      graph = graph.corrupted(
+        targetBadEdgeProportion: targetBadEdgeProportion,
+        using: &generator)
+    }
+
     var bestEvaluationResult: Result? = nil
     var bestPriorEvaluationResult: Result? = nil
     var emStepCallbackInvocationsWithoutImprovement = 0
     var emStepCallbackInvocationsWithoutPriorImprovement = 0
-    func emStepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) {
+
+    func emStepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) -> Bool {
       let evaluationResult = evaluate(model: model, using: graph, usePrior: false)
       if let bestResult = bestEvaluationResult {
         if evaluationResult.validationAccuracy > bestResult.validationAccuracy ||
@@ -136,7 +157,7 @@ try withRandomSeedForTensorFlow(randomSeed) {
       } else {
         bestPriorEvaluationResult = priorEvaluationResult
       }
-      logger.info("Configuration: \(configuration())")
+      logger.info("Configuration: \(configuration(graph: graph))")
       logger.info("Current Evaluation Result: \(evaluationResult)")
       logger.info("Current Prior Evaluation Result: \(priorEvaluationResult)")
       logger.info("Best Evaluation Result: \(String(describing: bestEvaluationResult))")
@@ -147,7 +168,11 @@ try withRandomSeedForTensorFlow(randomSeed) {
       if emStepCallbackInvocationsWithoutPriorImprovement > 0 {
         logger.info("Prior evaluation result has not improved in \(emStepCallbackInvocationsWithoutPriorImprovement) EM-step callback invocations.")
       }
+      return emStepCallbackInvocationsWithoutImprovement >= emConvergenceStepCount &&
+        emStepCallbackInvocationsWithoutPriorImprovement >= emConvergenceStepCount
     }
+
+    let predictor = predictor(graph)
 
     let optimizerFn = { () in
       Adam<Predictor>(
@@ -164,12 +189,12 @@ try withRandomSeedForTensorFlow(randomSeed) {
       optimizerFn: optimizerFn,
       entropyWeight: 0,
       qualitiesRegularizationWeight: 0,
-      randomSeed: 42,
+      randomSeed: randomSeed,
       batchSize: parsedArguments.get(batchSize) ?? 128,
       useWarmStarting: false,
       useThresholdedExpectations: false,
       labelSmoothing: parsedArguments.get(labelSmoothing) ?? 0.5,
-      // resultAccumulator: MovingAverageAccumulator(weight: 0.5),
+      resultAccumulator: ExactAccumulator(),
       mStepCount: 1000,
       emStepCount: 100,
       marginalStepCount: 1000,
@@ -178,51 +203,82 @@ try withRandomSeedForTensorFlow(randomSeed) {
       mConvergenceEvaluationCount: 100,
       emStepCallback: { emStepCallback(model: $0) },
       verbose: true)
-
-    dump(bestEvaluationResult)
     model.train(using: graph)
+    return (posteriorResult: bestEvaluationResult!, priorResult: bestPriorEvaluationResult!)
   }
+}
 
-  switch parsedArguments.get(model)! {
-  case .mlp: runExperiment(predictor: MLPPredictor(
-    graph: graph,
-    hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-    dropout: parsedArguments.get(dropout) ?? 0.5))
-  case .decoupledMLP: runExperiment(predictor: DecoupledMLPPredictorV2(
-    graph: graph,
-    lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-    qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
-    dropout: parsedArguments.get(dropout) ?? 0.5))
-  case .gcn: runExperiment(predictor: GCNPredictor(
-    graph: graph,
-    hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-    dropout: parsedArguments.get(dropout) ?? 0.5))
-  case .decoupledGCN: runExperiment(predictor: DecoupledGCNPredictorV2(
-    graph: graph,
-    lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-    qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
-    dropout: parsedArguments.get(dropout) ?? 0.5))
+@discardableResult
+func runExperiments<Predictor: GraphPredictor>(predictor: (Graph) -> Predictor) -> (
+  posteriorResultMean: Result,
+  posteriorResultStandardDeviation: Result,
+  priorResultMean: Result,
+  priorResultStandardDeviation: Result
+) where Predictor.TangentVector: VectorProtocol & PointwiseMultiplicative & ElementaryFunctions,
+        Predictor.TangentVector.VectorSpaceScalar == Float {
+  var posteriorResults = [Result]()
+  var priorResults = [Result]()
+  for run in 0..<(parsedArguments.get(runCount) ?? 1) {
+    logger.info("Starting run \(run)")
+    let randomSeed = Int64(parsedArguments.get(seed) ?? 123456789) &+ Int64(run)
+    var generator = PhiloxRandomNumberGenerator(seed: randomSeed)
+    let (posteriorResult, priorResult) = runExperiment(
+      predictor: predictor,
+      randomSeed: randomSeed,
+      using: &generator)
+    posteriorResults.append(posteriorResult)
+    priorResults.append(priorResult)
+    logger.info("Posterior results moments: \(posteriorResults.moments)")
+    logger.info("Prior results moments: \(priorResults.moments)")
   }
+  let posteriorMoments = posteriorResults.moments
+  let priorMoments = priorResults.moments
+  return (
+    posteriorResultMean: posteriorMoments.mean,
+    posteriorResultStandardDeviation: posteriorMoments.standardDeviation,
+    priorResultMean: priorMoments.mean,
+    priorResultStandardDeviation: priorMoments.standardDeviation)
+}
 
-  func configuration() -> String {
-    var configuration = "\(parsedArguments.get(dataset)!):\(parsedArguments.get(model)!)"
-    if let splitProportions = parsedArguments.get(splitProportions) {
-      configuration = "\(configuration):sp-\(splitProportions[0])-\(splitProportions[1])"
-    }
-    configuration = "\(configuration):bep-\(graph.badEdgeProportion)"
-    if let targetBadEdgeProportion = parsedArguments.get(targetBadEdgeProportion) {
-      configuration = "\(configuration):tbep-\(targetBadEdgeProportion)"
-    }
-    configuration = "\(configuration):lh-\(parsedArguments.get(lHiddenUnitCounts)!.map(String.init).joined(separator: "-"))"
-    if let qHiddenUnitCounts = parsedArguments.get(qHiddenUnitCounts) {
-      configuration = "\(configuration):qh-\(qHiddenUnitCounts.map(String.init).joined(separator: "-"))"
-    }
-    configuration = "\(configuration):bs-\(parsedArguments.get(batchSize) ?? 128)"
-    configuration = "\(configuration):ls-\(parsedArguments.get(labelSmoothing) ?? 0.5)"
-    configuration = "\(configuration):dr-\(parsedArguments.get(dropout) ?? 0.5)"
-    configuration = "\(configuration):s-\(parsedArguments.get(seed) ?? 123456789)"
-    return configuration
+switch parsedArguments.get(model)! {
+case .mlp: runExperiments(predictor: { MLPPredictor(
+  graph: $0,
+  hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+  dropout: parsedArguments.get(dropout) ?? 0.5) })
+case .decoupledMLP: runExperiments(predictor: { DecoupledMLPPredictorV2(
+  graph: $0,
+  lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+  qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
+  dropout: parsedArguments.get(dropout) ?? 0.5) })
+case .gcn: runExperiments(predictor: { GCNPredictor(
+  graph: $0,
+  hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+  dropout: parsedArguments.get(dropout) ?? 0.5) })
+case .decoupledGCN: runExperiments(predictor: { DecoupledGCNPredictorV2(
+  graph: $0,
+  lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+  qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
+  dropout: parsedArguments.get(dropout) ?? 0.5) })
+}
+
+func configuration(graph: Graph) -> String {
+  var configuration = "\(parsedArguments.get(dataset)!):\(parsedArguments.get(model)!)"
+  if let splitProportions = parsedArguments.get(splitProportions) {
+    configuration = "\(configuration):sp-\(splitProportions[0])-\(splitProportions[1])"
   }
+  configuration = "\(configuration):bep-\(graph.badEdgeProportion)"
+  if let targetBadEdgeProportion = parsedArguments.get(targetBadEdgeProportion) {
+    configuration = "\(configuration):tbep-\(targetBadEdgeProportion)"
+  }
+  configuration = "\(configuration):lh-\(parsedArguments.get(lHiddenUnitCounts)!.map(String.init).joined(separator: "-"))"
+  if let qHiddenUnitCounts = parsedArguments.get(qHiddenUnitCounts) {
+    configuration = "\(configuration):qh-\(qHiddenUnitCounts.map(String.init).joined(separator: "-"))"
+  }
+  configuration = "\(configuration):bs-\(parsedArguments.get(batchSize) ?? 128)"
+  configuration = "\(configuration):ls-\(parsedArguments.get(labelSmoothing) ?? 0.5)"
+  configuration = "\(configuration):dr-\(parsedArguments.get(dropout) ?? 0.5)"
+  configuration = "\(configuration):s-\(parsedArguments.get(seed) ?? 123456789)"
+  return configuration
 }
 
 extension Float: ArgumentKind {

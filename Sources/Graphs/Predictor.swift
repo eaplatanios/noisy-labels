@@ -163,6 +163,7 @@ public struct NodeIndexMap {
 public struct GraphPredictions: Differentiable {
   @noDerivative public var neighborIndices: Tensor<Int32>
   public var labelProbabilities: Tensor<Float>
+  public var neighborLabelProbabilities: Tensor<Float>
   public var qualities: Tensor<Float>
   public var qualitiesMask: Tensor<Float>
 
@@ -171,11 +172,13 @@ public struct GraphPredictions: Differentiable {
   public init(
     neighborIndices: Tensor<Int32>,
     labelProbabilities: Tensor<Float>,
+    neighborLabelProbabilities: Tensor<Float>,
     qualities: Tensor<Float>,
     qualitiesMask: Tensor<Float>
   ) {
     self.neighborIndices = neighborIndices
     self.labelProbabilities = labelProbabilities
+    self.neighborLabelProbabilities = neighborLabelProbabilities
     self.qualities = qualities
     self.qualitiesMask = qualitiesMask
   }
@@ -241,8 +244,12 @@ public struct MLPPredictor: GraphPredictor {
     // Compute features, label probabilities, and qualities for all requested nodes.
     let allFeatures = graph.features.gathering(atIndices: indexMap.uniqueNodeIndices)
     let allLatent = hiddenDropout(hiddenLayers.differentiableReduce(allFeatures) { $1($0) })
-    let labelProbabilities = logSoftmax(
-      predictionLayer(allLatent.gathering(atIndices: indexMap.nodeIndices)))
+    let allProbabilities = logSoftmax(predictionLayer(allLatent))
+    let labelProbabilities = allProbabilities.gathering(atIndices: indexMap.nodeIndices)
+    let neighborLabelProbabilities = allProbabilities.gathering(atIndices: indexMap.neighborIndices)
+    // let neighborLabelProbabilities = withoutDerivative(at: indexMap) {
+    //   allProbabilities.gathering(atIndices: $0.neighborIndices)
+    // }
 
     // Split up into the nodes and their neighbors.
     let C = Int32(graph.classCount)
@@ -257,6 +264,7 @@ public struct MLPPredictor: GraphPredictor {
     return GraphPredictions(
       neighborIndices: indexMap.neighborIndices,
       labelProbabilities: labelProbabilities,
+      neighborLabelProbabilities: neighborLabelProbabilities,
       qualities: qualities,
       qualitiesMask: indexMap.neighborsMask)
   }
@@ -352,8 +360,12 @@ public struct DecoupledMLPPredictor: GraphPredictor {
     let allFeatures = graph.features.gathering(atIndices: indexMap.uniqueNodeIndices)
     let allLatent = lHiddenLayers.differentiableReduce(allFeatures) { $1($0) }
     let allLatentQ = qHiddenLayers.differentiableReduce(allFeatures) { $1($0) }
-    let labelProbabilities = logSoftmax(
-      predictionLayer(allLatent.gathering(atIndices: indexMap.nodeIndices)))
+    let allProbabilities = logSoftmax(predictionLayer(allLatent))
+    let labelProbabilities = allProbabilities.gathering(atIndices: indexMap.nodeIndices)
+    let neighborLabelProbabilities = allProbabilities.gathering(atIndices: indexMap.neighborIndices)
+    // let neighborLabelProbabilities = withoutDerivative(at: indexMap) {
+    //   allProbabilities.gathering(atIndices: $0.neighborIndices)
+    // }
 
     // Split up into the nodes and their neighbors.
     let C = Int32(graph.classCount)
@@ -371,6 +383,7 @@ public struct DecoupledMLPPredictor: GraphPredictor {
     return GraphPredictions(
       neighborIndices: indexMap.neighborIndices,
       labelProbabilities: labelProbabilities,
+      neighborLabelProbabilities: neighborLabelProbabilities,
       qualities: qualities,
       qualitiesMask: indexMap.neighborsMask)
   }
@@ -466,8 +479,12 @@ public struct DecoupledMLPPredictorV2: GraphPredictor {
     // Compute features, label probabilities, and qualities for all requested nodes.
     let allFeatures = graph.features.gathering(atIndices: indexMap.uniqueNodeIndices)
     let allLatent = lHiddenLayers.differentiableReduce(allFeatures) { $1($0) }
-    let labelProbabilities = logSoftmax(
-      predictionLayer(allLatent.gathering(atIndices: indexMap.nodeIndices)))
+    let allProbabilities = logSoftmax(predictionLayer(allLatent))
+    let labelProbabilities = allProbabilities.gathering(atIndices: indexMap.nodeIndices)
+    let neighborLabelProbabilities = allProbabilities.gathering(atIndices: indexMap.neighborIndices)
+    // let neighborLabelProbabilities = withoutDerivative(at: indexMap) {
+    //   allProbabilities.gathering(atIndices: $0.neighborIndices)
+    // }
 
     // Split up into the nodes and their neighbors.
     let C = Int32(graph.classCount)
@@ -481,6 +498,7 @@ public struct DecoupledMLPPredictorV2: GraphPredictor {
     return GraphPredictions(
       neighborIndices: indexMap.neighborIndices,
       labelProbabilities: labelProbabilities,
+      neighborLabelProbabilities: neighborLabelProbabilities,
       qualities: qualities,
       qualitiesMask: indexMap.neighborsMask)
   }
@@ -570,6 +588,10 @@ public struct GCNPredictor: GraphPredictor {
 
     // Split up into the nodes and their neighbors.
     let labelProbabilities = allProbabilities.gathering(atIndices: indexMap.nodeIndices)
+    let neighborLabelProbabilities = allProbabilities.gathering(atIndices: indexMap.neighborIndices)
+    // let neighborLabelProbabilities = withoutDerivative(at: indexMap) {
+    //   allProbabilities.gathering(atIndices: $0.neighborIndices)
+    // }
     let C = Int32(graph.classCount)
     let nodesLatentQ = projectionMatrices.matrices[hiddenUnitCounts.count].matmul(
       withDense: nodeLatentLayer(allFeatures),
@@ -586,6 +608,7 @@ public struct GCNPredictor: GraphPredictor {
     return GraphPredictions(
       neighborIndices: indexMap.neighborIndices,
       labelProbabilities: labelProbabilities,
+      neighborLabelProbabilities: neighborLabelProbabilities,
       qualities: qualities,
       qualitiesMask: indexMap.neighborsMask)
   }
@@ -696,6 +719,10 @@ public struct DecoupledGCNPredictor: GraphPredictor {
       withDense: lOutputLayer(lFeatures),
       adjointA: true))
     let labelProbabilities = lOutput.gathering(atIndices: indexMap.nodeIndices)
+    let neighborLabelProbabilities = lOutput.gathering(atIndices: indexMap.neighborIndices)
+    // let neighborLabelProbabilities = withoutDerivative(at: indexMap) {
+    //   lOutput.gathering(atIndices: $0.neighborIndices)
+    // }
 
     // Compute the qualities.
     // TODO: Why not use `indexMap.neighborIndices` directly?
@@ -726,6 +753,7 @@ public struct DecoupledGCNPredictor: GraphPredictor {
     return GraphPredictions(
       neighborIndices: indexMap.neighborIndices,
       labelProbabilities: labelProbabilities,
+      neighborLabelProbabilities: neighborLabelProbabilities,
       qualities: qualities,
       qualitiesMask: indexMap.neighborsMask)
   }
@@ -840,6 +868,10 @@ public struct DecoupledGCNPredictorV2: GraphPredictor {
       withDense: lOutputLayer(lFeatures),
       adjointA: true))
     let labelProbabilities = lOutput.gathering(atIndices: indexMap.nodeIndices)
+    let neighborLabelProbabilities = lOutput.gathering(atIndices: indexMap.neighborIndices)
+    // let neighborLabelProbabilities = withoutDerivative(at: indexMap) {
+    //   lOutput.gathering(atIndices: $0.neighborIndices)
+    // }
 
     // Compute the qualities.
     let C = Int32(graph.classCount)
@@ -854,6 +886,7 @@ public struct DecoupledGCNPredictorV2: GraphPredictor {
     return GraphPredictions(
       neighborIndices: indexMap.neighborIndices,
       labelProbabilities: labelProbabilities,
+      neighborLabelProbabilities: neighborLabelProbabilities,
       qualities: qualities,
       qualitiesMask: indexMap.neighborsMask)
   }
@@ -943,7 +976,7 @@ public struct DecoupledGCNPredictorV3: GraphPredictor {
     }
     let C = graph.classCount
     self.lOutputLayer = DenseNoBias<Float>(inputSize: lInputSize, outputSize: C)
-    self.qOutputLayer = Dense<Float>(inputSize: qInputSize, outputSize: 1)
+    self.qOutputLayer = Dense<Float>(inputSize: qInputSize, outputSize: C * C)
   }
 
   @differentiable
@@ -964,21 +997,31 @@ public struct DecoupledGCNPredictorV3: GraphPredictor {
       withDense: lOutputLayer(lFeatures),
       adjointA: true))
     let labelProbabilities = lOutput.gathering(atIndices: indexMap.nodeIndices)
+    let neighborLabelProbabilities = lOutput.gathering(atIndices: indexMap.neighborIndices)
+    // let neighborLabelProbabilities = withoutDerivative(at: indexMap) {
+    //   lOutput.gathering(atIndices: $0.neighborIndices)
+    // }
 
     // Compute the qualities.
     let allFeatures = graph.features.gathering(atIndices: indexMap.uniqueNodeIndices)
     let allLatentQ = qHiddenLayers.differentiableReduce(allFeatures) { $1($0) }
     let L = Int32(qHiddenUnitCounts.last!)
+    let C = Int32(graph.classCount)
     let nodesLatentQ = allLatentQ.gathering(atIndices: indexMap.nodeIndices)
       .reshaped(toShape: Tensor<Int32>([-1, 1, L]))
     let neighborsLatentQ = allLatentQ.gathering(atIndices: indexMap.neighborIndices)
       .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), L]))
-    let agreements = sigmoid(qOutputLayer((nodesLatentQ - neighborsLatentQ).squared()))
-    let qualities = log(agreementsToQualities(agreements, classCount: graph.classCount))
+    let qualities = logSoftmax(
+      qOutputLayer(nodesLatentQ + neighborsLatentQ)
+        .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C])),
+      alongAxis: -2)
+    // let agreements = sigmoid(qOutputLayer((nodesLatentQ - neighborsLatentQ).squared()))
+    // let qualities = log(agreementsToQualities(agreements, classCount: graph.classCount))
 
     return GraphPredictions(
       neighborIndices: indexMap.neighborIndices,
       labelProbabilities: labelProbabilities,
+      neighborLabelProbabilities: neighborLabelProbabilities,
       qualities: qualities,
       qualitiesMask: indexMap.neighborsMask)
   }
@@ -1025,19 +1068,22 @@ public struct DecoupledGCNPredictorV3: GraphPredictor {
     }
     let C = graph.classCount
     self.lOutputLayer = DenseNoBias<Float>(inputSize: lInputSize, outputSize: C)
-    self.qOutputLayer = Dense<Float>(inputSize: qInputSize, outputSize: 1)
+    self.qOutputLayer = Dense<Float>(inputSize: qInputSize, outputSize: C * C)
   }
 }
 
-@differentiable
-fileprivate func agreementsToQualities(
-  _ agreements: Tensor<Float>,
-  classCount: Int
-) -> Tensor<Float> {
-  let agreementsDiagonal = agreements
-    .tiled(multiples: Tensor<Int32>([1, 1, Int32(classCount)]))
-    .diagonal()
-  let disagreements = withoutDerivative(at: agreementsDiagonal) { Tensor<Float>(onesLike: $0) } *
-    (1 - agreements.expandingShape(at: -1)) / Float(classCount - 1)
-  return agreementsDiagonal + disagreements
-}
+// @differentiable
+// fileprivate func agreementsToQualities(
+//   _ agreements: Tensor<Float>,
+//   classCount: Int
+// ) -> Tensor<Float> {
+//   let agreementsDiagonal = agreements
+//     .tiled(multiples: Tensor<Int32>([1, 1, Int32(classCount)]))
+//     .diagonal()
+//   let disagreementsDiagonal = agreements
+//     .tiled(multiples: Tensor<Int32>([1, 1, Int32(classCount)]))
+//     .diagonal()
+//   let disagreements = withoutDerivative(at: agreementsDiagonal) { Tensor<Float>(onesLike: $0) } *
+//     (1 - agreements.expandingShape(at: -1)) / Float(classCount - 1)
+//   return agreementsDiagonal + disagreements - disagreementsDiagonal / Float(classCount - 1)
+// }

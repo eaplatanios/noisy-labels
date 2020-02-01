@@ -203,10 +203,9 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       resultAccumulator: ExactAccumulator(),
       mStepCount: 500,
       emStepCount: 100,
-      marginalStepCount: 0,
-      evaluationStepCount: 10,
+      evaluationStepCount: 1,
       mStepLogCount: 100,
-      mConvergenceEvaluationCount: 10,
+      mConvergenceEvaluationCount: 100,
       emStepCallback: { emStepCallback(model: $0) },
       verbose: true)
     model.train(using: graph)
@@ -280,7 +279,7 @@ case .gcn: runExperiments(predictor: { GCNPredictor(
   graph: $0,
   hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
   dropout: parsedArguments.get(dropout) ?? 0.5) })
-case .decoupledGCN: runExperiments(predictor: { DecoupledGCNPredictorV3(
+case .decoupledGCN: runExperiments(predictor: { DecoupledGCNPredictorV2(
   graph: $0,
   lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
   qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,

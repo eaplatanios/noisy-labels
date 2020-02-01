@@ -914,6 +914,7 @@ public struct DecoupledGCNPredictorV3: GraphPredictor {
   public var lHiddenLayers: [Sequential<Dropout<Float>, DenseNoBias<Float>>]
   public var qHiddenLayers: [Sequential<Dropout<Float>, Dense<Float>>]
   public var lOutputLayer: DenseNoBias<Float>
+  public var qOutputLayer: Dense<Float>
 
   public init(graph: Graph, lHiddenUnitCounts: [Int], qHiddenUnitCounts: [Int], dropout: Float) {
     self.graph = graph
@@ -941,11 +942,8 @@ public struct DecoupledGCNPredictorV3: GraphPredictor {
       qInputSize = hiddenUnitCount
     }
     let C = graph.classCount
-    self.qHiddenLayers.append(Sequential {
-      Dropout<Float>(probability: Double(dropout))
-      Dense<Float>(inputSize: qInputSize, outputSize: 1)
-    })
     self.lOutputLayer = DenseNoBias<Float>(inputSize: lInputSize, outputSize: C)
+    self.qOutputLayer = Dense<Float>(inputSize: qInputSize, outputSize: 1)
   }
 
   @differentiable
@@ -970,11 +968,12 @@ public struct DecoupledGCNPredictorV3: GraphPredictor {
     // Compute the qualities.
     let allFeatures = graph.features.gathering(atIndices: indexMap.uniqueNodeIndices)
     let allLatentQ = qHiddenLayers.differentiableReduce(allFeatures) { $1($0) }
+    let L = Int32(qHiddenUnitCounts.last!)
     let nodesLatentQ = allLatentQ.gathering(atIndices: indexMap.nodeIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, 1, 1]))
+      .reshaped(toShape: Tensor<Int32>([-1, 1, L]))
     let neighborsLatentQ = allLatentQ.gathering(atIndices: indexMap.neighborIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), 1]))
-    let agreements = sigmoid(nodesLatentQ + neighborsLatentQ)
+      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), L]))
+    let agreements = sigmoid(qOutputLayer((nodesLatentQ - neighborsLatentQ).squared()))
     let qualities = log(agreementsToQualities(agreements, classCount: graph.classCount))
 
     return GraphPredictions(
@@ -1025,11 +1024,8 @@ public struct DecoupledGCNPredictorV3: GraphPredictor {
       qInputSize = hiddenUnitCount
     }
     let C = graph.classCount
-    self.qHiddenLayers.append(Sequential {
-      Dropout<Float>(probability: Double(dropout))
-      Dense<Float>(inputSize: qInputSize, outputSize: 1)
-    })
     self.lOutputLayer = DenseNoBias<Float>(inputSize: lInputSize, outputSize: C)
+    self.qOutputLayer = Dense<Float>(inputSize: qInputSize, outputSize: 1)
   }
 }
 

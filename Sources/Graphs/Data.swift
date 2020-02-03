@@ -47,6 +47,7 @@ public struct Graph {
   public let trainNodes: [Int32]
   public let validationNodes: [Int32]
   public let testNodes: [Int32]
+  public let unlabeledNodes: [Int32]
 
   public var labeledData: LabeledData {
     let nodeLabels = trainNodes.map { self.labels[$0]! }
@@ -56,20 +57,49 @@ public struct Graph {
   }
 
   public var unlabeledData: Tensor<Int32> {
-    Tensor<Int32>(validationNodes + testNodes)
+    Tensor<Int32>(validationNodes + testNodes + unlabeledNodes)
   }
 
   public var allUnlabeledData: Tensor<Int32> {
-    Tensor<Int32>(trainNodes + validationNodes + testNodes)
+    Tensor<Int32>(trainNodes + validationNodes + testNodes + unlabeledNodes)
   }
 
   public var unlabeledNodeIndices: Tensor<Int32> {
-    Tensor<Int32>(validationNodes + testNodes)
+    Tensor<Int32>(validationNodes + testNodes + unlabeledNodes)
   }
 
   public var maxBatchNeighborCount: Int { maxNeighborCount }
 
   public var maxNeighborCount: Int { neighbors.map { $0.count }.max()! }
+
+  public var leveledData: [[Int32]] {
+    var leveledData = [[Int32]]()
+    var allNodes = Set<Int32>(trainNodes)
+    var nodes = Set<Int32>(trainNodes)
+    leveledData.append([Int32](nodes))
+    while nodes.count < nodeCount && nodes.count > 0 {
+      nodes = Set(nodes.flatMap { Set(neighbors[Int($0)]) }).filter { !allNodes.contains($0) }
+      let newLevel: [Int32] = [Int32](nodes).map {
+        ($0, Set(neighbors[Int($0)]).filter { allNodes.contains($0) }.count)
+      }.sorted { $0.1 < $1.1 }.map { $0.0 }
+      if !newLevel.isEmpty {
+        leveledData.append(newLevel)
+        allNodes = allNodes.union(newLevel)
+      }
+    }
+    if allNodes.count < nodeCount {
+      leveledData.append((validationNodes + testNodes + unlabeledNodes).filter {
+        !allNodes.contains($0)
+      })
+    }
+    return leveledData
+  }
+
+  public func data(atDepth depth: Int) -> Tensor<Int32> {
+    let nodes = leveledData.prefix(depth).flatMap { $0 }
+    print("Training on \(nodes.count) / \(nodeCount) nodes.")
+    return Tensor<Int32>(nodes)
+  }
 }
 
 extension Graph {
@@ -95,6 +125,7 @@ extension Graph {
     var trainNodes = [Int32]()
     var validationNodes = [Int32]()
     var testNodes = [Int32]()
+    var unlabeledNodes = [Int32]()
     var labels = [Int32: Int]()
     var classCount = 0
     for lineParts in try parse(tsvFileAt: directory.appendingPathComponent("labels.txt")) {
@@ -107,6 +138,7 @@ extension Graph {
         case "train": trainNodes.append(node)
         case "val": validationNodes.append(node)
         case "test": testNodes.append(node)
+        case "unlabeled": unlabeledNodes.append(node)
         default: ()
       }
     }
@@ -129,13 +161,13 @@ extension Graph {
     // self.features = (Tensor<Float>(stacking: featureVectors, alongAxis: 0) - featuresMean) / featuresStd
 
     let featureVectors = features.map { f in Tensor<Float>(shape: [f.count], scalars: f) }
-    self.features = Tensor<Float>(stacking: featureVectors, alongAxis: 0)
-    // self.features = Tensor<Float>(
-    //   stacking: featureVectors.map { f -> Tensor<Float> in
-    //     let sum = sqrt(f.squared().sum())
-    //     return f / sum.replacing(with: Tensor<Float>(onesLike: sum), where: sum .== 0)
-    //   },
-    //   alongAxis: 0)
+    // self.features = Tensor<Float>(stacking: featureVectors, alongAxis: 0)
+    self.features = Tensor<Float>(
+      stacking: featureVectors.map { f -> Tensor<Float> in
+        let sum = sqrt(f.squared().sum())
+        return f / sum.replacing(with: Tensor<Float>(onesLike: sum), where: sum .== 0)
+      },
+      alongAxis: 0)
 
     self.nodeCount = features.count
     self.featureCount = features[0].count
@@ -153,6 +185,7 @@ extension Graph {
     self.trainNodes = trainNodes
     self.validationNodes = validationNodes
     self.testNodes = testNodes
+    self.unlabeledNodes = unlabeledNodes
   }
 }
 
@@ -163,12 +196,13 @@ extension Graph {
     using generator: inout T
   ) -> Graph {
     assert(0 < trainProportion + validationProportion && trainProportion + validationProportion < 1)
-    let nodes = (trainNodes + validationNodes + testNodes).shuffled(using: &generator)
-    let trainCount = Int(trainProportion * Float(nodes.count))
-    let validationCount = Int(validationProportion * Float(nodes.count))
-    let trainNodes = [Int32](nodes[0..<trainCount])
-    let validationNodes = [Int32](nodes[trainCount..<(trainCount + validationCount)])
-    let testNodes = [Int32](nodes[(trainCount + validationCount)...])
+    let nodes = trainNodes + validationNodes + testNodes + unlabeledNodes
+    let shuffledNodes = nodes.shuffled(using: &generator)
+    let trainCount = Int(trainProportion * Float(shuffledNodes.count))
+    let validationCount = Int(validationProportion * Float(shuffledNodes.count))
+    let trainNodes = [Int32](shuffledNodes[0..<trainCount])
+    let validationNodes = [Int32](shuffledNodes[trainCount..<(trainCount + validationCount)])
+    let testNodes = [Int32](shuffledNodes[(trainCount + validationCount)...])
     return Graph(
       nodeCount: nodeCount,
       featureCount: featureCount,
@@ -178,7 +212,8 @@ extension Graph {
       labels: labels,
       trainNodes: trainNodes,
       validationNodes: validationNodes,
-      testNodes: testNodes)
+      testNodes: testNodes,
+      unlabeledNodes: [])
   }
 
   fileprivate struct Edge: Hashable {
@@ -251,7 +286,8 @@ extension Graph {
       labels: labels,
       trainNodes: trainNodes,
       validationNodes: validationNodes,
-      testNodes: testNodes)
+      testNodes: testNodes,
+      unlabeledNodes: unlabeledNodes)
   }
 }
 

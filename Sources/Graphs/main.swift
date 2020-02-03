@@ -187,21 +187,23 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
         beta1: 0.9,
         beta2: 0.999,
         epsilon: 1e-8,
-        decay: 0)
+        decay: 0.01)
     }
 
     var model = Model(
       predictor: predictor,
       optimizerFn: optimizerFn,
-      entropyWeight: 0,
+      entropyWeight: 0.1,
       qualitiesRegularizationWeight: 0,
       randomSeed: randomSeed,
       batchSize: parsedArguments.get(batchSize) ?? 128,
       useWarmStarting: false,
       useThresholdedExpectations: false,
+      useIncrementalNeighborhoodExpansion: false,
       labelSmoothing: parsedArguments.get(labelSmoothing) ?? 0.5,
       resultAccumulator: ExactAccumulator(),
-      mStepCount: 500,
+      // resultAccumulator: MovingAverageAccumulator(weight: 0.1),
+      mStepCount: 1000,
       emStepCount: 100,
       evaluationStepCount: 1,
       mStepLogCount: 100,

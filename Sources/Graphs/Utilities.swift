@@ -26,6 +26,42 @@ internal extension Array where Element == Float {
   }
 }
 
+public extension Tensor where Scalar: TensorFlowNumeric {
+  /// Returns `self` with new diagonal values, given that `self` is an optionally batched matrix.
+  ///
+  /// The returned tensor has the same shape and values as `self`, except for the specified
+  /// diagonals of the innermost matrices which are overwritten by the values in `diagonal`.
+  ///
+  /// Parameter diagonal: A tensor with rank `rank - 1` representing the new diagonal values.
+  @inlinable
+  func withDiagonal(_ diagonal: Tensor<Scalar>) -> Tensor {
+      _Raw.matrixSetDiag(self, diagonal: diagonal)
+  }
+}
+
+/// Returns an identity matrix or a batch of matrices.
+///
+/// - Parameters:
+///   - rowCount: The number of rows in each batch matrix.
+///   - columnCount: The number of columns in each batch matrix.
+///   - batchShape: The leading batch dimensions of the returned tensor.
+public func eye<Scalar: Numeric>(
+    rowCount: Int,
+    columnCount: Int? = nil,
+    batchShape: [Int] = []
+) -> Tensor<Scalar> {
+    let columnCount = columnCount ?? rowCount
+    let diagonalSize = min(rowCount, columnCount)
+    let diagonalShape = batchShape + [diagonalSize]
+    let diagonalOnes = Tensor<Scalar>(ones: TensorShape(diagonalShape))
+    if rowCount == columnCount {
+        return diagonalOnes.diagonal()
+    }
+    let shape = batchShape + [rowCount, columnCount]
+    let zeroMatrix = Tensor<Scalar>(zeros: TensorShape(shape))
+    return zeroMatrix.withDiagonal(diagonalOnes)
+}
+
 /// Returns the log-softmax of the specified tensor element-wise.
 @inlinable
 @differentiable

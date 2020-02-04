@@ -187,13 +187,13 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
         beta1: 0.9,
         beta2: 0.999,
         epsilon: 1e-8,
-        decay: 0.01)
+        decay: 0)
     }
 
     var model = Model(
       predictor: predictor,
       optimizerFn: optimizerFn,
-      entropyWeight: 0.1,
+      entropyWeight: 0,
       qualitiesRegularizationWeight: 0,
       randomSeed: randomSeed,
       batchSize: parsedArguments.get(batchSize) ?? 128,

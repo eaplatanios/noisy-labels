@@ -42,7 +42,6 @@ where Optimizer.Model == Predictor {
   public var optimizer: Optimizer
   public var lastLabelsSample: Tensor<Int32>   // [NodeCount]
   public var expectedLabels: Tensor<Float>     // [NodeCount, ClassCount]
-  public var expectedNodePairs: [Int32: Tensor<Float>] // [NeighborCount, ClassCount, ClassCount]
 
   public var bestExpectedLabels: Tensor<Float>
   public var bestPredictor: Predictor
@@ -89,7 +88,6 @@ where Optimizer.Model == Predictor {
     self.verbose = verbose
     self.lastLabelsSample = Tensor<Int32>(zeros: [predictor.nodeCount])
     self.expectedLabels = Tensor<Float>(zeros: [predictor.nodeCount, predictor.classCount])
-    self.expectedNodePairs = [Int32: Tensor<Float>]()
     self.bestExpectedLabels = expectedLabels
     self.bestPredictor = predictor
     self.bestResult = nil
@@ -98,24 +96,30 @@ where Optimizer.Model == Predictor {
   public mutating func train(using graph: Graph) {
     var mStepData = Dataset(elements: graph.allUnlabeledData)
 
-    if verbose { logger.info("Initialization") }
-    initialize(using: graph)
-    // performMStep(data: Dataset(elements: graph.labeledData), emStep: 0)
-    // performEStep(using: graph)
-    emStepCallback(self)
-
     for emStep in 0..<emStepCount {
       if useIncrementalNeighborhoodExpansion {
         mStepData = Dataset(elements: graph.data(atDepth: emStep + 1))
       }
 
+      if emStep > 0 {
+        // E-Step
+        if verbose { logger.info("Iteration \(emStep) - Running E-Step") }
+        performGibbsEStep(using: graph)
+      } else {
+        if verbose { logger.info("Initialization") }
+        initialize(using: graph)
+        // performMStep(data: Dataset(elements: graph.labeledData), emStep: 0)
+        // performEStep(using: graph)
+        emStepCallback(self)
+      }
+
+      // // E-Step
+      // if verbose { logger.info("Iteration \(emStep) - Running E-Step") }
+      // performGibbsEStep(using: graph)
+
       // M-Step
       if verbose { logger.info("Iteration \(emStep) - Running M-Step") }
       performMStep(data: mStepData, emStep: emStep)
-
-      // E-Step
-      if verbose { logger.info("Iteration \(emStep) - Running E-Step") }
-      performEStep(using: graph)
 
       if emStepCallback(self) { break }
     }
@@ -195,16 +199,8 @@ where Optimizer.Model == Predictor {
     // expectedLabels = useThresholdedExpectations ?
     //   Tensor<Float>(expectedLabels .== expectedLabels.max(alongAxes: -1)) :
     //   expectedLabels
-    
-    lastLabelsSample = Tensor<Int32>(expectedLabels.argmax(squeezingAxis: -1))
 
-    expectedNodePairs = [Int32: Tensor<Float>]()
-    for node in 0..<graph.nodeCount {
-      expectedNodePairs[Int32(node)] = eye(
-        rowCount: predictor.classCount,
-        batchShape: [graph.neighbors[node].count]
-      ) / Float(predictor.classCount)
-    }
+    lastLabelsSample = expectedLabels.argmax(squeezingAxis: -1)
   }
 
   private mutating func performEStep(using graph: Graph) {
@@ -270,7 +266,9 @@ where Optimizer.Model == Predictor {
           let q = predictions.qualities                                                             // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
           let qTranspose = predictions.qualitiesTranspose                                           // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
           let qMask = predictions.qualitiesMask.expandingShape(at: -1)                              // [BatchSize, MaxNeighborCount, 1]
-          let yHat = expectedLabels.gathering(atIndices: predictions.neighborIndices)               // [BatchSize, MaxNeighborCount, ClassCount]
+          let yHat = Tensor<Float>(
+            oneHotAtIndices: currentSample.gathering(atIndices: predictions.neighborIndices),
+            depth: graph.classCount)                                                                // [BatchSize, MaxNeighborCount, ClassCount]
           let qYHat = ((q * yHat.expandingShape(at: 2)).sum(squeezingAxes: -1) * qMask).sum(squeezingAxes: 1)                   // [BatchSize, ClassCount]
           let qTransposeYHat = ((qTranspose * yHat.expandingShape(at: 3)).sum(squeezingAxes: -2) * qMask).sum(squeezingAxes: 1) // [BatchSize, ClassCount]
           let sample = Tensor<Int32>(
@@ -295,36 +293,36 @@ where Optimizer.Model == Predictor {
       stacking: samples.map { Tensor<Float>(oneHotAtIndices: $0, depth: predictor.classCount) },
       alongAxis: -1)
     expectedLabels = stackedSamples.mean(squeezingAxes: -1)
-    if labelSmoothing > 0.0 {
-      let term1 = (1 - labelSmoothing) * expectedLabels
-      let term2 = labelSmoothing / Float(predictor.classCount)
-      expectedLabels = term1 + term2
-    }
-    expectedLabels = useThresholdedExpectations ?
-      Tensor<Float>(expectedLabels .== expectedLabels.max(alongAxes: -1)) :
-      expectedLabels
-
-    expectedNodePairs = [Int32: Tensor<Float>]()
-    for node in 0..<graph.nodeCount {
-      let neighborSamples = stackedSamples.gathering(
-        atIndices: Tensor<Int32>(graph.neighbors[node]))
-        .expandingShape(at: 2)
-        .tiled(multiples: Tensor<Int32>([1, 1, Int32(predictor.classCount), 1]))
-      let nodeSample = stackedSamples[node]
-        .expandingShape(at: 0, 1)
-        .tiled(multiples: Tensor<Int32>([1, Int32(predictor.classCount), 1, 1]))
-      expectedNodePairs[Int32(node)] = (Tensor<Float>(neighborSamples) * Tensor<Float>(nodeSample)).mean(squeezingAxes: -1)
-      // let nominator = (Tensor<Float>(neighborSamples) * Tensor<Float>(nodeSample)).mean(squeezingAxes: -1)
-      // let denominator = Tensor<Float>(nominator.sum(alongAxes: -2))
-      // let broadcastedDenominator = denominator.broadcasted(like: nominator)
-      // let safeNominator = nominator.replacing(
-      //   with: Tensor<Float>(onesLike: broadcastedDenominator) / Float(predictor.classCount),
-      //   where: broadcastedDenominator .== 0)
-      // let safeDenominator = denominator.replacing(
-      //   with: Tensor<Float>(onesLike: denominator),
-      //   where: denominator .== 0)
-      // expectedNodePairs[Int32(node)] = safeNominator / safeDenominator
-    }
+    // if labelSmoothing > 0.0 {
+    //   let term1 = (1 - labelSmoothing) * expectedLabels
+    //   let term2 = labelSmoothing / Float(predictor.classCount)
+    //   expectedLabels = term1 + term2
+    // }
+    // expectedLabels = useThresholdedExpectations ?
+    //   Tensor<Float>(expectedLabels .== expectedLabels.max(alongAxes: -1)) :
+    //   expectedLabels
+    //
+    // expectedNodePairs = [Int32: Tensor<Float>]()
+    // for node in 0..<graph.nodeCount {
+    //   let neighborSamples = stackedSamples.gathering(
+    //     atIndices: Tensor<Int32>(graph.neighbors[node]))
+    //     .expandingShape(at: 2)
+    //     .tiled(multiples: Tensor<Int32>([1, 1, Int32(predictor.classCount), 1]))
+    //   let nodeSample = stackedSamples[node]
+    //     .expandingShape(at: 0, 1)
+    //     .tiled(multiples: Tensor<Int32>([1, Int32(predictor.classCount), 1, 1]))
+    //   expectedNodePairs[Int32(node)] = (Tensor<Float>(neighborSamples) * Tensor<Float>(nodeSample)).mean(squeezingAxes: -1)
+    //   // let nominator = (Tensor<Float>(neighborSamples) * Tensor<Float>(nodeSample)).mean(squeezingAxes: -1)
+    //   // let denominator = Tensor<Float>(nominator.sum(alongAxes: -2))
+    //   // let broadcastedDenominator = denominator.broadcasted(like: nominator)
+    //   // let safeNominator = nominator.replacing(
+    //   //   with: Tensor<Float>(onesLike: broadcastedDenominator) / Float(predictor.classCount),
+    //   //   where: broadcastedDenominator .== 0)
+    //   // let safeDenominator = denominator.replacing(
+    //   //   with: Tensor<Float>(onesLike: denominator),
+    //   //   where: denominator .== 0)
+    //   // expectedNodePairs[Int32(node)] = safeNominator / safeDenominator
+    // }
   }
 
   private mutating func performMStep(data: Dataset<LabeledData>, emStep: Int) {
@@ -349,7 +347,7 @@ where Optimizer.Model == Predictor {
       ) + labelSmoothing / Float(predictor.classCount)
       withLearningPhase(.training) {
         let (loss, gradient) = valueWithGradient(at: predictor) { predictor -> Tensor<Float> in
-          let predictions = predictor(batch.nodeIndices.scalars)
+          let predictions = predictor.labelProbabilitiesAndQualities(batch.nodeIndices.scalars)
           let crossEntropy = softmaxCrossEntropy(
             logits: predictions.labelProbabilities,
             probabilities: labels)
@@ -412,21 +410,11 @@ where Optimizer.Model == Predictor {
     for mStep in 0..<mStepCount {
       let batch = dataIterator.next()!
 
-      // let nodes = batch.scalars
-      // let expectedNodePairs = nodes.map { self.expectedNodePairs[$0]! }
-      // let maxNeighborCount = expectedNodePairs.map { $0.shape[0] }.max()!
-      // let pairExpectations = Tensor<Float>(stacking: expectedNodePairs.map {
-      //   $0.padded(forSizes: [
-      //     (before: 0, after: maxNeighborCount - $0.shape[0]),
-      //     (before: 0, after: 0),
-      //     (before: 0, after: 0)])
-      // }, alongAxis: 0)
-
       let yTilde = expectedLabels.gathering(atIndices: batch)
       withLearningPhase(.training) {
         let (negativeLogLikelihood, gradient) = valueWithGradient(at: predictor) {
           [expectedLabels, entropyWeight] predictor -> Tensor<Float> in
-          let predictions = predictor(batch.scalars)
+          let predictions = predictor.labelProbabilitiesAndQualities(batch.scalars)
           let h = predictions.labelProbabilities
           let q = predictions.qualities                                                             // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
           let qTranspose = predictions.qualitiesTranspose                                           // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
@@ -440,11 +428,6 @@ where Optimizer.Model == Predictor {
           let hEntropy = entropyWeight * (exp(h) * h).sum()
           let loss = hEntropy + negativeLogLikelihood + normalizingConstant
           return loss / Float(predictions.labelProbabilities.shape[0])
-
-          // let negativeLogLikelihood = -(yTilde * h).sum()
-          //   - (pairExpectations * q).sum()
-          //   - (pairExpectations.transposed(permutation: 0, 1, 3, 2) * qTranspose).sum()
-          // let normalizingConstant = (h + qYHat + qTransposeYHat).logSumExp(alongAxes: -1).sum()
         }
         optimizer.update(&predictor, along: gradient)
         accumulatedNLL += negativeLogLikelihood.scalarized()
@@ -465,7 +448,7 @@ where Optimizer.Model == Predictor {
         var modelCopy = self
         modelCopy.performEStep(using: predictor.graph)
 
-        let evaluationResult = evaluate(model: modelCopy, using: predictor.graph, usePrior: false)
+        let evaluationResult = evaluate(model: modelCopy, using: predictor.graph, usePrior: true)
         let result = resultAccumulator.update(with: evaluationResult)
         if let bestResult = self.bestResult {
           if result.validationAccuracy > bestResult.validationAccuracy {

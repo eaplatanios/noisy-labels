@@ -187,10 +187,10 @@ public struct GraphPredictions: Differentiable {
 public protocol GraphPredictor: Differentiable, KeyPathIterable {
   var graph: Graph { get }
 
-  @differentiable
+  @differentiable(wrt: self)
   func callAsFunction(_ nodes: [Int32]) -> GraphPredictions
 
-  @differentiable
+  @differentiable(wrt: self)
   func labelProbabilities(_ nodes: [Int32]) -> Tensor<Float>
 
   mutating func reset()
@@ -200,6 +200,11 @@ extension GraphPredictor {
   public var nodeCount: Int { graph.nodeCount }
   public var featureCount: Int { graph.featureCount }
   public var classCount: Int { graph.classCount }
+
+  @differentiable(wrt: self)
+  public func labelProbabilitiesAndQualities(_ nodes: [Int32]) -> GraphPredictions {
+    self(nodes)
+  }
 }
 
 public struct MLPPredictor: GraphPredictor {
@@ -236,7 +241,7 @@ public struct MLPPredictor: GraphPredictor {
     self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount)
   }
 
-  @differentiable
+  @differentiable(wrt: self)
   public func callAsFunction(_ nodes: [Int32]) -> GraphPredictions {
     // We need features for all provided nodes and their neighbors.
     let indexMap = withoutDerivative(at: nodes) { NodeIndexMap(nodes: $0, graph: graph) }
@@ -249,21 +254,19 @@ public struct MLPPredictor: GraphPredictor {
 
     // Split up into the nodes and their neighbors.
     let C = Int32(graph.classCount)
-    let nodesLatent = allLatent.gathering(atIndices: indexMap.nodeIndices)
-    let neighborsLatent = allLatent.gathering(atIndices: indexMap.neighborIndices)
-    let nodesLatentQ = nodeLatentLayer(nodesLatent)
+    let allNodeLatentQ = nodeLatentLayer(allLatent)
+    let allNeighborLatentQ = neighborLatentLayer(allLatent)
+    let nodesLatentQ = allNodeLatentQ.gathering(atIndices: indexMap.nodeIndices)
       .reshaped(toShape: Tensor<Int32>([-1, 1, C, C]))
-    let neighborsLatentQ = neighborLatentLayer(neighborsLatent)
+    let neighborsLatentQ = allNeighborLatentQ.gathering(atIndices: indexMap.neighborIndices)
       .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C]))
     let qualities = logSoftmax(nodesLatentQ + neighborsLatentQ, alongAxis: -2)
 
-    let nodesLatentQTranspose = nodeLatentLayer(neighborsLatent)
+    let nodesLatentQTranspose = allNodeLatentQ.gathering(atIndices: indexMap.neighborIndices)
       .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C]))
-    let neighborsLatentQTranspose = neighborLatentLayer(nodesLatent)
+    let neighborsLatentQTranspose = allNeighborLatentQ.gathering(atIndices: indexMap.nodeIndices)
       .reshaped(toShape: Tensor<Int32>([-1, 1, C, C]))
-    let qualitiesTranspose = logSoftmax(
-      nodesLatentQTranspose + neighborsLatentQTranspose,
-      alongAxis: -2)
+    let qualitiesTranspose = logSoftmax(nodesLatentQTranspose + neighborsLatentQTranspose, alongAxis: -1)
 
     return GraphPredictions(
       neighborIndices: indexMap.neighborIndices,
@@ -273,7 +276,7 @@ public struct MLPPredictor: GraphPredictor {
       qualitiesMask: indexMap.neighborsMask)
   }
 
-  @differentiable
+  @differentiable(wrt: self)
   public func labelProbabilities(_ nodes: [Int32]) -> Tensor<Float> {
     let nodeIndices = Tensor<Int32>(nodes)
     let nodeFeatures = graph.features.gathering(atIndices: nodeIndices)
@@ -355,7 +358,7 @@ public struct DecoupledMLPPredictor: GraphPredictor {
     self.neighborLatentLayer = Dense<Float>(inputSize: qInputSize, outputSize: Int(C * C * L))
   }
 
-  @differentiable
+  @differentiable(wrt: self)
   public func callAsFunction(_ nodes: [Int32]) -> GraphPredictions {
     // We need features for all provided nodes and their neighbors.
     let indexMap = withoutDerivative(at: nodes) { NodeIndexMap(nodes: $0, graph: graph) }
@@ -396,7 +399,7 @@ public struct DecoupledMLPPredictor: GraphPredictor {
       qualitiesMask: indexMap.neighborsMask)
   }
 
-  @differentiable
+  @differentiable(wrt: self)
   public func labelProbabilities(_ nodes: [Int32]) -> Tensor<Float> {
     let nodeIndices = Tensor<Int32>(nodes)
     let nodeFeatures = graph.features.gathering(atIndices: nodeIndices)
@@ -479,7 +482,7 @@ public struct DecoupledMLPPredictorV2: GraphPredictor {
     self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: C * C)
   }
 
-  @differentiable
+  @differentiable(wrt: self)
   public func callAsFunction(_ nodes: [Int32]) -> GraphPredictions {
     // We need features for all provided nodes and their neighbors.
     let indexMap = withoutDerivative(at: nodes) { NodeIndexMap(nodes: $0, graph: graph) }
@@ -517,7 +520,7 @@ public struct DecoupledMLPPredictorV2: GraphPredictor {
       qualitiesMask: indexMap.neighborsMask)
   }
 
-  @differentiable
+  @differentiable(wrt: self)
   public func labelProbabilities(_ nodes: [Int32]) -> Tensor<Float> {
     let nodeIndices = Tensor<Int32>(nodes)
     let nodeFeatures = graph.features.gathering(atIndices: nodeIndices)
@@ -582,11 +585,11 @@ public struct GCNPredictor: GraphPredictor {
     self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount)
   }
 
-  @differentiable
+  @differentiable(wrt: self)
   public func callAsFunction(_ nodes: [Int32]) -> GraphPredictions {
     // We need features for all provided nodes and their neighbors.
     let indexMap = withoutDerivative(at: nodes) { NodeIndexMap(nodes: $0, graph: graph) }
-    let projectionMatrices = indexMap.neighborProjectionMatrices(depth: hiddenUnitCounts.count + 1)
+    let projectionMatrices = indexMap.neighborProjectionMatrices(depth: hiddenUnitCounts.count)
 
     // Compute features, label probabilities, and qualities for all requested nodes.
     var allFeatures = graph.features.gathering(atIndices: projectionMatrices.nodeIndices)
@@ -595,19 +598,13 @@ public struct GCNPredictor: GraphPredictor {
         withDense: hiddenDropout(hiddenLayers[i](allFeatures)),
         adjointA: true))
     }
-    let allProbabilities = logSoftmax(projectionMatrices.matrices[hiddenUnitCounts.count].matmul(
-      withDense: predictionLayer(allFeatures),
-      adjointA: true))
+    let allProbabilities = logSoftmax(predictionLayer(allFeatures))
 
     // Split up into the nodes and their neighbors.
     let labelProbabilities = allProbabilities.gathering(atIndices: indexMap.nodeIndices)
     let C = Int32(graph.classCount)
-    let nodesLatent = projectionMatrices.matrices[hiddenUnitCounts.count].matmul(
-      withDense: nodeLatentLayer(allFeatures),
-      adjointA: true)
-    let neighborsLatent = projectionMatrices.matrices[hiddenUnitCounts.count].matmul(
-      withDense: neighborLatentLayer(allFeatures),
-      adjointA: true)
+    let nodesLatent = nodeLatentLayer(allFeatures)
+    let neighborsLatent = neighborLatentLayer(allFeatures)
     let nodesLatentQ = nodesLatent.gathering(atIndices: indexMap.nodeIndices).reshaped(
         toShape: Tensor<Int32>([-1, 1, C, C]))
     let neighborsLatentQ = neighborsLatent.gathering(atIndices: indexMap.neighborIndices).reshaped(
@@ -630,11 +627,11 @@ public struct GCNPredictor: GraphPredictor {
       qualitiesMask: indexMap.neighborsMask)
   }
 
-  @differentiable
+  @differentiable(wrt: self)
   public func labelProbabilities(_ nodes: [Int32]) -> Tensor<Float> {
     // We need features for all provided nodes and their neighbors.
     let indexMap = withoutDerivative(at: nodes) { NodeIndexMap(nodes: $0, graph: graph) }
-    let projectionMatrices = indexMap.neighborProjectionMatrices(depth: hiddenUnitCounts.count + 1)
+    let projectionMatrices = indexMap.neighborProjectionMatrices(depth: hiddenUnitCounts.count)
 
     // Compute features, label probabilities, and qualities for all requested nodes.
     var allFeatures = graph.features.gathering(atIndices: projectionMatrices.nodeIndices)
@@ -643,9 +640,7 @@ public struct GCNPredictor: GraphPredictor {
         withDense: hiddenDropout(hiddenLayers[i](allFeatures)),
         adjointA: true))
     }
-    let allProbabilities = logSoftmax(projectionMatrices.matrices[hiddenUnitCounts.count].matmul(
-      withDense: predictionLayer(allFeatures),
-      adjointA: true))
+    let allProbabilities = logSoftmax(predictionLayer(allFeatures))
 
     // Split up the nodes from their neighbors.
     return allProbabilities.gathering(atIndices: indexMap.nodeIndices)
@@ -717,7 +712,7 @@ public struct DecoupledGCNPredictor: GraphPredictor {
     self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: Int(C * C * L))
   }
 
-  @differentiable
+  @differentiable(wrt: self)
   public func callAsFunction(_ nodes: [Int32]) -> GraphPredictions {
     // We need features for all provided nodes and their neighbors.
     let indexMap = withoutDerivative(at: nodes) { NodeIndexMap(nodes: $0, graph: graph) }
@@ -770,7 +765,7 @@ public struct DecoupledGCNPredictor: GraphPredictor {
       qualitiesMask: indexMap.neighborsMask)
   }
 
-  @differentiable
+  @differentiable(wrt: self)
   public func labelProbabilities(_ nodes: [Int32]) -> Tensor<Float> {
     // We need features for all provided nodes and their neighbors.
     let lIndexMap = withoutDerivative(at: nodes) { NodeIndexMap(nodes: $0, graph: graph) }
@@ -862,7 +857,7 @@ public struct DecoupledGCNPredictorV2: GraphPredictor {
     self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: C * C)
   }
 
-  @differentiable
+  @differentiable(wrt: self)
   public func callAsFunction(_ nodes: [Int32]) -> GraphPredictions {
     // We need features for all provided nodes and their neighbors.
     let indexMap = withoutDerivative(at: nodes) { NodeIndexMap(nodes: $0, graph: graph) }
@@ -908,7 +903,7 @@ public struct DecoupledGCNPredictorV2: GraphPredictor {
       qualitiesMask: indexMap.neighborsMask)
   }
 
-  @differentiable
+  @differentiable(wrt: self)
   public func labelProbabilities(_ nodes: [Int32]) -> Tensor<Float> {
     // We need features for all provided nodes and their neighbors.
     let lIndexMap = withoutDerivative(at: nodes) { NodeIndexMap(nodes: $0, graph: graph) }
@@ -996,7 +991,7 @@ public struct DecoupledGCNPredictorV3: GraphPredictor {
     self.qOutputLayer = Dense<Float>(inputSize: qInputSize, outputSize: C * C)
   }
 
-  @differentiable
+  @differentiable(wrt: self)
   public func callAsFunction(_ nodes: [Int32]) -> GraphPredictions {
     // We need features for all provided nodes and their neighbors.
     let indexMap = withoutDerivative(at: nodes) { NodeIndexMap(nodes: $0, graph: graph) }
@@ -1039,7 +1034,7 @@ public struct DecoupledGCNPredictorV3: GraphPredictor {
       qualitiesMask: indexMap.neighborsMask)
   }
 
-  @differentiable
+  @differentiable(wrt: self)
   public func labelProbabilities(_ nodes: [Int32]) -> Tensor<Float> {
     // We need features for all provided nodes and their neighbors.
     let lIndexMap = withoutDerivative(at: nodes) { NodeIndexMap(nodes: $0, graph: graph) }
@@ -1084,6 +1079,18 @@ public struct DecoupledGCNPredictorV3: GraphPredictor {
     self.qOutputLayer = Dense<Float>(inputSize: qInputSize, outputSize: C * C)
   }
 }
+
+// @differentiable
+// fileprivate func sinkhorn(_ input: Tensor<Float>) -> Tensor<Float> {
+//   // let n = input.shape[1]
+//   // let inputShape = [Int](input.shape.dimensions.prefix(upTo: input.rank - 2))
+//   var result = input
+//   for _ in 0..<5 {
+//     result = logSoftmax(result, alongAxis: -2)//.reshaped(to: TensorShape(inputShape + [n, 1]))
+//     result = logSoftmax(result, alongAxis: -1)//.reshaped(to: TensorShape(inputShape + [1, n]))
+//   }
+//   return result
+// }
 
 // @differentiable
 // fileprivate func agreementsToQualities(

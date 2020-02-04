@@ -405,7 +405,6 @@ where Optimizer.Model == Predictor {
       .makeIterator()
     for mStep in 0..<mStepCount {
       let batch = dataIterator.next()!
-
       let yTilde = expectedLabels.gathering(atIndices: batch)
       withLearningPhase(.training) {
         let (negativeLogLikelihood, gradient) = valueWithGradient(at: predictor) {
@@ -440,11 +439,13 @@ where Optimizer.Model == Predictor {
         }
       }
       if let c = evaluationStepCount, mStep % c == 0 {
-        // Run the E step.
-        var modelCopy = self
-        modelCopy.performEStep(using: predictor.graph)
+//        // Run the E step.
+//        var modelCopy = self
+//        modelCopy.performEStep(using: predictor.graph)
 
-        let evaluationResult = evaluate(model: modelCopy, using: predictor.graph, usePrior: true)
+        let predictionsMAP = labelsApproximateMAP(maxStepCount: 10)
+        let evaluationResult = evaluate(predictions: predictionsMAP, using: predictor.graph)
+        // let evaluationResult = evaluate(model: modelCopy, using: predictor.graph, usePrior: true)
         let result = resultAccumulator.update(with: evaluationResult)
         if let bestResult = self.bestResult {
           if result.validationAccuracy > bestResult.validationAccuracy {
@@ -472,6 +473,38 @@ where Optimizer.Model == Predictor {
       expectedLabels = bestExpectedLabels
       predictor = bestPredictor
     }
+  }
+
+  internal func labelsApproximateMAP(maxStepCount: Int = 100) -> [Int32] {
+    let nodes = [Int](0..<predictor.graph.nodeCount).map(Int32.init)
+    var h = [Tensor<Float>]()
+    var q = [Tensor<Float>]()
+    for batch in Dataset(elements: Tensor<Int32>(nodes)).batched(batchSize) {
+      let predictions = predictor.labelProbabilitiesAndQualities(batch.scalars)
+      let qualities = predictions.qualities.unstacked(alongAxis: 0)
+      let neighborCounts = predictions.qualitiesMask
+        .sum(squeezingAxes: -1)
+        .unstacked(alongAxis: 0)
+        .map { Int($0.scalarized()) }
+      h.append(predictions.labelProbabilities)
+      q.append(contentsOf: zip(qualities, neighborCounts).map { $0[0..<$1] })
+    }
+    let hScalars = Tensor<Float>(concatenating: h, alongAxis: 0).scalars
+    let labelLogits = LabelLogits(
+      logits: hScalars,
+      nodeCount: predictor.graph.nodeCount,
+      labelCount: predictor.graph.classCount)
+    let qualityLogits = q.map {
+      QualityLogits(
+        logits: $0.scalars,
+        nodeCount: $0.shape[0],
+        labelCount: predictor.graph.classCount)
+    }
+    return iteratedConditionalModes(
+      labelLogits: labelLogits,
+      qualityLogits: qualityLogits,
+      graph: predictor.graph,
+      maxStepCount: maxStepCount)
   }
 
   internal func labelsMAP() -> [Int32] {

@@ -47,7 +47,7 @@ func bestNodeAssignments(h: LabelLogits, q: [QualityLogits], G: Graph) -> [Int32
     uniqueKeysWithValues: G.trainNodes.map { ($0, G.labels[$0]!) })
   let sortedNodes = (0..<G.nodeCount)
     .filter { !labeledNodes.keys.contains(Int32($0)) }
-    .sorted { nodeDegrees[$0] < nodeDegrees[$1] }
+    .sorted { nodeDegrees[$0] > nodeDegrees[$1] }
 
   var upperBound: Float = 0
   for node in sortedNodes {
@@ -159,6 +159,11 @@ public struct LabelLogits {
   @inlinable
   public func labelLogit(node: Int, label: Int) -> Float {
     logits[node * labelCount + label]
+  }
+
+  @inlinable
+  public func labelLogits(forNode node: Int) -> [Float] {
+    [Float](logits[(node * labelCount)..<((node + 1) * labelCount)])
   }
 }
 

@@ -135,7 +135,7 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
     var emStepCallbackInvocationsWithoutPriorImprovement = 0
 
     func emStepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) -> Bool {
-      let predictionsMAP = model.labelsMAP()
+      let predictionsMAP = model.labelsApproximateMAP(maxStepCount: 10000)
       let evaluationResult = evaluate(predictions: predictionsMAP, using: graph)
       // let evaluationResult = evaluate(model: model, using: graph, usePrior: false)
       if firstEvaluationResult == nil { firstEvaluationResult = evaluationResult }
@@ -201,15 +201,15 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       batchSize: parsedArguments.get(batchSize) ?? 128,
       useWarmStarting: false,
       useThresholdedExpectations: false,
-      useIncrementalNeighborhoodExpansion: false,
+      useIncrementalNeighborhoodExpansion: true,
       labelSmoothing: parsedArguments.get(labelSmoothing) ?? 0.5,
       resultAccumulator: ExactAccumulator(),
       // resultAccumulator: MovingAverageAccumulator(weight: 0.1),
       mStepCount: 1000,
       emStepCount: 100,
-      evaluationStepCount: 1,
+      evaluationStepCount: 10,
       mStepLogCount: 100,
-      mConvergenceEvaluationCount: 100,
+      mConvergenceEvaluationCount: 10,
       emStepCallback: { emStepCallback(model: $0) },
       verbose: true)
     model.train(using: graph)

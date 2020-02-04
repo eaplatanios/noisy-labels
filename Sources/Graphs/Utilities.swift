@@ -26,6 +26,20 @@ internal extension Array where Element == Float {
   }
 }
 
+internal extension Array where Element: Comparable {
+  var indexOfMax: Index? {
+    guard var maxValue = self.first else { return nil }
+    var maxIndex = 0
+    for (index, value) in self.enumerated() {
+      if value > maxValue {
+        maxValue = value
+        maxIndex = index
+      }
+    }
+    return maxIndex
+  }
+}
+
 public extension Tensor where Scalar: TensorFlowNumeric {
   /// Returns `self` with new diagonal values, given that `self` is an optionally batched matrix.
   ///

@@ -1,223 +1,178 @@
-//
-//  Heap.swift
-//  Written for the Swift Algorithm Club by Kevin Randrup and Matthijs Hollemans
-//
+// This code was inspired by Section 2.4 of Algorithms by Sedgewick & Wayne, 4th Edition
+/// A PriorityQueue takes objects to be pushed of any type that implements Comparable.
+/// It will pop the objects in the order that they would be sorted. A pop() or a push()
+/// can be accomplished in O(lg n) time. It can be specified whether the objects should
+/// be popped in ascending or descending order (Max Priority Queue or Min Priority Queue)
+/// at the time of initialization.
+public struct PriorityQueue<T> {
 
-public struct Heap<T> {
-  
-  /** The array that stores the heap's nodes. */
-  var nodes = [T]()
-  
-  /**
-   * Determines how to compare two nodes in the heap.
-   * Use '>' for a max-heap or '<' for a min-heap,
-   * or provide a comparing method if the heap is made
-   * of custom elements, for example tuples.
-   */
-  private var orderCriteria: (T, T) -> Bool
-  
-  /**
-   * Creates an empty heap.
-   * The sort function determines whether this is a min-heap or max-heap.
-   * For comparable data types, > makes a max-heap, < makes a min-heap.
-   */
-  public init(sort: @escaping (T, T) -> Bool) {
-    self.orderCriteria = sort
-  }
-  
-  /**
-   * Creates a heap from an array. The order of the array does not matter;
-   * the elements are inserted into the heap in the order determined by the
-   * sort function. For comparable data types, '>' makes a max-heap,
-   * '<' makes a min-heap.
-   */
-  public init(array: [T], sort: @escaping (T, T) -> Bool) {
-    self.orderCriteria = sort
-    configureHeap(from: array)
-  }
-  
-  /**
-   * Configures the max-heap or min-heap from an array, in a bottom-up manner.
-   * Performance: This runs pretty much in O(n).
-   */
-  private mutating func configureHeap(from array: [T]) {
-    nodes = array
-    for i in stride(from: (nodes.count/2-1), through: 0, by: -1) {
-      shiftDown(i)
+  fileprivate var heap = [T]()
+  private let ordered: (T, T) -> Bool
+
+  /// Creates a new PriorityQueue with the given ordering.
+  ///
+  /// - parameter order: A function that specifies whether its first argument should
+  ///                    come after the second argument in the PriorityQueue.
+  /// - parameter startingValues: An array of elements to initialize the PriorityQueue with.
+  public init(order: @escaping (T, T) -> Bool, startingValues: [T] = []) {
+    ordered = order
+
+    // Based on "Heap construction" from Sedgewick p 323
+    heap = startingValues
+    var i = heap.count/2 - 1
+    while i >= 0 {
+      sink(i)
+      i -= 1
     }
   }
-  
-  public var isEmpty: Bool {
-    return nodes.isEmpty
+
+  /// How many elements the Priority Queue stores
+  public var count: Int { return heap.count }
+
+  /// true if and only if the Priority Queue is empty
+  public var isEmpty: Bool { return heap.isEmpty }
+
+  /// Add a new element onto the Priority Queue. O(lg n)
+  ///
+  /// - parameter element: The element to be inserted into the Priority Queue.
+  public mutating func push(_ element: T) {
+    heap.append(element)
+    swim(heap.count - 1)
   }
-  
-  public var count: Int {
-    return nodes.count
+
+  /// Remove and return the element with the highest priority (or lowest if ascending). O(lg n)
+  ///
+  /// - returns: The element with the highest priority in the Priority Queue, or nil if the PriorityQueue is empty.
+  public mutating func pop() -> T? {
+
+    if heap.isEmpty { return nil }
+    let count = heap.count
+    if count == 1 { return heap.removeFirst() }  // added for Swift 2 compatibility
+    // so as not to call swap() with two instances of the same location
+    fastPop(newCount: count - 1)
+
+    return heap.removeLast()
   }
-  
-  /**
-   * Returns the index of the parent of the element at index i.
-   * The element at index 0 is the root of the tree and has no parent.
-   */
-  @inline(__always) internal func parentIndex(ofIndex i: Int) -> Int {
-    return (i - 1) / 2
-  }
-  
-  /**
-   * Returns the index of the left child of the element at index i.
-   * Note that this index can be greater than the heap size, in which case
-   * there is no left child.
-   */
-  @inline(__always) internal func leftChildIndex(ofIndex i: Int) -> Int {
-    return 2*i + 1
-  }
-  
-  /**
-   * Returns the index of the right child of the element at index i.
-   * Note that this index can be greater than the heap size, in which case
-   * there is no right child.
-   */
-  @inline(__always) internal func rightChildIndex(ofIndex i: Int) -> Int {
-    return 2*i + 2
-  }
-  
-  /**
-   * Returns the maximum value in the heap (for a max-heap) or the minimum
-   * value (for a min-heap).
-   */
+
+
+//  /// Removes the first occurence of a particular item. Finds it by value comparison using ==. O(n)
+//  /// Silently exits if no occurrence found.
+//  ///
+//  /// - parameter item: The item to remove the first occurrence of.
+//  public mutating func remove(_ item: T) {
+//    if let index = heap.firstIndex(of: item) {
+//      heap.swapAt(index, heap.count - 1)
+//      heap.removeLast()
+//      if index < heap.count { // if we removed the last item, nothing to swim
+//        swim(index)
+//        sink(index)
+//      }
+//    }
+//  }
+
+//  /// Removes all occurences of a particular item. Finds it by value comparison using ==. O(n)
+//  /// Silently exits if no occurrence found.
+//  ///
+//  /// - parameter item: The item to remove.
+//  public mutating func removeAll(_ item: T) {
+//    var lastCount = heap.count
+//    remove(item)
+//    while (heap.count < lastCount) {
+//      lastCount = heap.count
+//      remove(item)
+//    }
+//  }
+
+  /// Get a look at the current highest priority item, without removing it. O(1)
+  ///
+  /// - returns: The element with the highest priority in the PriorityQueue, or nil if the PriorityQueue is empty.
   public func peek() -> T? {
-    return nodes.first
+    return heap.first
   }
-  
-  /**
-   * Adds a new value to the heap. This reorders the heap so that the max-heap
-   * or min-heap property still holds. Performance: O(log n).
-   */
-  public mutating func insert(_ value: T) {
-    nodes.append(value)
-    shiftUp(nodes.count - 1)
+
+  /// Eliminate all of the elements from the Priority Queue.
+  public mutating func clear() {
+    heap.removeAll(keepingCapacity: false)
   }
-  
-  /**
-   * Adds a sequence of values to the heap. This reorders the heap so that
-   * the max-heap or min-heap property still holds. Performance: O(log n).
-   */
-  public mutating func insert<S: Sequence>(_ sequence: S) where S.Iterator.Element == T {
-    for value in sequence {
-      insert(value)
+
+  // Based on example from Sedgewick p 316
+  private mutating func sink(_ index: Int) {
+    var index = index
+    while 2 * index + 1 < heap.count {
+
+      var j = 2 * index + 1
+
+      if j < (heap.count - 1) && ordered(heap[j], heap[j + 1]) { j += 1 }
+      if !ordered(heap[index], heap[j]) { break }
+
+      heap.swapAt(index, j)
+      index = j
     }
   }
-  
-  /**
-   * Allows you to change an element. This reorders the heap so that
-   * the max-heap or min-heap property still holds.
-   */
-  public mutating func replace(index i: Int, value: T) {
-    guard i < nodes.count else { return }
-    
-    remove(at: i)
-    insert(value)
-  }
-  
-  /**
-   * Removes the root node from the heap. For a max-heap, this is the maximum
-   * value; for a min-heap it is the minimum value. Performance: O(log n).
-   */
-  @discardableResult public mutating func remove() -> T? {
-    guard !nodes.isEmpty else { return nil }
-    
-    if nodes.count == 1 {
-      return nodes.removeLast()
-    } else {
-      // Use the last node to replace the first one, then fix the heap by
-      // shifting this new first node into its proper position.
-      let value = nodes[0]
-      nodes[0] = nodes.removeLast()
-      shiftDown(0)
-      return value
+
+  /// Helper function for pop.
+  ///
+  /// Swaps the first and last elements, then sinks the first element.
+  ///
+  /// After executing this function, calling `heap.removeLast()` returns the popped element.
+  /// - Parameter newCount: The number of elements in heap after the `pop()` operation is complete.
+  private mutating func fastPop(newCount: Int) {
+    var index = 0
+    heap.withUnsafeMutableBufferPointer { bufferPointer in
+      let _heap = bufferPointer.baseAddress! // guaranteed non-nil because count > 0
+      swap(&_heap[0], &_heap[newCount])
+      while 2 * index + 1 < newCount {
+        var j = 2 * index + 1
+        if j < (newCount - 1) && ordered(_heap[j], _heap[j+1]) { j += 1 }
+        if !ordered(_heap[index], _heap[j]) { return }
+        swap(&_heap[index], &_heap[j])
+        index = j
+      }
     }
   }
-  
-  /**
-   * Removes an arbitrary node from the heap. Performance: O(log n).
-   * Note that you need to know the node's index.
-   */
-  @discardableResult public mutating func remove(at index: Int) -> T? {
-    guard index < nodes.count else { return nil }
-    
-    let size = nodes.count - 1
-    if index != size {
-      nodes.swapAt(index, size)
-      shiftDown(from: index, until: size)
-      shiftUp(index)
+
+  // Based on example from Sedgewick p 316
+  private mutating func swim(_ index: Int) {
+    var index = index
+    while index > 0 && ordered(heap[(index - 1) / 2], heap[index]) {
+      heap.swapAt((index - 1) / 2, index)
+      index = (index - 1) / 2
     }
-    return nodes.removeLast()
   }
-  
-  /**
-   * Takes a child node and looks at its parents; if a parent is not larger
-   * (max-heap) or not smaller (min-heap) than the child, we exchange them.
-   */
-  internal mutating func shiftUp(_ index: Int) {
-    var childIndex = index
-    let child = nodes[childIndex]
-    var parentIndex = self.parentIndex(ofIndex: childIndex)
-    
-    while childIndex > 0 && orderCriteria(child, nodes[parentIndex]) {
-      nodes[childIndex] = nodes[parentIndex]
-      childIndex = parentIndex
-      parentIndex = self.parentIndex(ofIndex: childIndex)
-    }
-    
-    nodes[childIndex] = child
-  }
-  
-  /**
-   * Looks at a parent node and makes sure it is still larger (max-heap) or
-   * smaller (min-heap) than its childeren.
-   */
-  internal mutating func shiftDown(from index: Int, until endIndex: Int) {
-    let leftChildIndex = self.leftChildIndex(ofIndex: index)
-    let rightChildIndex = leftChildIndex + 1
-    
-    // Figure out which comes first if we order them by the sort function:
-    // the parent, the left child, or the right child. If the parent comes
-    // first, we're done. If not, that element is out-of-place and we make
-    // it "float down" the tree until the heap property is restored.
-    var first = index
-    if leftChildIndex < endIndex && orderCriteria(nodes[leftChildIndex], nodes[first]) {
-      first = leftChildIndex
-    }
-    if rightChildIndex < endIndex && orderCriteria(nodes[rightChildIndex], nodes[first]) {
-      first = rightChildIndex
-    }
-    if first == index { return }
-    
-    nodes.swapAt(index, first)
-    shiftDown(from: first, until: endIndex)
-  }
-  
-  internal mutating func shiftDown(_ index: Int) {
-    shiftDown(from: index, until: nodes.count)
-  }
-  
 }
 
-// MARK: - Searching
+// MARK: - GeneratorType
+extension PriorityQueue: IteratorProtocol {
 
-extension Heap where T: Equatable {
-  
-  /** Get the index of a node in the heap. Performance: O(n). */
-  public func index(of node: T) -> Int? {
-    return nodes.index(where: { $0 == node })
+  public typealias Element = T
+  mutating public func next() -> Element? { return pop() }
+}
+
+// MARK: - SequenceType
+extension PriorityQueue: Sequence {
+
+  public typealias Iterator = PriorityQueue
+  public func makeIterator() -> Iterator { return self }
+}
+
+// MARK: - CollectionType
+extension PriorityQueue: Collection {
+
+  public typealias Index = Int
+
+  public var startIndex: Int { return heap.startIndex }
+  public var endIndex: Int { return heap.endIndex }
+
+  public subscript(i: Int) -> T { return heap[i] }
+
+  public func index(after i: PriorityQueue.Index) -> PriorityQueue.Index {
+    return heap.index(after: i)
   }
-  
-  /** Removes the first occurrence of a node from the heap. Performance: O(n). */
-  @discardableResult public mutating func remove(node: T) -> T? {
-    if let index = index(of: node) {
-      return remove(at: index)
-    }
-    return nil
-  }
-  
+}
+
+// MARK: - CustomStringConvertible, CustomDebugStringConvertible
+extension PriorityQueue: CustomStringConvertible, CustomDebugStringConvertible {
+
+  public var description: String { return heap.description }
+  public var debugDescription: String { return heap.debugDescription }
 }

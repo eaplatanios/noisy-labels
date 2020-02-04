@@ -476,7 +476,7 @@ where Optimizer.Model == Predictor {
 
   internal func labelsMAP() -> [Int32] {
     let nodes = [Int](0..<predictor.graph.nodeCount).map(Int32.init)
-    var hs = [Tensor<Float>]()
+    var h = [Tensor<Float>]()
     var q = [Tensor<Float>]()
     for batch in Dataset(elements: Tensor<Int32>(nodes)).batched(batchSize) {
       let predictions = predictor.labelProbabilitiesAndQualities(batch.scalars)
@@ -485,11 +485,21 @@ where Optimizer.Model == Predictor {
         .sum(squeezingAxes: -1)
         .unstacked(alongAxis: 0)
         .map { Int($0.scalarized()) }
-      hs.append(predictions.labelProbabilities)
+      h.append(predictions.labelProbabilities)
       q.append(contentsOf: zip(qualities, neighborCounts).map { $0[0..<$1] })
     }
-    let h = Tensor<Float>(concatenating: hs, alongAxis: 0)
-    return bestNodeAssignments(h: h, q: q, G: predictor.graph)
+    let hScalars = Tensor<Float>(concatenating: h, alongAxis: 0).scalars
+    let labelLogits = LabelLogits(
+      logits: hScalars,
+      nodeCount: predictor.graph.nodeCount,
+      labelCount: predictor.graph.classCount)
+    let qualityLogits = q.map {
+      QualityLogits(
+        logits: $0.scalars,
+        nodeCount: $0.shape[0],
+        labelCount: predictor.graph.classCount)
+    }
+    return bestNodeAssignments(h: labelLogits, q: qualityLogits, G: predictor.graph)
   }
 }
 

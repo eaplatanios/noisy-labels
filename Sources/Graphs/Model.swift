@@ -104,18 +104,14 @@ where Optimizer.Model == Predictor {
       if emStep > 0 {
         // E-Step
         if verbose { logger.info("Iteration \(emStep) - Running E-Step") }
-        performGibbsEStep(using: graph)
+        performEStep(using: graph)
       } else {
         if verbose { logger.info("Initialization") }
         initialize(using: graph)
         // performMStep(data: Dataset(elements: graph.labeledData), emStep: 0)
         // performEStep(using: graph)
-        emStepCallback(self)
+        // emStepCallback(self)
       }
-
-      // // E-Step
-      // if verbose { logger.info("Iteration \(emStep) - Running E-Step") }
-      // performGibbsEStep(using: graph)
 
       // M-Step
       if verbose { logger.info("Iteration \(emStep) - Running M-Step") }
@@ -131,7 +127,7 @@ where Optimizer.Model == Predictor {
   ) -> Tensor<Float> {
     var batches = [Tensor<Float>]()
     for batch in Dataset(elements: Tensor<Int32>(nodeIndices)).batched(batchSize) {
-      batches.append(usePrior ? 
+      batches.append(usePrior ?
         predictor.labelProbabilities(batch.scalars) :
         expectedLabels.gathering(atIndices: batch))
     }
@@ -283,13 +279,13 @@ where Optimizer.Model == Predictor {
         currentSampleCount += 1
         progressBar.setValue(currentSampleCount)
         if currentSampleCount > burnInSampleCount &&
-           currentSampleCount.isMultiple(of: thinningSampleCount) {
+             currentSampleCount.isMultiple(of: thinningSampleCount) {
           samples.append(currentSample)
         }
       }
     }
     lastLabelsSample = currentSample
-    let stackedSamples = Tensor<Float>(                                                             // [NodeCount, ClassCount, SampleCount]
+    let stackedSamples = Tensor<Float>(// [NodeCount, ClassCount, SampleCount]
       stacking: samples.map { Tensor<Float>(oneHotAtIndices: $0, depth: predictor.classCount) },
       alongAxis: -1)
     expectedLabels = stackedSamples.mean(squeezingAxes: -1)
@@ -476,6 +472,24 @@ where Optimizer.Model == Predictor {
       expectedLabels = bestExpectedLabels
       predictor = bestPredictor
     }
+  }
+
+  internal func labelsMAP() -> [Int32] {
+    let nodes = [Int](0..<predictor.graph.nodeCount).map(Int32.init)
+    var hs = [Tensor<Float>]()
+    var q = [Tensor<Float>]()
+    for batch in Dataset(elements: Tensor<Int32>(nodes)).batched(batchSize) {
+      let predictions = predictor.labelProbabilitiesAndQualities(batch.scalars)
+      let qualities = predictions.qualities.unstacked(alongAxis: 0)
+      let neighborCounts = predictions.qualitiesMask
+        .sum(squeezingAxes: -1)
+        .unstacked(alongAxis: 0)
+        .map { Int($0.scalarized()) }
+      hs.append(predictions.labelProbabilities)
+      q.append(contentsOf: zip(qualities, neighborCounts).map { $0[0..<$1] })
+    }
+    let h = Tensor<Float>(concatenating: hs, alongAxis: 0)
+    return bestNodeAssignments(h: h, q: q, G: predictor.graph)
   }
 }
 

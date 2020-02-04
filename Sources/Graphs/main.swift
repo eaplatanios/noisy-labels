@@ -135,7 +135,9 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
     var emStepCallbackInvocationsWithoutPriorImprovement = 0
 
     func emStepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) -> Bool {
-      let evaluationResult = evaluate(model: model, using: graph, usePrior: false)
+      let predictionsMAP = model.labelsMAP()
+      let evaluationResult = evaluate(predictions: predictionsMAP, using: graph)
+      // let evaluationResult = evaluate(model: model, using: graph, usePrior: false)
       if firstEvaluationResult == nil { firstEvaluationResult = evaluationResult }
       if let bestResult = bestEvaluationResult {
         if evaluationResult.validationAccuracy > bestResult.validationAccuracy ||

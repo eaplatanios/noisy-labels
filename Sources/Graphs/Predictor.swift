@@ -237,8 +237,8 @@ public struct MLPPredictor: GraphPredictor {
     }
     self.hiddenDropout = Dropout<Float>(probability: Double(dropout))
     self.predictionLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
-    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount)
-    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount)
+    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
+    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
   }
 
   @differentiable(wrt: self)
@@ -249,7 +249,8 @@ public struct MLPPredictor: GraphPredictor {
     // Compute features, label probabilities, and qualities for all requested nodes.
     let allFeatures = graph.features.gathering(atIndices: indexMap.uniqueNodeIndices)
     let allLatent = hiddenDropout(hiddenLayers.differentiableReduce(allFeatures) { $1($0) })
-    let allProbabilities = logSoftmax(predictionLayer(allLatent))
+//    let allProbabilities = logSoftmax(predictionLayer(allLatent))
+    let allProbabilities = predictionLayer(allLatent)
     let labelProbabilities = allProbabilities.gathering(atIndices: indexMap.nodeIndices)
 
     // Split up into the nodes and their neighbors.
@@ -257,16 +258,20 @@ public struct MLPPredictor: GraphPredictor {
     let allNodeLatentQ = nodeLatentLayer(allLatent)
     let allNeighborLatentQ = neighborLatentLayer(allLatent)
     let nodesLatentQ = allNodeLatentQ.gathering(atIndices: indexMap.nodeIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C]))
+      .reshaped(toShape: Tensor<Int32>([-1, 1, C, 1]))
     let neighborsLatentQ = allNeighborLatentQ.gathering(atIndices: indexMap.neighborIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C]))
-    let qualities = logSoftmax(nodesLatentQ + neighborsLatentQ, alongAxis: -2)
+      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), 1, C]))
+//    let qualities = logSoftmax(nodesLatentQ + neighborsLatentQ, alongAxis: -2)
+    let qualities = nodesLatentQ + neighborsLatentQ
 
     let nodesLatentQTranspose = allNodeLatentQ.gathering(atIndices: indexMap.neighborIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C]))
+      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, 1]))
     let neighborsLatentQTranspose = allNeighborLatentQ.gathering(atIndices: indexMap.nodeIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C]))
-    let qualitiesTranspose = logSoftmax(nodesLatentQTranspose + neighborsLatentQTranspose, alongAxis: -1)
+      .reshaped(toShape: Tensor<Int32>([-1, 1, 1, C]))
+//    let qualitiesTranspose = logSoftmax(
+//      nodesLatentQTranspose + neighborsLatentQTranspose,
+//      alongAxis: -1)
+    let qualitiesTranspose = nodesLatentQTranspose + neighborsLatentQTranspose
 
     return GraphPredictions(
       neighborIndices: indexMap.neighborIndices,
@@ -281,7 +286,8 @@ public struct MLPPredictor: GraphPredictor {
     let nodeIndices = Tensor<Int32>(nodes)
     let nodeFeatures = graph.features.gathering(atIndices: nodeIndices)
     let nodeLatent = hiddenLayers.differentiableReduce(nodeFeatures) { $1($0) }
-    return logSoftmax(predictionLayer(nodeLatent))
+//    return logSoftmax(predictionLayer(nodeLatent))
+    return predictionLayer(nodeLatent)
   }
 
   public mutating func reset() {
@@ -298,8 +304,8 @@ public struct MLPPredictor: GraphPredictor {
       inputSize = hiddenUnitCount
     }
     self.predictionLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
-    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount)
-    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount)
+    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
+    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
   }
 }
 
@@ -476,10 +482,9 @@ public struct DecoupledMLPPredictorV2: GraphPredictor {
       })
       qInputSize = hiddenUnitCount
     }
-    let C = graph.classCount
-    self.predictionLayer = Dense<Float>(inputSize: lInputSize, outputSize: C)
-    self.qNodeLayer = Dense<Float>(inputSize: qInputSize, outputSize: C * C)
-    self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: C * C)
+    self.predictionLayer = Dense<Float>(inputSize: lInputSize, outputSize: graph.classCount)
+    self.qNodeLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount)
+    self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount)
   }
 
   @differentiable(wrt: self)
@@ -499,15 +504,15 @@ public struct DecoupledMLPPredictorV2: GraphPredictor {
     let nodesLatent = allLatentQ.gathering(atIndices: indexMap.nodeIndices)
     let neighborsLatent = allLatentQ.gathering(atIndices: indexMap.neighborIndices)
     let nodesLatentQ = qNodeLayer(nodesLatent)
-      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C]))
+      .reshaped(toShape: Tensor<Int32>([-1, 1, C, 1]))
     let neighborsLatentQ = qNeighborLayer(neighborsLatent)
-      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C]))
+      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), 1, C]))
     let qualities = logSoftmax(nodesLatentQ + neighborsLatentQ, alongAxis: -2)
 
     let nodesLatentQTranspose = qNodeLayer(neighborsLatent)
-      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C]))
+      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, 1]))
     let neighborsLatentQTranspose = qNeighborLayer(nodesLatent)
-      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C]))
+      .reshaped(toShape: Tensor<Int32>([-1, 1, 1, C]))
     let qualitiesTranspose = logSoftmax(
       nodesLatentQTranspose + neighborsLatentQTranspose,
       alongAxis: -2)
@@ -547,10 +552,9 @@ public struct DecoupledMLPPredictorV2: GraphPredictor {
       })
       qInputSize = hiddenUnitCount
     }
-    let C = graph.classCount
-    self.predictionLayer = Dense<Float>(inputSize: lInputSize, outputSize: C)
-    self.qNodeLayer = Dense<Float>(inputSize: qInputSize, outputSize: C * C)
-    self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: C * C)
+    self.predictionLayer = Dense<Float>(inputSize: lInputSize, outputSize: graph.classCount)
+    self.qNodeLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount)
+    self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount)
   }
 }
 

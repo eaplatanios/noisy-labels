@@ -34,6 +34,9 @@ internal extension Array where Element: Comparable {
       if value > maxValue {
         maxValue = value
         maxIndex = index
+      } else if value == maxValue, Int.random(in: 0...1) == 0 {
+        maxValue = value
+        maxIndex = index
       }
     }
     return maxIndex

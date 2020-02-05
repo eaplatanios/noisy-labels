@@ -135,9 +135,10 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
     var emStepCallbackInvocationsWithoutPriorImprovement = 0
 
     func emStepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) -> Bool {
-      let predictionsMAP = model.labelsApproximateMAP(maxStepCount: 10000)
+//      let predictionsMAP = model.labelsApproximateMAP(maxStepCount: 10000)
+      let predictionsMAP = model.labelsGibbsMarginalMAP()
       let evaluationResult = evaluate(predictions: predictionsMAP, using: graph)
-      // let evaluationResult = evaluate(model: model, using: graph, usePrior: false)
+//      let evaluationResult = evaluate(model: model, using: graph, usePrior: false)
       if firstEvaluationResult == nil { firstEvaluationResult = evaluationResult }
       if let bestResult = bestEvaluationResult {
         if evaluationResult.validationAccuracy > bestResult.validationAccuracy ||

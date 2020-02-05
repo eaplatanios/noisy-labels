@@ -12,6 +12,59 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
+// 6: Modularity?
+// 6: Computational power could have been a reason.
+// 6: "..." when you fast forward in the time scale.
+// 7: Trained using many examples is not necessarily the difference.
+// 8: More like parametric vs nonparametric models.
+// 8: I disagree that the meaning is lost. It's more about how you compress that meaning.
+// 14: Only applies to context-free structures.
+// 19: Function evaluation? Why is that interesting?
+// 20: Tree-structured not chain-structured, right?
+// 20: The one-hot embeddings are local representations, right?
+// 22: How many examples do you need? How did you generate training data? What about curriculum?
+// 27: This simply has to do with moving complexity around to programming language features.
+// 28: Shouldn't it be the same stack for everyone?
+// 33: Is Sympy good? How does a better solver like Mathematica do?
+// 44: Make that a single animation.
+// 45: Yoda speaking.
+// 45: Why use the right to left notation in your slides?
+// 45: I don't get this example in the end? Can you keep using a running example instead of letter symbols?
+// 46: What about uncertainty in k_t? Isn't that a big challenge with symbolic systems too?
+// 47: Do these representations really generalize? As in, what does a vector mean when it lies between three logical expressions?
+// 49: Mizaitis and Mitchel are misspelled in the bottom.
+// 50: Underscore?
+// 50: How many did you have in total? Was the domain limited? How were the data collected?
+// 53: Does no feedback also means no supervision at all?
+// 57: Mizaitis in the bottom.
+// 58: Mitchel in the bottom.
+// 58: Make it prettier.
+// 61: P(Y|X) and P(Y, X) are not needed. Just explain what the two terms mean intuitively.
+// 62: Weird jump back to the math part and the motivation for that.
+
+
+
+// Symbolic solvers disadvantage: slow because of discrete search with heuristics.
+// Maybe mention big challenges that symbolic solvers cannot handle.
+
+// How do these math problems relate to difficult real-world problems with noisy structures?
+// Why talk about the math stuff if there are no future directions or connections to future directions for that part?
+
+
+
+
+
+
+
+// 16: Can be compressed by just evaluating that expression. How much information do you want to keep? Do you want to be able to reconstruct the original expression?
+// 23: What is the representation of the prediction? Is that a structured prediction problem?
+// 25: Are the mistakes between LSTM and Sympy the same? What do they look like?
+// 25: How do you determine failure in the symbolic solver? Is it time based?
+// 23: Bi-directional LSTM? Transformer? That would be more about directionality rather than about hierarchical structure in the data.
+
+
+
+
 import Foundation
 import Progress
 import TensorFlow
@@ -96,26 +149,23 @@ where Optimizer.Model == Predictor {
   public mutating func train(using graph: Graph) {
     var mStepData = Dataset(elements: graph.allUnlabeledData)
 
+    if verbose { logger.info("Initialization") }
+    initialize(using: graph)
+//    performMStep(data: Dataset(elements: graph.labeledData), emStep: 0)
+    let _ = emStepCallback(self)
+
     for emStep in 0..<emStepCount {
       if useIncrementalNeighborhoodExpansion {
         mStepData = Dataset(elements: graph.data(atDepth: emStep + 1))
       }
 
-      if emStep > 0 {
-        // E-Step
-        if verbose { logger.info("Iteration \(emStep) - Running E-Step") }
-        performEStep(using: graph)
-      } else {
-        if verbose { logger.info("Initialization") }
-        initialize(using: graph)
-        // performMStep(data: Dataset(elements: graph.labeledData), emStep: 0)
-        // performEStep(using: graph)
-        // emStepCallback(self)
-      }
-
       // M-Step
       if verbose { logger.info("Iteration \(emStep) - Running M-Step") }
       performMStep(data: mStepData, emStep: emStep)
+
+      // E-Step
+      if verbose { logger.info("Iteration \(emStep) - Running E-Step") }
+      for _ in 0..<10 { performEStep(using: graph) }
 
       if emStepCallback(self) { break }
     }
@@ -137,67 +187,94 @@ where Optimizer.Model == Predictor {
 
   private mutating func initialize(using graph: Graph) {
     expectedLabels = Tensor<Float>(zeros: [predictor.nodeCount, predictor.classCount])
-    var labeledNodes = Set<Int32>()
-    var nodesToLabel = Set<Int32>()
+    lastLabelsSample = Tensor<Int32>(
+      randomUniform: [predictor.nodeCount],
+      lowerBound: Tensor<Int32>(0),
+      upperBound: Tensor<Int32>(Int32(predictor.classCount)))
 
     // Start with the labeled nodes.
     for node in graph.trainNodes {
-      let label = graph.labels[node]!
-      expectedLabels = _Raw.tensorScatterAdd(
+      expectedLabels = _Raw.tensorScatterUpdate(
         expectedLabels,
         indices: Tensor<Int32>([node]).expandingShape(at: -1),
         updates: Tensor<Float>(
-          oneHotAtIndices: Tensor<Int32>(Int32(label)),
+          oneHotAtIndices: Tensor<Int32>(Int32(graph.labels[node]!)),
           depth: predictor.classCount).expandingShape(at: 0))
-      labeledNodes.update(with: node)
-      nodesToLabel.remove(node)
-      graph.neighbors[Int(node)].forEach {
-        if !labeledNodes.contains($0) {
-          nodesToLabel.update(with: $0)
-        }
-      }
     }
 
-    // Proceed with label propagation for the unlabeled nodes.
-    while !nodesToLabel.isEmpty {
-      for node in nodesToLabel {
-        let labeledNeighbors = graph.neighbors[Int(node)].filter(labeledNodes.contains)
-        var probabilities = Tensor<Float>(zeros: [graph.classCount])
-        for neighbor in labeledNeighbors {
-          probabilities += expectedLabels[Int(neighbor)]
-        }
-        probabilities /= probabilities.sum()
-        expectedLabels = _Raw.tensorScatterAdd(
-          expectedLabels,
-          indices: Tensor<Int32>([node]).expandingShape(at: -1),
-          updates: probabilities.expandingShape(at: 0))
-      }
-      for node in nodesToLabel {
-        labeledNodes.update(with: node)
-        nodesToLabel.remove(node)
-        graph.neighbors[Int(node)].forEach {
-          if !labeledNodes.contains($0) {
-            nodesToLabel.update(with: $0)
-          }
-        }
-      }
-    }
-
-    for node in (0..<Int32(graph.nodeCount)).filter({ !labeledNodes.contains($0) }) {
-      expectedLabels = _Raw.tensorScatterAdd(
+    for batch in Dataset(elements: graph.unlabeledData).batched(batchSize) {
+      expectedLabels = _Raw.tensorScatterUpdate(
         expectedLabels,
-        indices: Tensor<Int32>([node]).expandingShape(at: -1),
+        indices: batch.expandingShape(at: -1),
         updates: Tensor<Float>(
           repeating: 1 / Float(graph.classCount),
-          shape: [1, graph.classCount]))
+          shape: [batch.shape[0], graph.classCount]))
     }
-
-    // expectedLabels = useThresholdedExpectations ?
-    //   Tensor<Float>(expectedLabels .== expectedLabels.max(alongAxes: -1)) :
-    //   expectedLabels
-
-    lastLabelsSample = expectedLabels.argmax(squeezingAxis: -1)
   }
+
+//  private mutating func initialize(using graph: Graph) {
+//    expectedLabels = Tensor<Float>(zeros: [predictor.nodeCount, predictor.classCount])
+//    var labeledNodes = Set<Int32>()
+//    var nodesToLabel = Set<Int32>()
+//
+//    // Start with the labeled nodes.
+//    for node in graph.trainNodes {
+//      let label = graph.labels[node]!
+//      expectedLabels = _Raw.tensorScatterAdd(
+//        expectedLabels,
+//        indices: Tensor<Int32>([node]).expandingShape(at: -1),
+//        updates: Tensor<Float>(
+//          oneHotAtIndices: Tensor<Int32>(Int32(label)),
+//          depth: predictor.classCount).expandingShape(at: 0))
+//      labeledNodes.update(with: node)
+//      nodesToLabel.remove(node)
+//      graph.neighbors[Int(node)].forEach {
+//        if !labeledNodes.contains($0) {
+//          nodesToLabel.update(with: $0)
+//        }
+//      }
+//    }
+//
+//    // Proceed with label propagation for the unlabeled nodes.
+//    while !nodesToLabel.isEmpty {
+//      for node in nodesToLabel {
+//        let labeledNeighbors = graph.neighbors[Int(node)].filter(labeledNodes.contains)
+//        var probabilities = Tensor<Float>(zeros: [graph.classCount])
+//        for neighbor in labeledNeighbors {
+//          probabilities += expectedLabels[Int(neighbor)]
+//        }
+//        probabilities /= probabilities.sum()
+//        expectedLabels = _Raw.tensorScatterAdd(
+//          expectedLabels,
+//          indices: Tensor<Int32>([node]).expandingShape(at: -1),
+//          updates: probabilities.expandingShape(at: 0))
+//      }
+//      for node in nodesToLabel {
+//        labeledNodes.update(with: node)
+//        nodesToLabel.remove(node)
+//        graph.neighbors[Int(node)].forEach {
+//          if !labeledNodes.contains($0) {
+//            nodesToLabel.update(with: $0)
+//          }
+//        }
+//      }
+//    }
+//
+//    for node in (0..<Int32(graph.nodeCount)).filter({ !labeledNodes.contains($0) }) {
+//      expectedLabels = _Raw.tensorScatterAdd(
+//        expectedLabels,
+//        indices: Tensor<Int32>([node]).expandingShape(at: -1),
+//        updates: Tensor<Float>(
+//          repeating: 1 / Float(graph.classCount),
+//          shape: [1, graph.classCount]))
+//    }
+//
+//    // expectedLabels = useThresholdedExpectations ?
+//    //   Tensor<Float>(expectedLabels .== expectedLabels.max(alongAxes: -1)) :
+//    //   expectedLabels
+//
+//    lastLabelsSample = expectedLabels.argmax(squeezingAxis: -1)
+//  }
 
   private mutating func performEStep(using graph: Graph) {
     // Use the provided labels for labeled nodes.
@@ -211,8 +288,9 @@ where Optimizer.Model == Predictor {
     let leveledData = graph.leveledData
       .suffix(from: 1)
       .map { Dataset(elements: Tensor<Int32>($0)) }
-    for level in leveledData {
-      for batch in level.batched(batchSize) {
+    for batch in Dataset(elements: graph.unlabeledData).batched(batchSize) {
+//    for level in leveledData {
+//      for batch in level.batched(batchSize) {
         let predictions = predictor(batch.scalars)
         let h = predictions.labelProbabilities
         let q = predictions.qualities                                                               // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
@@ -225,7 +303,7 @@ where Optimizer.Model == Predictor {
           expectedLabels,
           indices: batch.expandingShape(at: -1),
           updates: softmax(h + qYHat + qTransposeYHat))
-      }
+//      }
     }
   }
 
@@ -241,7 +319,7 @@ where Optimizer.Model == Predictor {
     let leveledData = graph.leveledData
       .suffix(from: 1)
       .map { Dataset(elements: Tensor<Int32>($0)) }
-    let sampleCount = 10
+    let sampleCount = 100
     let burnInSampleCount = 100
     let thinningSampleCount = 10
     var progressBar = ProgressBar(
@@ -279,7 +357,7 @@ where Optimizer.Model == Predictor {
         currentSampleCount += 1
         progressBar.setValue(currentSampleCount)
         if currentSampleCount > burnInSampleCount &&
-             currentSampleCount.isMultiple(of: thinningSampleCount) {
+           currentSampleCount.isMultiple(of: thinningSampleCount) {
           samples.append(currentSample)
         }
       }
@@ -392,7 +470,7 @@ where Optimizer.Model == Predictor {
     var convergenceStepCount = 0
     bestResult = nil
     resultAccumulator.reset()
-    if !useWarmStarting {
+    if !useWarmStarting && emStep > 0 {
       predictor.reset()
       optimizer = optimizerFn()
     }
@@ -408,7 +486,7 @@ where Optimizer.Model == Predictor {
       let yTilde = expectedLabels.gathering(atIndices: batch)
       withLearningPhase(.training) {
         let (negativeLogLikelihood, gradient) = valueWithGradient(at: predictor) {
-          [expectedLabels, entropyWeight] predictor -> Tensor<Float> in
+          [expectedLabels, entropyWeight, qualitiesRegularizationWeight] predictor -> Tensor<Float> in
           let predictions = predictor.labelProbabilitiesAndQualities(batch.scalars)
           let h = predictions.labelProbabilities
           let q = predictions.qualities                                                             // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
@@ -421,7 +499,8 @@ where Optimizer.Model == Predictor {
           let negativeLogLikelihood = -(yTilde * logits).sum()
           let normalizingConstant = logits.logSumExp(alongAxes: -1).sum()
           let hEntropy = entropyWeight * (exp(h) * h).sum()
-          let loss = hEntropy + negativeLogLikelihood + normalizingConstant
+          let qEntropy = qualitiesRegularizationWeight * (exp(q) * q).sum()
+          let loss = hEntropy + qEntropy + negativeLogLikelihood + normalizingConstant
           return loss / Float(predictions.labelProbabilities.shape[0])
         }
         optimizer.update(&predictor, along: gradient)
@@ -439,13 +518,13 @@ where Optimizer.Model == Predictor {
         }
       }
       if let c = evaluationStepCount, mStep % c == 0 {
-//        // Run the E step.
-//        var modelCopy = self
-//        modelCopy.performEStep(using: predictor.graph)
-
-        let predictionsMAP = labelsApproximateMAP(maxStepCount: 10)
-        let evaluationResult = evaluate(predictions: predictionsMAP, using: predictor.graph)
-        // let evaluationResult = evaluate(model: modelCopy, using: predictor.graph, usePrior: true)
+        // Run the E step.
+        var modelCopy = self
+        for _ in 0..<10 { modelCopy.performEStep(using: predictor.graph) }
+//        let predictionsMAP = labelsApproximateMAP(maxStepCount: 10)
+//        let predictionsMAP = labelsGibbsMarginalMAP()
+//        let evaluationResult = evaluate(predictions: predictionsMAP, using: predictor.graph)
+        let evaluationResult = evaluate(model: modelCopy, using: predictor.graph, usePrior: false)
         let result = resultAccumulator.update(with: evaluationResult)
         if let bestResult = self.bestResult {
           if result.validationAccuracy > bestResult.validationAccuracy {
@@ -473,6 +552,42 @@ where Optimizer.Model == Predictor {
       expectedLabels = bestExpectedLabels
       predictor = bestPredictor
     }
+  }
+
+  internal func labelsGibbsMarginalMAP() -> [Int32] {
+    var modelCopy = self
+    modelCopy.performGibbsEStep(using: predictor.graph)
+    let probabilities = modelCopy.labelProbabilities(for: [Int32](0..<Int32(predictor.graph.nodeCount)))
+    return probabilities.argmax(squeezingAxis: -1).scalars
+
+//    let nodes = [Int](0..<predictor.graph.nodeCount).map(Int32.init)
+//    var h = [Tensor<Float>]()
+//    var q = [Tensor<Float>]()
+//    for batch in Dataset(elements: Tensor<Int32>(nodes)).batched(batchSize) {
+//      let predictions = predictor.labelProbabilitiesAndQualities(batch.scalars)
+//      let qualities = predictions.qualities.unstacked(alongAxis: 0)
+//      let neighborCounts = predictions.qualitiesMask
+//        .sum(squeezingAxes: -1)
+//        .unstacked(alongAxis: 0)
+//        .map { Int($0.scalarized()) }
+//      h.append(predictions.labelProbabilities)
+//      q.append(contentsOf: zip(qualities, neighborCounts).map { $0[0..<$1] })
+//    }
+//    let hScalars = Tensor<Float>(concatenating: h, alongAxis: 0).scalars
+//    let labelLogits = LabelLogits(
+//      logits: hScalars,
+//      nodeCount: predictor.graph.nodeCount,
+//      labelCount: predictor.graph.classCount)
+//    let qualityLogits = q.map {
+//      QualityLogits(
+//        logits: $0.scalars,
+//        nodeCount: $0.shape[0],
+//        labelCount: predictor.graph.classCount)
+//    }
+//    return gibbsMarginalMAP(
+//      labelLogits: labelLogits,
+//      qualityLogits: qualityLogits,
+//      graph: predictor.graph)
   }
 
   internal func labelsApproximateMAP(maxStepCount: Int = 100) -> [Int32] {

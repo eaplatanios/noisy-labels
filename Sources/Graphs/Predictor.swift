@@ -162,25 +162,25 @@ public struct NodeIndexMap {
 
 public struct GraphPredictions: Differentiable {
   @noDerivative public var neighborIndices: Tensor<Int32>
-  public var labelProbabilities: Tensor<Float>
-  public var qualities: Tensor<Float>
-  public var qualitiesTranspose: Tensor<Float>
-  @noDerivative public var qualitiesMask: Tensor<Float>
+  @noDerivative public var neighborMask: Tensor<Float>
+  public var nodeLabelLogits: Tensor<Float>
+  public var neighborLabelLogits: Tensor<Float>
+  public var qualityLogits: Tensor<Float>
 
   @inlinable
   @differentiable
   public init(
     neighborIndices: Tensor<Int32>,
-    labelProbabilities: Tensor<Float>,
-    qualities: Tensor<Float>,
-    qualitiesTranspose: Tensor<Float>,
-    qualitiesMask: Tensor<Float>
+    neighborMask: Tensor<Float>,
+    nodeLabelLogits: Tensor<Float>,
+    neighborLabelLogits: Tensor<Float>,
+    qualityLogits: Tensor<Float>
   ) {
     self.neighborIndices = neighborIndices
-    self.labelProbabilities = labelProbabilities
-    self.qualities = qualities
-    self.qualitiesTranspose = qualitiesTranspose
-    self.qualitiesMask = qualitiesMask
+    self.neighborMask = neighborMask
+    self.nodeLabelLogits = nodeLabelLogits
+    self.neighborLabelLogits = neighborLabelLogits
+    self.qualityLogits = qualityLogits
   }
 }
 
@@ -189,9 +189,6 @@ public protocol GraphPredictor: Differentiable, KeyPathIterable {
 
   @differentiable(wrt: self)
   func callAsFunction(_ nodes: [Int32]) -> GraphPredictions
-
-  @differentiable(wrt: self)
-  func labelProbabilities(_ nodes: [Int32]) -> Tensor<Float>
 
   mutating func reset()
 }
@@ -202,8 +199,49 @@ extension GraphPredictor {
   public var classCount: Int { graph.classCount }
 
   @differentiable(wrt: self)
-  public func labelProbabilitiesAndQualities(_ nodes: [Int32]) -> GraphPredictions {
+  public func labelAndQualityLogits(_ nodes: [Int32]) -> GraphPredictions {
     self(nodes)
+  }
+
+  @differentiable(wrt: self)
+  public func labelLogits(_ nodes: [Int32]) -> Tensor<Float> {
+    let predictions = labelAndQualityLogits(nodes)
+    let neighborLogH = predictions.neighborLabelLogits.expandingShape(at: -2)                       // [BatchSize, MaxNeighborCount, 1, ClassCount]
+    let logQ = predictions.qualityLogits
+    let neighborsTerm = (neighborLogH + logQ).logSumExp(squeezingAxes: -1)                          // [BatchSize, MaxNeighborCount, ClassCount]
+    let neighborMask = predictions.neighborMask.expandingShape(at: -1)                              // [BatchSize, MaxNeighborCount, 1]
+    return predictions.nodeLabelLogits + (neighborsTerm * neighborMask).sum(squeezingAxes: 1)       // [BatchSize, ClassCount]
+  }
+
+  public func yHatYConditionalLogits(_ nodes: [Int32]) -> [Tensor<Float>] {
+    let predictions = labelAndQualityLogits(nodes)
+    let neighborLogH = predictions.neighborLabelLogits.expandingShape(at: -2)                       // [BatchSize, MaxNeighborCount, 1, ClassCount]
+    let logQ = predictions.qualityLogits                                                            // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+    let neighborTerm = neighborLogH + logQ                                                          // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+    let neighborTermLogSumExp = neighborTerm.logSumExp(squeezingAxes: -1)                           // [BatchSize, MaxNeighborCount, ClassCount]
+    let neighborProductTerm = neighborTermLogSumExp.sum(alongAxes: 1) - neighborTermLogSumExp       // [BatchSize, MaxNeighborCount, ClassCount]
+    let logits = neighborTerm + neighborProductTerm.expandingShape(at: -1)                          // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+    let unstackedLogits = logits.unstacked(alongAxis: 0)
+    let neighborCounts = Tensor<Int32>(predictions.neighborMask.sum(squeezingAxes: -1)).scalars
+    let classCount = Int32(classCount)
+    return zip(unstackedLogits, neighborCounts).map {
+      $0.slice(
+        lowerBounds: Tensor<Int32>([0, 0, 0]),
+        sizes: Tensor<Int32>([$1, classCount, classCount]))
+    }
+  }
+
+  @differentiable(wrt: self)
+  public func logLikelihood(
+    _ nodes: [Int32],
+    yHatYConditionalLogits: [Tensor<Float>]
+  ) -> Tensor<Float> {
+    let predictions = labelAndQualityLogits(nodes)
+    let logH = predictions.nodeLabelLogits                                                          // [BatchSize, ClassCount]
+    let entropyH = (logH * exp(logH)).sum()
+    let neighborLogH = predictions.neighborLabelLogits.expandingShape(at: -2)                       // [BatchSize, MaxNeighborCount, 1, ClassCount]
+
+
   }
 }
 

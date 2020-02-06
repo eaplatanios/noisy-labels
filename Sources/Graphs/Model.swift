@@ -193,13 +193,14 @@ where Optimizer.Model == Predictor {
   public let initializationMethod: ModelInitializationMethod
   public let stepCount: Int
   public let preTrainingStepCount: Int
+  public let gibbsLikelihoodChainCount: Int
   public let gibbsLikelihoodSampleCount: Int
   public let gibbsLikelihoodBurnInSampleCount: Int
   public let gibbsLikelihoodThinningSampleCount: Int
+  public let gibbsNormalizationChainCount: Int
   public let gibbsNormalizationSampleCount: Int
   public let gibbsNormalizationBurnInSampleCount: Int
   public let gibbsNormalizationThinningSampleCount: Int
-  public let gibbsChainCount: Int
   public let evaluationStepCount: Int?
   public let evaluationConvergenceStepCount: Int?
   public let stepCallback: (Model) -> ()
@@ -212,7 +213,8 @@ where Optimizer.Model == Predictor {
 
   /// The last labels sample is an array that contains arrays with the labels sampled in the last
   ///step, for each node in the graph and for each Gibbs sampling chain.
-  private var lastSamples: [[Int32]]
+  private var lastLikelihoodSamples: [[Int32]]
+  private var lastNormalizationSamples: [[Int32]]
   private var bestPredictor: Predictor
   private var bestResult: Result?
 
@@ -227,13 +229,14 @@ where Optimizer.Model == Predictor {
     initializationMethod: ModelInitializationMethod = .labelPropagation,
     stepCount: Int = 1000,
     preTrainingStepCount: Int = 1000,
+    gibbsLikelihoodChainCount: Int = 5,
     gibbsLikelihoodSampleCount: Int = 5,
     gibbsLikelihoodBurnInSampleCount: Int = 0,
     gibbsLikelihoodThinningSampleCount: Int = 0,
+    gibbsNormalizationChainCount: Int = 5,
     gibbsNormalizationSampleCount: Int = 5,
     gibbsNormalizationBurnInSampleCount: Int = 10,
     gibbsNormalizationThinningSampleCount: Int = 0,
-    gibbsChainCount: Int = 5,
     evaluationStepCount: Int? = 1,
     evaluationConvergenceStepCount: Int? = 10,
     evaluationResultsAccumulator: Accumulator = ExactAccumulator(),
@@ -249,24 +252,31 @@ where Optimizer.Model == Predictor {
     self.initializationMethod = initializationMethod
     self.stepCount = stepCount
     self.preTrainingStepCount = preTrainingStepCount
+    self.gibbsLikelihoodChainCount = gibbsLikelihoodChainCount
     self.gibbsLikelihoodSampleCount = gibbsLikelihoodSampleCount
     self.gibbsLikelihoodBurnInSampleCount = gibbsLikelihoodBurnInSampleCount
     self.gibbsLikelihoodThinningSampleCount = gibbsLikelihoodThinningSampleCount
+    self.gibbsNormalizationChainCount = gibbsNormalizationChainCount
     self.gibbsNormalizationSampleCount = gibbsNormalizationSampleCount
     self.gibbsNormalizationBurnInSampleCount = gibbsNormalizationBurnInSampleCount
     self.gibbsNormalizationThinningSampleCount = gibbsNormalizationThinningSampleCount
-    self.gibbsChainCount = gibbsChainCount
     self.evaluationStepCount = evaluationStepCount
     self.evaluationConvergenceStepCount = evaluationConvergenceStepCount
     self.evaluationResultsAccumulator = evaluationResultsAccumulator
     self.stepCallback = stepCallback
     self.logStepCount = logStepCount
     self.verbose = verbose
-    self.lastSamples = [[Int32]]()
-    self.lastSamples.reserveCapacity(gibbsChainCount)
-    self.lastSamples.append(initializationMethod.initialSample(forGraph: predictor.graph))
-    for _ in 1..<gibbsChainCount {
-      self.lastSamples.append(ModelInitializationMethod.random.initialSample(
+    self.lastLikelihoodSamples = [[Int32]]()
+    self.lastLikelihoodSamples.reserveCapacity(gibbsLikelihoodChainCount)
+    self.lastLikelihoodSamples.append(initializationMethod.initialSample(forGraph: predictor.graph))
+    for _ in 1..<gibbsLikelihoodChainCount {
+      self.lastLikelihoodSamples.append(ModelInitializationMethod.random.initialSample(
+        forGraph: predictor.graph))
+    }
+    self.lastNormalizationSamples = [[Int32]]()
+    self.lastNormalizationSamples.reserveCapacity(gibbsNormalizationChainCount)
+    for _ in 0..<gibbsNormalizationChainCount {
+      self.lastNormalizationSamples.append(ModelInitializationMethod.random.initialSample(
         forGraph: predictor.graph))
     }
     self.bestPredictor = predictor
@@ -311,9 +321,9 @@ where Optimizer.Model == Predictor {
         InMemoryPredictions(fromPredictions: $0, using: graph)
       }
       for _ in 0..<gibbsLikelihoodBurnInSampleCount {
-        lastSamples = sampleLabels(
+        lastLikelihoodSamples = sampleLabels(
           using: inMemoryPredictions,
-          previousSamples: lastSamples,
+          previousSamples: lastLikelihoodSamples,
           sampleTrainLabels: false)
       }
     }
@@ -337,7 +347,7 @@ where Optimizer.Model == Predictor {
 
         let likelihoodSamples = sampleMultipleLabels(
           using: inMemoryPredictions,
-          previousSamples: lastSamples,
+          previousSamples: lastLikelihoodSamples,
           sampleTrainLabels: false,
           sampleCount: gibbsLikelihoodSampleCount,
           burnInSampleCount: gibbsLikelihoodBurnInSampleCount,
@@ -361,29 +371,30 @@ where Optimizer.Model == Predictor {
               alongAxis: 1,
               batchDimensionCount: 1).sum()
           }
-          lastSamples = samples
+          lastLikelihoodSamples = samples
         }
 
-        let likelihoodSampleCount = gibbsLikelihoodSampleCount * gibbsChainCount
+        let likelihoodSampleCount = gibbsLikelihoodSampleCount * gibbsLikelihoodChainCount
         negativeLogLikelihood = negativeLogLikelihood / Float(likelihoodSampleCount)
 
         // Compute the normalization term in the negative log-likelihood.
+        let normalizationSamples = sampleMultipleLabels(
+          using: inMemoryPredictions,
+          previousSamples: lastNormalizationSamples,
+          sampleTrainLabels: true,
+          sampleCount: gibbsNormalizationSampleCount,
+          burnInSampleCount: gibbsNormalizationBurnInSampleCount,
+          thinningSampleCount: gibbsNormalizationThinningSampleCount)
         negativeLogLikelihood = negativeLogLikelihood + estimateNormalizationConstant(
           using: predictions,
-          samples: sampleMultipleLabels(
-            using: inMemoryPredictions,
-            previousSamples: lastSamples,
-            sampleTrainLabels: true,
-            sampleCount: gibbsNormalizationSampleCount,
-            burnInSampleCount: gibbsNormalizationBurnInSampleCount,
-            thinningSampleCount: gibbsNormalizationThinningSampleCount
-          ))
+          samples: normalizationSamples)
+        lastNormalizationSamples = normalizationSamples.last!
 
         // Update the last sample.
         for _ in 0..<gibbsLikelihoodThinningSampleCount {
-          lastSamples = sampleLabels(
+          lastLikelihoodSamples = sampleLabels(
             using: inMemoryPredictions,
-            previousSamples: lastSamples,
+            previousSamples: lastLikelihoodSamples,
             sampleTrainLabels: false)
         }
 
@@ -502,7 +513,7 @@ where Optimizer.Model == Predictor {
         graph.leveledData.suffix(from: 1) :
         [graph.unlabeledNodes]
     var currentSamples = previousSamples
-    for chain in 0..<gibbsChainCount {
+    for chain in 0..<previousSamples.count {
       for level in nodeLevels {
         for node in level.shuffled() {
           let g = predictions.qualityLogits[Int(node)]
@@ -546,7 +557,7 @@ where Optimizer.Model == Predictor {
     burnInSampleCount: Int = 10,
     thinningSampleCount: Int = 0
   ) -> [[[Int32]]] {
-    var samples = [[[Int32]]](repeating: [[Int32]](), count: gibbsChainCount)
+    var samples = [[[Int32]]](repeating: [[Int32]](), count: previousSamples.count)
     var currentSamples = previousSamples
     var currentSampleCount = 0
     while samples[0].count < sampleCount {
@@ -557,7 +568,7 @@ where Optimizer.Model == Predictor {
       currentSampleCount += 1
       if currentSampleCount > burnInSampleCount &&
            currentSampleCount.isMultiple(of: thinningSampleCount + 1) {
-        for chain in 0..<gibbsChainCount {
+        for chain in 0..<previousSamples.count {
           samples[chain].append(currentSamples[chain])
         }
       }

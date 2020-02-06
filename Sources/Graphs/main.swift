@@ -272,7 +272,8 @@ case .mlp: runExperiments(predictor: { MLPPredictor(
 case .decoupledMLP: runExperiments(predictor: { DecoupledMLPPredictor(
   graph: $0,
   lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-  qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
+  qHiddenUnitCounts: [Int](parsedArguments.get(qHiddenUnitCounts)!.suffix(from: 1)),
+  confusionLatentSize: parsedArguments.get(qHiddenUnitCounts)![0], // TODO: !!! Fix this hack.
   dropout: parsedArguments.get(dropout) ?? 0.5) })
 default: fatalError("The specified model is not supported yet.")
 //case .gcn: runExperiments(predictor: { GCNPredictor(

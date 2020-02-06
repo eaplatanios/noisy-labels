@@ -188,6 +188,7 @@ internal func _vjpEstimateNormalizationConstant(
 public struct Model<Predictor: GraphPredictor, Optimizer: TensorFlow.Optimizer>
 where Optimizer.Model == Predictor {
   public let randomSeed: Int64
+  /// TODO: !!! Clarify that this is currently only a pre-training batch size.
   public let batchSize: Int
   public let useIncrementalNeighborhoodExpansion: Bool
   public let initializationMethod: ModelInitializationMethod
@@ -212,7 +213,7 @@ where Optimizer.Model == Predictor {
   public var evaluationResultsAccumulator: Accumulator
 
   /// The last labels sample is an array that contains arrays with the labels sampled in the last
-  ///step, for each node in the graph and for each Gibbs sampling chain.
+  /// step, for each node in the graph and for each Gibbs sampling chain.
   private var lastLikelihoodSamples: [[Int32]]
   private var lastNormalizationSamples: [[Int32]]
   private var bestPredictor: Predictor
@@ -352,7 +353,7 @@ where Optimizer.Model == Predictor {
           sampleCount: gibbsLikelihoodSampleCount,
           burnInSampleCount: gibbsLikelihoodBurnInSampleCount,
           thinningSampleCount: gibbsLikelihoodThinningSampleCount)
-        var negativeLogLikelihood = h.sum() * 0
+        var negativeLogLikelihood = (h * exp(h)).sum() * 0 // TODO: !!!
         for samples in likelihoodSamples {
           for sample in samples {
             let y = Tensor<Int32>(sample)
@@ -518,31 +519,36 @@ where Optimizer.Model == Predictor {
         for node in level.shuffled() {
           let g = predictions.qualityLogits[Int(node)]
           let gT = predictions.qualityLogitsTransposed[Int(node)]
-          var labelLogits = predictions.labelLogits.labelLogits(forNode: Int(node))
+          var labelProbabilities = predictions.labelLogits.labelLogits(forNode: Int(node))
           for (neighborIndex, neighbor) in graph.neighbors[Int(node)].enumerated() {
             for k in 0..<graph.classCount {
-              labelLogits[k] += g.qualityLogit(
+              labelProbabilities[k] += g.qualityLogit(
                 forNeighbor: Int(neighborIndex),
                 nodeLabel: k,
                 neighborLabel: Int(currentSamples[chain][Int(neighbor)]))
-              labelLogits[k] += gT.qualityLogit(
+              labelProbabilities[k] += gT.qualityLogit(
                 forNeighbor: Int(neighborIndex),
                 nodeLabel: Int(currentSamples[chain][Int(neighbor)]),
                 neighborLabel: k)
             }
           }
-          var maxIndex = 0
-          var maxValue = -Float.infinity
+          var sum = Float(0)
           for k in 0..<graph.classCount {
-            // TODO: !!! Seed / random number generator.
-            let random = Float.random(in: 0..<1)
-            let value = labelLogits[k] - log(-log(random))
-            if value > maxValue {
-              maxIndex = k
-              maxValue = value
+            labelProbabilities[k] = exp(labelProbabilities[k])
+            sum += labelProbabilities[k]
+          }
+          // TODO: !!! Seed / random number generator.
+          let random = sum > 0 ?
+            Float.random(in: 0..<sum) :
+            Float.random(in: 0..<Float(graph.classCount))
+          var accumulator: Float = 0
+          for k in 0..<graph.classCount {
+            accumulator += sum > 0 ? labelProbabilities[k] : 1
+            if random < accumulator {
+              currentSamples[chain][Int(node)] = Int32(k)
+              break
             }
           }
-          currentSamples[chain][Int(node)] = Int32(maxIndex)
         }
       }
     }

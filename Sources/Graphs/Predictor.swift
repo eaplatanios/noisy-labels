@@ -66,7 +66,6 @@ public struct NodeIndexMap {
 
   public let nodeIndices: Tensor<Int32>
   public let neighborIndices: Tensor<Int32>
-  public let neighborMask: Tensor<Float>
   public let uniqueNodeIndices: Tensor<Int32>
 
   @inlinable
@@ -105,13 +104,6 @@ public struct NodeIndexMap {
     self.neighborIndices = Tensor<Int32>(
       stacking: neighborIndices.map {
         Tensor<Int32>($0 + [Int32](repeating: 0, count: maxNeighborCount - $0.count))
-      },
-      alongAxis: 0)
-    self.neighborMask = Tensor<Float>(
-      stacking: neighborIndices.map {
-        Tensor<Float>(
-          [Float](repeating: 1, count: $0.count) +
-            [Float](repeating: 0, count: maxNeighborCount - $0.count))
       },
       alongAxis: 0)
     self.uniqueNodeIndices = Tensor<Int32>(uniqueNodeIndices)
@@ -214,7 +206,7 @@ extension Predictions {
       stacking: withoutDerivative(at: nodes) {
         $0.map { graph.neighbors[Int($0)] }.map {
           Tensor<Float>(
-            [Float](repeating: 1, count: $0.count) +
+            [Float](repeating: 1 / Float($0.count), count: $0.count) +
               [Float](repeating: 0, count: graph.maxNodeDegree - $0.count))
         }
       },

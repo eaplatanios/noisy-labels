@@ -188,7 +188,7 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       beta1: 0.9,
       beta2: 0.999,
       epsilon: 1e-8,
-      decay: 0.01)
+      decay: 0)
 
     var model = Model(
       predictor: predictor,

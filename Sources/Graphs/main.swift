@@ -135,8 +135,8 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
     var emStepCallbackInvocationsWithoutPriorImprovement = 0
 
     func emStepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) -> Bool {
-//      let predictionsMAP = model.labelsApproximateMAP(maxStepCount: 10000)
-      let predictionsMAP = model.labelsGibbsMarginalMAP()
+      let predictionsMAP = model.labelsApproximateMAP(maxStepCount: 10000)
+//      let predictionsMAP = model.labelsGibbsMarginalMAP()
       let evaluationResult = evaluate(predictions: predictionsMAP, using: graph)
 //      let evaluationResult = evaluate(model: model, using: graph, usePrior: false)
       if firstEvaluationResult == nil { firstEvaluationResult = evaluationResult }
@@ -186,9 +186,9 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
     let optimizerFn = { () in
       Adam<Predictor>(
         for: predictor,
-        learningRate: 1e-3,
+        learningRate: 1e-2,
         beta1: 0.9,
-        beta2: 0.999,
+        beta2: 0.99,
         epsilon: 1e-8,
         decay: 0)
     }
@@ -201,16 +201,15 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       randomSeed: randomSeed,
       batchSize: parsedArguments.get(batchSize) ?? 128,
       useWarmStarting: false,
-      useThresholdedExpectations: false,
-      useIncrementalNeighborhoodExpansion: true,
+      useIncrementalNeighborhoodExpansion: false,
       labelSmoothing: parsedArguments.get(labelSmoothing) ?? 0.5,
       resultAccumulator: ExactAccumulator(),
       // resultAccumulator: MovingAverageAccumulator(weight: 0.1),
-      mStepCount: 1000,
+      mStepCount: 100,
       emStepCount: 100,
-      evaluationStepCount: 10,
-      mStepLogCount: 100,
-      mConvergenceEvaluationCount: 10,
+      evaluationStepCount: nil,
+      mStepLogCount: 10,
+      mConvergenceEvaluationCount: 5,
       emStepCallback: { emStepCallback(model: $0) },
       verbose: true)
     model.train(using: graph)

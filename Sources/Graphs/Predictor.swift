@@ -184,6 +184,11 @@ public struct GraphPredictions: Differentiable {
   }
 }
 
+public struct GibbsHelper: Differentiable {
+  public var value: Tensor<Float>
+  @noDerivative public let sample: Tensor<Int32>
+}
+
 public protocol GraphPredictor: Differentiable, KeyPathIterable {
   var graph: Graph { get }
 
@@ -204,6 +209,156 @@ extension GraphPredictor {
   @differentiable(wrt: self)
   public func labelProbabilitiesAndQualities(_ nodes: [Int32]) -> GraphPredictions {
     self(nodes)
+  }
+
+  @differentiable(wrt: self)
+  public func negativeLogLikelihood(
+    _ nodes: [Int32],
+    expectedLabels: Tensor<Float>,
+    initialSample: Tensor<Int32>
+  ) -> GibbsHelper {
+    let yTilde = expectedLabels.gathering(atIndices: Tensor<Int32>(nodes))
+    let predictions = labelProbabilitiesAndQualities(nodes)
+    let h = predictions.labelProbabilities
+    let q = predictions.qualities                                                                   // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+    let qTranspose = predictions.qualitiesTranspose                                                 // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+    let qMask = predictions.qualitiesMask.expandingShape(at: -1)                                    // [BatchSize, MaxNeighborCount, 1]
+    let neighborIndices = withoutDerivative(at: q) { q in
+      Tensor<Int32>(
+        stacking: nodes.map { graph.neighbors[Int($0)] }.map {
+          Tensor<Int32>($0 + [Int32](repeating: 0, count: q.shape[1] - $0.count))
+        },
+        alongAxis: 0)
+    }
+    let yHat = expectedLabels.gathering(atIndices: neighborIndices)                     // [BatchSize, MaxNeighborCount, ClassCount]
+    let qYHat = ((q * yHat.expandingShape(at: 2)).sum(squeezingAxes: -1) * qMask).sum(squeezingAxes: 1)                   // [BatchSize, ClassCount]
+//    let qTransposeYHat = ((qTranspose * yHat.expandingShape(at: 3)).sum(squeezingAxes: -2) * qMask).sum(squeezingAxes: 1) // [BatchSize, ClassCount]
+//    dump(q[0])
+//    dump(qYHat[0])
+//    dump(yHat[0])
+//    dump(yTilde[0])
+    let logNominator = -(yTilde * h).sum() - (yTilde * qYHat).sum()
+    let normalizationConstant = gibbsNormalizationConstant(
+      nodes,
+      batchSize: nodes.count,
+      initialSample: initialSample)
+    let compilerBug = qTranspose.sum() * 0
+    return GibbsHelper(
+      value: logNominator + normalizationConstant.value + compilerBug,
+      sample: normalizationConstant.sample)
+  }
+
+  public func negativeLogLikelihoodGradient(
+    _ nodes: [Int32],
+    expectedLabels: Tensor<Float>,
+    initialSample: Tensor<Int32>
+  ) -> (GibbsHelper, TangentVector) {
+    var sample = initialSample
+    let (value, gradient) = TensorFlow.valueWithGradient(at: self) { p -> Tensor<Float> in
+      let result = p.negativeLogLikelihood(
+        nodes,
+        expectedLabels: expectedLabels,
+        initialSample: initialSample)
+      sample = result.sample
+      return result.value
+    }
+    return (GibbsHelper(value: value, sample: sample), gradient)
+  }
+
+  @differentiable(wrt: self)
+  public func gibbsNormalizationConstant(
+    _ nodes: [Int32],
+    batchSize: Int,
+    initialSample: Tensor<Int32>? = nil
+  ) -> GibbsHelper {
+    _vjpGibbsNormalizationConstant(nodes, batchSize: batchSize, initialSample: initialSample).value
+  }
+
+  @derivative(of: gibbsNormalizationConstant)
+  @usableFromInline
+  internal func _vjpGibbsNormalizationConstant(
+    _ nodes: [Int32],
+    batchSize: Int,
+    initialSample: Tensor<Int32>? = nil
+  ) -> (value: GibbsHelper, pullback: (GibbsHelper.TangentVector) -> TangentVector) {
+//    let leveledData = graph.leveledData
+//      .suffix(from: 1)
+//      .map { Dataset(elements: Tensor<Int32>($0)) }
+    let data = graph.allUnlabeledData
+    let sampleCount = 10
+    let burnInSampleCount = 10
+    let thinningSampleCount = 1
+    var value = Tensor<Float>(0)
+    var gradient = TangentVector.zero
+//    var currentSample = initialSample ?? Tensor<Int32>(propagateLabels(inGraph: graph))
+    var currentSample = Tensor<Int32>(graph.labels.sorted { $0.key < $1.key }.map { Int32($0.value) })
+    var currentSampleCount = 0
+    var collectedSampleCount = 0
+
+    while collectedSampleCount < sampleCount {
+//      for data in leveledData {
+        for batch in Dataset(elements: data).batched(10) {
+          let predictions = labelProbabilitiesAndQualities(batch.scalars)
+          let h = predictions.labelProbabilities                                                    // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          let q = predictions.qualities                                                             // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          let qTranspose = predictions.qualitiesTranspose                                           // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          let qMask = predictions.qualitiesMask.expandingShape(at: -1)                              // [BatchSize, MaxNeighborCount, 1]
+          let neighborIndices = withoutDerivative(at: q) { q in
+            Tensor<Int32>(
+              stacking: batch.scalars.map { graph.neighbors[Int($0)] }.map {
+                Tensor<Int32>($0 + [Int32](repeating: 0, count: q.shape[1] - $0.count))
+              },
+              alongAxis: 0)
+          }
+          let yHat = Tensor<Float>(
+            oneHotAtIndices: currentSample.gathering(atIndices: neighborIndices),
+            depth: graph.classCount)                                                                // [BatchSize, MaxNeighborCount, ClassCount]
+          let qYHat = ((q * yHat.expandingShape(at: 2)).sum(squeezingAxes: -1) * qMask).sum(squeezingAxes: 1)                   // [BatchSize, ClassCount]
+          let qTransposeYHat = ((qTranspose * yHat.expandingShape(at: 3)).sum(squeezingAxes: -2) * qMask).sum(squeezingAxes: 1) // [BatchSize, ClassCount]
+          let sample = Tensor<Int32>(
+            randomCategorialLogits: h + qYHat + qTransposeYHat,
+            sampleCount: 1
+          ).squeezingShape(at: -1)
+          currentSample = _Raw.tensorScatterUpdate(
+            currentSample,
+            indices: batch.expandingShape(at: -1),
+            updates: sample)
+        }
+//      }
+      currentSampleCount += 1
+      if currentSampleCount > burnInSampleCount && currentSampleCount.isMultiple(of: thinningSampleCount) {
+        collectedSampleCount += 1
+        let sample = Tensor<Float>(oneHotAtIndices: currentSample, depth: graph.classCount)
+        for batch in Dataset(elements: graph.allUnlabeledData).batched(batchSize) {
+          let yTilde = sample.gathering(atIndices: batch)
+          let (sampleValue, sampleGradient) = TensorFlow.valueWithGradient(at: self) { predictor -> Tensor<Float> in
+            let predictions = predictor.labelProbabilitiesAndQualities(batch.scalars)
+            let h = predictions.labelProbabilities
+            let q = predictions.qualities                                                           // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+            let qTranspose = predictions.qualitiesTranspose                                         // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+            let qMask = predictions.qualitiesMask.expandingShape(at: -1)                            // [BatchSize, MaxNeighborCount, 1]
+            let neighborIndices = withoutDerivative(at: q) { q in
+              Tensor<Int32>(
+                stacking: batch.scalars.map { graph.neighbors[Int($0)] }.map {
+                  Tensor<Int32>($0 + [Int32](repeating: 0, count: q.shape[1] - $0.count))
+                },
+                alongAxis: 0)
+            }
+            let yHat = sample.gathering(atIndices: neighborIndices)                     // [BatchSize, MaxNeighborCount, ClassCount]
+            let qYHat = ((q * yHat.expandingShape(at: 2)).sum(squeezingAxes: -1) * qMask).sum(squeezingAxes: 1)                   // [BatchSize, ClassCount]
+//            let qTransposeYHat = ((qTranspose * yHat.expandingShape(at: 3)).sum(squeezingAxes: -2) * qMask).sum(squeezingAxes: 1) // [BatchSize, ClassCount]
+//            let logits = h + qYHat // + qTransposeYHat                                                 // [BatchSize, ClassCount]
+            let compilerBug = qTranspose.sum() * 0
+            return ((yTilde * h).sum() + (yTilde * qYHat).sum()) / Float(sampleCount) + compilerBug
+          }
+          value += sampleValue
+          gradient += sampleGradient
+        }
+      }
+    }
+    return (
+      value: GibbsHelper(value: value, sample: currentSample),
+      pullback: { _ in gradient })
   }
 }
 
@@ -237,8 +392,8 @@ public struct MLPPredictor: GraphPredictor {
     }
     self.hiddenDropout = Dropout<Float>(probability: Double(dropout))
     self.predictionLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
-    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
-    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
+    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount)
+    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount)
   }
 
   @differentiable(wrt: self)
@@ -249,8 +404,8 @@ public struct MLPPredictor: GraphPredictor {
     // Compute features, label probabilities, and qualities for all requested nodes.
     let allFeatures = graph.features.gathering(atIndices: indexMap.uniqueNodeIndices)
     let allLatent = hiddenDropout(hiddenLayers.differentiableReduce(allFeatures) { $1($0) })
-//    let allProbabilities = logSoftmax(predictionLayer(allLatent))
-    let allProbabilities = predictionLayer(allLatent)
+    let allProbabilities = logSoftmax(predictionLayer(allLatent))
+//    let allProbabilities = predictionLayer(allLatent)
     let labelProbabilities = allProbabilities.gathering(atIndices: indexMap.nodeIndices)
 
     // Split up into the nodes and their neighbors.
@@ -258,20 +413,20 @@ public struct MLPPredictor: GraphPredictor {
     let allNodeLatentQ = nodeLatentLayer(allLatent)
     let allNeighborLatentQ = neighborLatentLayer(allLatent)
     let nodesLatentQ = allNodeLatentQ.gathering(atIndices: indexMap.nodeIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, 1, C, 1]))
+      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C]))
     let neighborsLatentQ = allNeighborLatentQ.gathering(atIndices: indexMap.neighborIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), 1, C]))
-//    let qualities = logSoftmax(nodesLatentQ + neighborsLatentQ, alongAxis: -2)
-    let qualities = nodesLatentQ + neighborsLatentQ
+      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C]))
+    let qualities = logSoftmax(nodesLatentQ + neighborsLatentQ, alongAxis: -2)
+//    let qualities = nodesLatentQ + neighborsLatentQ
 
     let nodesLatentQTranspose = allNodeLatentQ.gathering(atIndices: indexMap.neighborIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, 1]))
+      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C]))
     let neighborsLatentQTranspose = allNeighborLatentQ.gathering(atIndices: indexMap.nodeIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, 1, 1, C]))
-//    let qualitiesTranspose = logSoftmax(
-//      nodesLatentQTranspose + neighborsLatentQTranspose,
-//      alongAxis: -1)
-    let qualitiesTranspose = nodesLatentQTranspose + neighborsLatentQTranspose
+      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C]))
+    let qualitiesTranspose = logSoftmax(
+      nodesLatentQTranspose + neighborsLatentQTranspose,
+      alongAxis: -1)
+//    let qualitiesTranspose = nodesLatentQTranspose + neighborsLatentQTranspose
 
     return GraphPredictions(
       neighborIndices: indexMap.neighborIndices,
@@ -286,8 +441,8 @@ public struct MLPPredictor: GraphPredictor {
     let nodeIndices = Tensor<Int32>(nodes)
     let nodeFeatures = graph.features.gathering(atIndices: nodeIndices)
     let nodeLatent = hiddenLayers.differentiableReduce(nodeFeatures) { $1($0) }
-//    return logSoftmax(predictionLayer(nodeLatent))
-    return predictionLayer(nodeLatent)
+    return logSoftmax(predictionLayer(nodeLatent))
+//    return predictionLayer(nodeLatent)
   }
 
   public mutating func reset() {
@@ -304,8 +459,8 @@ public struct MLPPredictor: GraphPredictor {
       inputSize = hiddenUnitCount
     }
     self.predictionLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
-    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
-    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
+    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount)
+    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount)
   }
 }
 

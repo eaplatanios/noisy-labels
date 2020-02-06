@@ -11,13 +11,11 @@ func iteratedConditionalModes(
     labelLogits: labelLogits,
     qualityLogits: qualityLogits,
     graph: graph)
-  // let leveledData = graph.leveledData.suffix(from: 1)
-  let unlabeledNodes = graph.validationNodes + graph.testNodes + graph.unlabeledNodes
-  for step in 0..<maxStepCount {
+  let leveledData = graph.leveledData.suffix(from: 1)
+  for _ in 0..<maxStepCount {
     var changed = 0
-    for node in unlabeledNodes.shuffled() {
-    // for level in leveledData {
-      // for node in level.shuffled() {
+    for level in leveledData {
+      for node in level.shuffled() {
         var scores = labelLogits.labelLogits(forNode: Int(node))
         for (index, neighbor) in graph.neighbors[Int(node)].enumerated() {
           for k in 0..<graph.classCount {
@@ -30,7 +28,7 @@ func iteratedConditionalModes(
         let label = Int32(scores.indexOfMax!)
         if labels[Int(node)] != label { changed += 1 }
         labels[Int(node)] = label
-      // }
+      }
     }
     // logger.info("ICM Step \(step): \(changed) labels changed.")
     // if changed == 0 { break }

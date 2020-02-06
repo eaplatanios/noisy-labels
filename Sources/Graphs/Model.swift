@@ -192,6 +192,12 @@ where Optimizer.Model == Predictor {
   public let initializationMethod: ModelInitializationMethod
   public let stepCount: Int
   public let preTrainingStepCount: Int
+  public let gibbsLikelihoodSampleCount: Int
+  public let gibbsLikelihoodBurnInSampleCount: Int
+  public let gibbsLikelihoodThinningSampleCount: Int
+  public let gibbsNormalizationSampleCount: Int
+  public let gibbsNormalizationBurnInSampleCount: Int
+  public let gibbsNormalizationThinningSampleCount: Int
   public let evaluationStepCount: Int?
   public let evaluationConvergenceStepCount: Int?
   public let stepCallback: (Model) -> ()
@@ -219,6 +225,12 @@ where Optimizer.Model == Predictor {
     initializationMethod: ModelInitializationMethod = .labelPropagation,
     stepCount: Int = 1000,
     preTrainingStepCount: Int = 1000,
+    gibbsLikelihoodSampleCount: Int = 10,
+    gibbsLikelihoodBurnInSampleCount: Int = 0,
+    gibbsLikelihoodThinningSampleCount: Int = 10,
+    gibbsNormalizationSampleCount: Int = 10,
+    gibbsNormalizationBurnInSampleCount: Int = 10,
+    gibbsNormalizationThinningSampleCount: Int = 0,
     evaluationStepCount: Int? = 1,
     evaluationConvergenceStepCount: Int? = 10,
     evaluationResultsAccumulator: Accumulator = ExactAccumulator(),
@@ -234,6 +246,12 @@ where Optimizer.Model == Predictor {
     self.initializationMethod = initializationMethod
     self.stepCount = stepCount
     self.preTrainingStepCount = preTrainingStepCount
+    self.gibbsLikelihoodSampleCount = gibbsLikelihoodSampleCount
+    self.gibbsLikelihoodBurnInSampleCount = gibbsLikelihoodBurnInSampleCount
+    self.gibbsLikelihoodThinningSampleCount = gibbsLikelihoodThinningSampleCount
+    self.gibbsNormalizationSampleCount = gibbsNormalizationSampleCount
+    self.gibbsNormalizationBurnInSampleCount = gibbsNormalizationBurnInSampleCount
+    self.gibbsNormalizationThinningSampleCount = gibbsNormalizationThinningSampleCount
     self.evaluationStepCount = evaluationStepCount
     self.evaluationConvergenceStepCount = evaluationConvergenceStepCount
     self.evaluationResultsAccumulator = evaluationResultsAccumulator
@@ -265,6 +283,8 @@ where Optimizer.Model == Predictor {
   }
 
   public mutating func train() {
+    let nodes = graph.nodesTensor
+
     if preTrainingStepCount > 0 {
       if verbose { logger.info("Starting model pre-training.") }
       preTrainLabelsPredictor()
@@ -274,14 +294,26 @@ where Optimizer.Model == Predictor {
     // trainLabelPredictors()
     stepCallback(self)
 
-    let nodes = graph.nodesTensor
+    // Burn some samples before starting to use them for estimating the likelihood function.
+    if gibbsLikelihoodBurnInSampleCount > 0 {
+      let predictions = predictor.predictions(forNodes: nodes)
+      let inMemoryPredictions = withoutDerivative(at: predictions) {
+        InMemoryPredictions(fromPredictions: $0, using: graph)
+      }
+      for _ in 0..<gibbsLikelihoodBurnInSampleCount {
+        lastSample = sampleLabels(
+          using: inMemoryPredictions,
+          previousSample: lastSample,
+          sampleTrainLabels: false)
+      }
+    }
+
     var convergenceStepCount = 0
     bestResult = nil
     evaluationResultsAccumulator.reset()
     var accumulatedNLL = Float(0.0)
     var accumulatedSteps = 0
     for step in 0..<stepCount {
-      let y = Tensor<Int32>(lastSample)                                                             // [BatchSize]
       let (negativeLogLikelihood, gradient) = valueWithGradient(at: predictor) {
         predictor -> Tensor<Float> in
         let predictions = predictor.predictions(forNodes: nodes)
@@ -289,24 +321,37 @@ where Optimizer.Model == Predictor {
           InMemoryPredictions(fromPredictions: $0, using: graph)
         }
 
-        // Compute the first term in the negative log-likelihood.
         let h = predictions.labelLogits
         let g = predictions.qualityLogits                                                           // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
         let gMask = predictions.neighborMask                                                        // [BatchSize, MaxNeighborCount]
-        let neighborY = y.gathering(atIndices: predictions.neighborIndices)                         // [BatchSize, MaxNeighborCount, ClassCount]
-        let gY = g.batchGathering(
-          atIndices: neighborY.expandingShape(at: -1),
-          alongAxis: 3,
-          batchDimensionCount: 2).squeezingShape(at: -1)                                            // [BatchSize, MaxNeighborCount, ClassCount]
-        let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                    // [BatchSize, ClassCount]
-        var negativeLogLikelihood = -h.batchGathering(
-          atIndices: y.expandingShape(at: -1),
-          alongAxis: 1,
-          batchDimensionCount: 1).sum()
-        negativeLogLikelihood = negativeLogLikelihood - gYMasked.batchGathering(
-          atIndices: y.expandingShape(at: -1),
-          alongAxis: 1,
-          batchDimensionCount: 1).sum()
+
+        let likelihoodSamples = sampleMultipleLabels(
+          using: inMemoryPredictions,
+          previousSample: lastSample,
+          sampleTrainLabels: false,
+          sampleCount: gibbsLikelihoodSampleCount,
+          burnInSampleCount: gibbsLikelihoodBurnInSampleCount,
+          thinningSampleCount: gibbsLikelihoodThinningSampleCount)
+        var negativeLogLikelihood = Tensor<Float>(0)
+        for sample in likelihoodSamples {
+          let y = Tensor<Int32>(sample)
+          let neighborY = y.gathering(atIndices: predictions.neighborIndices)                       // [BatchSize, MaxNeighborCount, ClassCount]
+          let gY = g.batchGathering(
+            atIndices: neighborY.expandingShape(at: -1),
+            alongAxis: 3,
+            batchDimensionCount: 2).squeezingShape(at: -1)                                          // [BatchSize, MaxNeighborCount, ClassCount]
+          let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                  // [BatchSize, ClassCount]
+          negativeLogLikelihood = negativeLogLikelihood - h.batchGathering(
+            atIndices: y.expandingShape(at: -1),
+            alongAxis: 1,
+            batchDimensionCount: 1).sum()
+          negativeLogLikelihood = negativeLogLikelihood - gYMasked.batchGathering(
+            atIndices: y.expandingShape(at: -1),
+            alongAxis: 1,
+            batchDimensionCount: 1).sum()
+        }
+
+        negativeLogLikelihood = negativeLogLikelihood / Float(gibbsLikelihoodSampleCount)
 
         // Compute the normalization term in the negative log-likelihood.
         negativeLogLikelihood = negativeLogLikelihood + estimateNormalizationConstant(
@@ -314,10 +359,13 @@ where Optimizer.Model == Predictor {
           samples: sampleMultipleLabels(
             using: inMemoryPredictions,
             previousSample: lastSample,
-            sampleTrainLabels: true))
+            sampleTrainLabels: true,
+            sampleCount: gibbsNormalizationSampleCount,
+            burnInSampleCount: gibbsNormalizationBurnInSampleCount,
+            thinningSampleCount: gibbsNormalizationThinningSampleCount))
 
         // Update the last sample.
-        for _ in 0..<10 {
+        for _ in 0..<gibbsLikelihoodThinningSampleCount {
           lastSample = sampleLabels(
             using: inMemoryPredictions,
             previousSample: lastSample,

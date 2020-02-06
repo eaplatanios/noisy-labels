@@ -349,6 +349,7 @@ where Optimizer.Model == Predictor {
             atIndices: y.expandingShape(at: -1),
             alongAxis: 1,
             batchDimensionCount: 1).sum()
+          lastSample = sample
         }
 
         negativeLogLikelihood = negativeLogLikelihood / Float(gibbsLikelihoodSampleCount)

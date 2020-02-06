@@ -255,7 +255,7 @@ public struct MLPPredictor: GraphPredictor {
     let allFeatures = graph.features.gathering(atIndices: indexMap.uniqueNodeIndices)
     let allLatent = hiddenDropout(hiddenLayers.differentiableReduce(allFeatures) { $1($0) })
     let allLabelLogits = logSoftmax(predictionLayer(allLatent))
-    let nodeLabelLogits = allLabelLogits.gathering(atIndices: indexMap.nodeIndices)
+    let labelLogits = allLabelLogits.gathering(atIndices: indexMap.nodeIndices)
 
     // Split up into the nodes and their neighbors.
     let C = Int32(graph.classCount)
@@ -299,7 +299,7 @@ public struct MLPPredictor: GraphPredictor {
       nodes: nodes,
       neighborIndices: neighborIndices,
       neighborMask: neighborMask,
-      labelLogits: nodeLabelLogits,
+      labelLogits: labelLogits,
       qualityLogits: qualityLogits,
       qualityLogitsTransposed: qualityLogitsTransposed)
   }

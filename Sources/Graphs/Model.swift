@@ -70,11 +70,14 @@ import Progress
 import TensorFlow
 
 public enum ModelInitializationMethod {
+  case groundTruth
   case random
   case labelPropagation
 
   public func initialSample(forGraph graph: Graph) -> Tensor<Int32> {
     switch self {
+    case .groundTruth: return Tensor<Int32>(
+      graph.labels.sorted { $0.key < $1.key }.map { Int32($0.value) })
     case .random:
       var sample = Tensor<Int32>(
         randomUniform: [graph.nodeCount],
@@ -86,7 +89,7 @@ public enum ModelInitializationMethod {
         sample = _Raw.tensorScatterUpdate(
           sample,
           indices: Tensor<Int32>([node]).expandingShape(at: -1),
-          updates: Tensor<Int32>(Int32(graph.labels[node]!)))
+          updates: Tensor<Int32>([Int32(graph.labels[node]!)]))
       }
 
       return sample
@@ -323,13 +326,16 @@ where Optimizer.Model == Predictor {
         negativeLogLikelihood = negativeLogLikelihood + estimateNormalizationConstant(
           using: predictions,
           samples: withoutDerivative(at: predictions) {
-            sampleMultipleLabels(using: $0, previousSample: lastSample)
+            sampleMultipleLabels(using: $0, previousSample: lastSample, sampleTrainLabels: true)
           })
 
         // Update the last sample.
         lastSample = withoutDerivative(at: predictions) {
           for _ in 0..<10 {
-            lastSample = sampleLabels(using: $0, previousSample: lastSample)
+            lastSample = sampleLabels(
+              using: $0,
+              previousSample: lastSample,
+              sampleTrainLabels: false)
           }
           return lastSample
         }
@@ -386,12 +392,15 @@ where Optimizer.Model == Predictor {
 
   private func sampleLabels(
     using predictions: Predictions,
-    previousSample: Tensor<Int32>
+    previousSample: Tensor<Int32>,
+    sampleTrainLabels: Bool = true
   ) -> Tensor<Int32> {
     var currentSample = previousSample
-    let data = useIncrementalNeighborhoodExpansion ?
-      graph.leveledData.suffix(from: 1).map { Tensor<Int32>($0) } :
-      [graph.unlabeledData]
+    let data = sampleTrainLabels ?
+      [graph.allNodes] :
+      useIncrementalNeighborhoodExpansion ?
+        graph.leveledData.suffix(from: 1).map { Tensor<Int32>($0) } :
+        [graph.unlabeledData]
     for batch in data {
       let h = predictions.labelLogits.gathering(atIndices: batch)
       let g = predictions.qualityLogits.gathering(atIndices: batch)                                 // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
@@ -422,17 +431,21 @@ where Optimizer.Model == Predictor {
 
   private func sampleMultipleLabels(
     using predictions: Predictions,
-    previousSample: Tensor<Int32>,
+    previousSample: Tensor<Int32>? = nil,
+    sampleTrainLabels: Bool = true,
     sampleCount: Int = 10,
     burnInSampleCount: Int = 10,
     thinningSampleCount: Int = 0
   ) -> [Tensor<Int32>] {
-    var currentSample = previousSample
+    var currentSample = previousSample ?? initializationMethod.initialSample(forGraph: graph)
     var currentSampleCount = 0
     var samples = [Tensor<Int32>]()
     samples.reserveCapacity(sampleCount)
     while samples.count < sampleCount {
-      currentSample = sampleLabels(using: predictions, previousSample: currentSample)
+      currentSample = sampleLabels(
+        using: predictions,
+        previousSample: currentSample,
+        sampleTrainLabels: sampleTrainLabels)
       currentSampleCount += 1
       if currentSampleCount > burnInSampleCount &&
            currentSampleCount.isMultiple(of: thinningSampleCount + 1) {

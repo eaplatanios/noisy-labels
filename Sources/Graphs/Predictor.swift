@@ -172,7 +172,7 @@ public struct Predictions: Differentiable {
   @noDerivative public var qualityLogitsTransposed: Tensor<Float>
 
   @inlinable
-  @differentiable
+  @differentiable(wrt: (labelLogits, qualityLogits))
   public init(
     nodes: Tensor<Int32>,
     neighborIndices: Tensor<Int32>,
@@ -229,6 +229,157 @@ extension Predictions {
   }
 }
 
+public struct InMemoryPredictions {
+  public let labelLogits: LabelLogits
+  public let qualityLogits: [QualityLogits]
+  public let qualityLogitsTransposed: [QualityLogits]
+}
+
+extension InMemoryPredictions {
+  public init(fromPredictions predictions: Predictions, using graph: Graph) {
+    let neighborCounts = predictions.neighborMask
+      .sum(squeezingAxes: -1)
+      .unstacked(alongAxis: 0)
+      .map { Int($0.scalarized()) }
+    let h = predictions.labelLogits.scalars
+    let q = zip(predictions.qualityLogits.unstacked(alongAxis: 0), neighborCounts).map {
+      $0[0..<$1]
+    }
+    let qT = zip(predictions.qualityLogitsTransposed.unstacked(alongAxis: 0), neighborCounts).map {
+      $0[0..<$1]
+    }
+    self.labelLogits = LabelLogits(
+      logits: h,
+      nodeCount: graph.nodeCount,
+      labelCount: graph.classCount)
+    self.qualityLogits = q.map {
+      QualityLogits(
+        logits: $0.scalars,
+        nodeCount: $0.shape[0],
+        labelCount: graph.classCount)
+    }
+    self.qualityLogitsTransposed = qT.map {
+      QualityLogits(
+        logits: $0.scalars,
+        nodeCount: $0.shape[0],
+        labelCount: graph.classCount)
+    }
+  }
+}
+
+public struct LabelLogits {
+  public let logits: [Float]
+  public let nodeCount: Int
+  public let labelCount: Int
+
+  public let maxLabelLogits: [Float]
+
+  public init(logits: [Float], nodeCount: Int, labelCount: Int) {
+    self.logits = logits
+    self.nodeCount = nodeCount
+    self.labelCount = labelCount
+    self.maxLabelLogits = {
+      var maxLabelLogits = [Float]()
+      maxLabelLogits.reserveCapacity(nodeCount)
+      for node in 0..<nodeCount {
+        var maxLogit = logits[node * labelCount]
+        for label in 1..<labelCount {
+          maxLogit = max(maxLogit, logits[node * labelCount + label])
+        }
+        maxLabelLogits.append(maxLogit)
+      }
+      return maxLabelLogits
+    }()
+  }
+
+  @inlinable
+  public func labelLogit(node: Int, label: Int) -> Float {
+    logits[node * labelCount + label]
+  }
+
+  @inlinable
+  public func labelLogits(forNode node: Int) -> [Float] {
+    [Float](logits[(node * labelCount)..<((node + 1) * labelCount)])
+  }
+}
+
+public struct QualityLogits {
+  public let logits: [Float]
+  public let nodeCount: Int
+  public let labelCount: Int
+  public let maxQualityLogits: [Float]
+  public let maxQualityLogitsPerLabel: [Float]
+  public let maxQualityLogitsPerNeighborLabel: [Float]
+
+  public init(logits: [Float], nodeCount: Int, labelCount: Int) {
+    self.logits = logits
+    self.nodeCount = nodeCount
+    self.labelCount = labelCount
+
+    self.maxQualityLogits = {
+      var maxQualityLogits = [Float]()
+      maxQualityLogits.reserveCapacity(nodeCount)
+      for node in 0..<nodeCount {
+        var maxLogit = logits[node * labelCount * labelCount]
+        for l in 0..<labelCount {
+          for k in 0..<labelCount {
+            if k != 0 || l > 0 {
+              maxLogit = max(maxLogit, logits[node * labelCount * labelCount + l * labelCount + k])
+            }
+          }
+        }
+        maxQualityLogits.append(maxLogit)
+      }
+      return maxQualityLogits
+    }()
+
+    self.maxQualityLogitsPerLabel = {
+      var maxQualityLogitsPerLabel = [Float]()
+      maxQualityLogitsPerLabel.reserveCapacity(nodeCount * labelCount)
+      for node in 0..<nodeCount {
+        for l in 0..<labelCount {
+          var maxLogit = logits[node * labelCount * labelCount + l * labelCount]
+          for k in 1..<labelCount {
+            maxLogit = max(maxLogit, logits[node * labelCount * labelCount + l * labelCount + k])
+          }
+          maxQualityLogitsPerLabel.append(maxLogit)
+        }
+      }
+      return maxQualityLogitsPerLabel
+    }()
+
+    self.maxQualityLogitsPerNeighborLabel = {
+      var maxQualityLogitsPerNeighborLabel = [Float]()
+      maxQualityLogitsPerNeighborLabel.reserveCapacity(nodeCount * labelCount)
+      for node in 0..<nodeCount {
+        for k in 0..<labelCount {
+          var maxLogit = logits[node * labelCount * labelCount + k]
+          for l in 1..<labelCount {
+            maxLogit = max(maxLogit, logits[node * labelCount * labelCount + l * labelCount + k])
+          }
+          maxQualityLogitsPerNeighborLabel.append(maxLogit)
+        }
+      }
+      return maxQualityLogitsPerNeighborLabel
+    }()
+  }
+
+  @inlinable
+  public func qualityLogit(forNeighbor neighbor: Int, nodeLabel: Int, neighborLabel: Int) -> Float {
+    logits[neighbor * labelCount * labelCount + nodeLabel * labelCount + neighborLabel]
+  }
+
+  @inlinable
+  public func maxQualityLogit(forNeighbor neighbor: Int, nodeLabel: Int) -> Float {
+    maxQualityLogitsPerLabel[neighbor * labelCount + nodeLabel]
+  }
+
+  @inlinable
+  public func maxQualityLogit(forNeighbor neighbor: Int, neighborLabel: Int) -> Float {
+    maxQualityLogitsPerNeighborLabel[neighbor * labelCount + neighborLabel]
+  }
+}
+
 public protocol GraphPredictor: Differentiable, KeyPathIterable {
   var graph: Graph { get }
 
@@ -255,6 +406,7 @@ extension GraphPredictor {
 public struct MLPPredictor: GraphPredictor {
   @noDerivative public let graph: Graph
   @noDerivative public let hiddenUnitCounts: [Int]
+  @noDerivative public let confusionLatentSize: Int
   @noDerivative public let dropout: Float
 
   public var hiddenLayers: [Sequential<Dropout<Float>, Dense<Float>>]
@@ -263,9 +415,10 @@ public struct MLPPredictor: GraphPredictor {
   public var nodeLatentLayer: Dense<Float>
   public var neighborLatentLayer: Dense<Float>
 
-  public init(graph: Graph, hiddenUnitCounts: [Int], dropout: Float) {
+  public init(graph: Graph, hiddenUnitCounts: [Int], confusionLatentSize: Int, dropout: Float) {
     self.graph = graph
     self.hiddenUnitCounts = hiddenUnitCounts
+    self.confusionLatentSize = confusionLatentSize
     self.dropout = dropout
 
     var inputSize = graph.featureCount
@@ -282,8 +435,8 @@ public struct MLPPredictor: GraphPredictor {
     }
     self.hiddenDropout = Dropout<Float>(probability: Double(dropout))
     self.predictionLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
-    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount)
-    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount)
+    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
+    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
   }
 
   @differentiable(wrt: self)
@@ -300,20 +453,27 @@ public struct MLPPredictor: GraphPredictor {
 
     // Split up into the nodes and their neighbors.
     let C = Int32(graph.classCount)
+    let L = Int32(confusionLatentSize)
     let allNodeLatentQ = nodeLatentLayer(allLatent)
     let allNeighborLatentQ = neighborLatentLayer(allLatent)
     let nodesLatentQ = allNodeLatentQ.gathering(atIndices: indexMap.nodeIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C]))
+      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C, L]))
+      .tiled(multiples: Tensor<Int32>([1, Int32(indexMap.neighborIndices.shape[1]), 1, 1, 1]))
     let neighborsLatentQ = allNeighborLatentQ.gathering(atIndices: indexMap.neighborIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C]))
-    let qualityLogits = logSoftmax(nodesLatentQ + neighborsLatentQ, alongAxis: -2)
+      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C, L]))
+    let qualityLogits = logSoftmax(
+      (nodesLatentQ + neighborsLatentQ).logSumExp(squeezingAxes: -1),
+      alongAxis: -2)
 
     let nodesLatentQTranspose = allNodeLatentQ.gathering(atIndices: indexMap.neighborIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C]))
+      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C, L]))
     let neighborsLatentQTranspose = allNeighborLatentQ.gathering(atIndices: indexMap.nodeIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C]))
+      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C, L]))
+      .tiled(multiples: Tensor<Int32>([1, Int32(indexMap.neighborIndices.shape[1]), 1, 1, 1]))
     let qualityLogitsTransposed = logSoftmax(
-      nodesLatentQTranspose + neighborsLatentQTranspose,
+      withoutDerivative(at: nodesLatentQTranspose + neighborsLatentQTranspose) {
+        $0.logSumExp(squeezingAxes: -1)
+      },
       alongAxis: -1)
 
     return Predictions(
@@ -345,8 +505,8 @@ public struct MLPPredictor: GraphPredictor {
       inputSize = hiddenUnitCount
     }
     self.predictionLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
-    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount)
-    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount)
+    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
+    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
   }
 }
 

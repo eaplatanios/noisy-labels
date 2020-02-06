@@ -47,7 +47,7 @@ public struct Graph {
   public let trainNodes: [Int32]
   public let validationNodes: [Int32]
   public let testNodes: [Int32]
-  public let unlabeledNodes: [Int32]
+  public let otherNodes: [Int32]
 
   public var maxNodeDegree: Int { neighbors.map { $0.count }.max()! }
 
@@ -58,16 +58,14 @@ public struct Graph {
       nodeLabels: Tensor<Int32>(nodeLabels.map(Int32.init)))
   }
 
-  public var unlabeledData: Tensor<Int32> {
-    Tensor<Int32>(validationNodes + testNodes + unlabeledNodes)
-  }
+  public var nodes: [Int32] { [Int32](0..<Int32(nodeCount)) }
+  public var unlabeledNodes: [Int32] { validationNodes + testNodes + otherNodes }
 
-  public var allNodes: Tensor<Int32> {
-    Tensor<Int32>((0..<Int32(nodeCount)))
-  }
+  public var nodesTensor: Tensor<Int32> { Tensor<Int32>(nodes) }
+  public var unlabeledNodesTensor: Tensor<Int32> { Tensor<Int32>(unlabeledNodes) }
 
   public var unlabeledNodeIndices: Tensor<Int32> {
-    Tensor<Int32>(validationNodes + testNodes + unlabeledNodes)
+    Tensor<Int32>(validationNodes + testNodes + otherNodes)
   }
 
   public var maxBatchNeighborCount: Int { maxNeighborCount }
@@ -90,7 +88,7 @@ public struct Graph {
       }
     }
     if allNodes.count < nodeCount {
-      leveledData.append((validationNodes + testNodes + unlabeledNodes).filter {
+      leveledData.append((validationNodes + testNodes + otherNodes).filter {
         !allNodes.contains($0)
       })
     }
@@ -187,7 +185,7 @@ extension Graph {
     self.trainNodes = trainNodes
     self.validationNodes = validationNodes
     self.testNodes = testNodes
-    self.unlabeledNodes = unlabeledNodes
+    self.otherNodes = unlabeledNodes
   }
 }
 
@@ -198,7 +196,7 @@ extension Graph {
     using generator: inout T
   ) -> Graph {
     assert(0 < trainProportion + validationProportion && trainProportion + validationProportion < 1)
-    let nodes = trainNodes + validationNodes + testNodes + unlabeledNodes
+    let nodes = trainNodes + validationNodes + testNodes + otherNodes
     let shuffledNodes = nodes.shuffled(using: &generator)
     let trainCount = Int(trainProportion * Float(shuffledNodes.count))
     let validationCount = Int(validationProportion * Float(shuffledNodes.count))
@@ -215,7 +213,7 @@ extension Graph {
       trainNodes: trainNodes,
       validationNodes: validationNodes,
       testNodes: testNodes,
-      unlabeledNodes: [])
+      otherNodes: [])
   }
 
   fileprivate struct Edge: Hashable {
@@ -289,7 +287,7 @@ extension Graph {
       trainNodes: trainNodes,
       validationNodes: validationNodes,
       testNodes: testNodes,
-      unlabeledNodes: unlabeledNodes)
+      otherNodes: otherNodes)
   }
 }
 

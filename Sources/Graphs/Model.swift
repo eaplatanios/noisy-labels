@@ -74,24 +74,12 @@ public enum ModelInitializationMethod {
   case random
   case labelPropagation
 
-  public func initialSample(forGraph graph: Graph) -> Tensor<Int32> {
+  public func initialSample(forGraph graph: Graph) -> [Int32] {
     switch self {
-    case .groundTruth: return Tensor<Int32>(
-      graph.labels.sorted { $0.key < $1.key }.map { Int32($0.value) })
+    case .groundTruth: return graph.labels.sorted { $0.key < $1.key }.map { Int32($0.value) }
     case .random:
-      var sample = Tensor<Int32>(
-        randomUniform: [graph.nodeCount],
-        lowerBound: Tensor<Int32>(0),
-        upperBound: Tensor<Int32>(Int32(graph.classCount)))
-
-      // Start with the labeled nodes.
-      for node in graph.trainNodes {
-        sample = _Raw.tensorScatterUpdate(
-          sample,
-          indices: Tensor<Int32>([node]).expandingShape(at: -1),
-          updates: Tensor<Int32>([Int32(graph.labels[node]!)]))
-      }
-
+      var sample = (0..<graph.nodeCount).map { _ in Int32.random(in: 0..<Int32(graph.classCount)) }
+      for node in graph.trainNodes { sample[Int(node)] = Int32(graph.labels[node]!) }
       return sample
     case .labelPropagation:
       var labelScores = Tensor<Float>(zeros: [graph.nodeCount, graph.classCount])
@@ -150,7 +138,7 @@ public enum ModelInitializationMethod {
             shape: [1, graph.classCount]))
       }
 
-      return labelScores.argmax(squeezingAxis: -1)
+      return labelScores.argmax(squeezingAxis: -1).scalars
     }
   }
 }
@@ -158,7 +146,7 @@ public enum ModelInitializationMethod {
 @differentiable(wrt: predictions)
 public func estimateNormalizationConstant(
   using predictions: Predictions,
-  samples: [Tensor<Int32>]
+  samples: [[Int32]]
 ) -> Tensor<Float> {
   _vjpEstimateNormalizationConstant(using: predictions, samples: samples).value
 }
@@ -167,23 +155,26 @@ public func estimateNormalizationConstant(
 @usableFromInline
 internal func _vjpEstimateNormalizationConstant(
   using predictions: Predictions,
-  samples: [Tensor<Int32>]
+  samples: [[Int32]]
 ) -> (value: Tensor<Float>, pullback: (Tensor<Float>) -> Predictions.TangentVector) {
   var value = Tensor<Float>(0)
   var gradient = Predictions.TangentVector.zero
   for sample in samples {
+    let sampleTensor = Tensor<Int32>(sample)
     let (sampleValue, sampleGradient) = valueWithGradient(at: predictions) {
       predictions -> Tensor<Float> in
       let h = predictions.labelLogits                                                               // [BatchSize, ClassCount]
       let g = predictions.qualityLogits                                                             // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
       let gMask = predictions.neighborMask                                                          // [BatchSize, MaxNeighborCount]
       let gY = g.batchGathering(
-        atIndices: sample.gathering(atIndices: predictions.neighborIndices).expandingShape(at: -1),
+        atIndices: sampleTensor.gathering(
+          atIndices: predictions.neighborIndices
+        ).expandingShape(at: -1),
         alongAxis: 3,
         batchDimensionCount: 2).squeezingShape(at: -1)                                              // [BatchSize, MaxNeighborCount, ClassCount]
       let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                      // [BatchSize, ClassCount]
       return (h + gYMasked).batchGathering(
-        atIndices: sample.expandingShape(at: -1),
+        atIndices: sampleTensor.expandingShape(at: -1),
         alongAxis: 1,
         batchDimensionCount: 1).sum() / Float(samples.count)
     }
@@ -211,9 +202,9 @@ where Optimizer.Model == Predictor {
   public var optimizer: Optimizer
   public var evaluationResultsAccumulator: Accumulator
 
-  /// The last labels sample is a tensor with shape `[NodeCount]` that contains the label sampled
-  /// in the last step, for each node in the graph.
-  private var lastSample: Tensor<Int32>
+  /// The last labels sample is an array that contains the label sampled in the last step,
+  /// for each node in the graph.
+  private var lastSample: [Int32]
   private var bestPredictor: Predictor
   private var bestResult: Result?
 
@@ -260,29 +251,13 @@ where Optimizer.Model == Predictor {
 
     // Estimate MAP using iterated conditional modes.
     // The following is inefficient.
-    let predictions = predictor.predictions(forNodes: graph.allNodes)
-    let neighborCounts = predictions.neighborMask
-      .sum(squeezingAxes: -1)
-      .unstacked(alongAxis: 0)
-      .map { Int($0.scalarized()) }
-    let h = predictions.labelLogits.scalars
-    let q = zip(predictions.qualityLogits.unstacked(alongAxis: 0), neighborCounts).map {
-      $0[0..<$1]
-    }
-    let labelLogits = LabelLogits(
-      logits: h,
-      nodeCount: graph.nodeCount,
-      labelCount: graph.classCount)
-    let qualityLogits = q.map {
-      QualityLogits(
-        logits: $0.scalars,
-        nodeCount: $0.shape[0],
-        labelCount: predictor.graph.classCount)
-    }
+    let predictions = InMemoryPredictions(
+      fromPredictions: predictor.predictions(forNodes: graph.nodesTensor),
+      using: graph)
     return Tensor<Float>(
       oneHotAtIndices: Tensor<Int32>(iteratedConditionalModes(
-        labelLogits: labelLogits,
-        qualityLogits: qualityLogits,
+        labelLogits: predictions.labelLogits,
+        qualityLogits: predictions.qualityLogits,
         graph: graph,
         maxStepCount: 100)
       ).gathering(atIndices: nodes),
@@ -299,23 +274,26 @@ where Optimizer.Model == Predictor {
     // trainLabelPredictors()
     stepCallback(self)
 
-    let nodes = graph.allNodes
+    let nodes = graph.nodesTensor
     var convergenceStepCount = 0
     bestResult = nil
     evaluationResultsAccumulator.reset()
     var accumulatedNLL = Float(0.0)
     var accumulatedSteps = 0
     for step in 0..<stepCount {
-      let y = lastSample                                                                            // [BatchSize]
+      let y = Tensor<Int32>(lastSample)                                                             // [BatchSize]
       let (negativeLogLikelihood, gradient) = valueWithGradient(at: predictor) {
         predictor -> Tensor<Float> in
         let predictions = predictor.predictions(forNodes: nodes)
+        let inMemoryPredictions = withoutDerivative(at: predictions) {
+          InMemoryPredictions(fromPredictions: $0, using: graph)
+        }
 
         // Compute the first term in the negative log-likelihood.
         let h = predictions.labelLogits
         let g = predictions.qualityLogits                                                           // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
         let gMask = predictions.neighborMask                                                        // [BatchSize, MaxNeighborCount]
-        let neighborY = lastSample.gathering(atIndices: predictions.neighborIndices)                // [BatchSize, MaxNeighborCount, ClassCount]
+        let neighborY = y.gathering(atIndices: predictions.neighborIndices)                         // [BatchSize, MaxNeighborCount, ClassCount]
         let gY = g.batchGathering(
           atIndices: neighborY.expandingShape(at: -1),
           alongAxis: 3,
@@ -333,19 +311,17 @@ where Optimizer.Model == Predictor {
         // Compute the normalization term in the negative log-likelihood.
         negativeLogLikelihood = negativeLogLikelihood + estimateNormalizationConstant(
           using: predictions,
-          samples: withoutDerivative(at: predictions) {
-            sampleMultipleLabels(using: $0, previousSample: lastSample, sampleTrainLabels: true)
-          })
+          samples: sampleMultipleLabels(
+            using: inMemoryPredictions,
+            previousSample: lastSample,
+            sampleTrainLabels: true))
 
         // Update the last sample.
-        lastSample = withoutDerivative(at: predictions) {
-          for _ in 0..<10 {
-            lastSample = sampleLabels(
-              using: $0,
-              previousSample: lastSample,
-              sampleTrainLabels: false)
-          }
-          return lastSample
+        for _ in 0..<10 {
+          lastSample = sampleLabels(
+            using: inMemoryPredictions,
+            previousSample: lastSample,
+            sampleTrainLabels: false)
         }
 
         return negativeLogLikelihood
@@ -453,55 +429,61 @@ where Optimizer.Model == Predictor {
   }
 
   private func sampleLabels(
-    using predictions: Predictions,
-    previousSample: Tensor<Int32>,
+    using predictions: InMemoryPredictions,
+    previousSample: [Int32],
     sampleTrainLabels: Bool = true
-  ) -> Tensor<Int32> {
+  ) -> [Int32] {
     var currentSample = previousSample
-    let data = sampleTrainLabels ?
-      [graph.allNodes] :
+    let nodeLevels = sampleTrainLabels ?
+      [graph.nodes] :
       useIncrementalNeighborhoodExpansion ?
-        graph.leveledData.suffix(from: 1).map { Tensor<Int32>($0) } :
-        [graph.unlabeledData]
-    for batch in data {
-      let h = predictions.labelLogits.gathering(atIndices: batch)
-      let g = predictions.qualityLogits.gathering(atIndices: batch)                                 // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-      let gT = predictions.qualityLogitsTransposed.gathering(atIndices: batch)                      // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-      let gMask = predictions.neighborMask.gathering(atIndices: batch)                              // [BatchSize, MaxNeighborCount]
-      let neighborY = currentSample.gathering(
-        atIndices: predictions.neighborIndices.gathering(atIndices: batch)
-      ).expandingShape(at: -1)                                                                      // [BatchSize, MaxNeighborCount, 1]
-      let gY = g.batchGathering(
-        atIndices: neighborY,
-        alongAxis: 3,
-        batchDimensionCount: 2).squeezingShape(at: -1)                                              // [BatchSize, MaxNeighborCount, ClassCount]
-      let gTY = gT.batchGathering(
-        atIndices: neighborY,
-        alongAxis: 2,
-        batchDimensionCount: 2).squeezingShape(at: -2)                                              // [BatchSize, MaxNeighborCount, ClassCount]
-      let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                      // [BatchSize, ClassCount]
-      let gTYMasked = (gTY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                    // [BatchSize, ClassCount]
-      currentSample = _Raw.tensorScatterUpdate(
-        currentSample,
-        indices: batch.expandingShape(at: -1),
-        updates: Tensor<Int32>(
-          randomCategorialLogits: h + gYMasked + gTYMasked,
-          sampleCount: 1).squeezingShape(at: -1))
+        graph.leveledData.suffix(from: 1) :
+        [graph.unlabeledNodes]
+    for level in nodeLevels {
+      for node in level.shuffled() {
+        let g = predictions.qualityLogits[Int(node)]
+        let gT = predictions.qualityLogitsTransposed[Int(node)]
+        var labelLogits = predictions.labelLogits.labelLogits(forNode: Int(node))
+        for (neighborIndex, neighbor) in graph.neighbors[Int(node)].enumerated() {
+          for k in 0..<graph.classCount {
+            labelLogits[k] += g.qualityLogit(
+              forNeighbor: Int(neighborIndex),
+              nodeLabel: k,
+              neighborLabel: Int(currentSample[Int(neighbor)]))
+            labelLogits[k] += gT.qualityLogit(
+              forNeighbor: Int(neighborIndex),
+              nodeLabel: Int(currentSample[Int(neighbor)]),
+              neighborLabel: k)
+          }
+        }
+        var maxIndex = 0
+        var maxValue = -Float.infinity
+        for k in 0..<graph.classCount {
+          // TODO: !!! Seed / random number generator.
+          let random = Float.random(in: 0..<1)
+          let value = labelLogits[k] - log(-log(random))
+          if value > maxValue {
+            maxIndex = k
+            maxValue = value
+          }
+        }
+        currentSample[Int(node)] = Int32(maxIndex)
+      }
     }
     return currentSample
   }
 
   private func sampleMultipleLabels(
-    using predictions: Predictions,
-    previousSample: Tensor<Int32>? = nil,
+    using predictions: InMemoryPredictions,
+    previousSample: [Int32]? = nil,
     sampleTrainLabels: Bool = true,
     sampleCount: Int = 10,
     burnInSampleCount: Int = 10,
     thinningSampleCount: Int = 0
-  ) -> [Tensor<Int32>] {
+  ) -> [[Int32]] {
     var currentSample = previousSample ?? initializationMethod.initialSample(forGraph: graph)
     var currentSampleCount = 0
-    var samples = [Tensor<Int32>]()
+    var samples = [[Int32]]()
     samples.reserveCapacity(sampleCount)
     while samples.count < sampleCount {
       currentSample = sampleLabels(

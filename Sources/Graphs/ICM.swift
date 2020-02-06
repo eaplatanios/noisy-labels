@@ -19,10 +19,10 @@ func iteratedConditionalModes(
         var scores = labelLogits.labelLogits(forNode: Int(node))
         for (index, neighbor) in graph.neighbors[Int(node)].enumerated() {
           for k in 0..<graph.classCount {
-            scores[k] += qualityLogits[Int(node)].qualityLogits(
-              node: index,
-              l: k,
-              k: Int(labels[Int(neighbor)]))
+            scores[k] += qualityLogits[Int(node)].qualityLogit(
+              forNeighbor: index,
+              nodeLabel: k,
+              neighborLabel: Int(labels[Int(neighbor)]))
           }
         }
         let label = Int32(scores.indexOfMax!)
@@ -57,11 +57,14 @@ func initialization(
         let label = labels[Int(neighbor)]
         if label != -1 {
           for k in 0..<graph.classCount {
-            scores[k] += qualityLogits[Int(node)].qualityLogits(node: index, l: k, k: Int(label))
+            scores[k] += qualityLogits[Int(node)].qualityLogit(
+              forNeighbor: index,
+              nodeLabel: k,
+              neighborLabel: Int(label))
           }
         } else {
           for k in 0..<graph.classCount {
-            scores[k] += qualityLogits[Int(node)].maxQualityLogit(forNode: index, alongK: k)
+            scores[k] += qualityLogits[Int(node)].maxQualityLogit(forNeighbor: index, nodeLabel: k)
           }
         }
       }

@@ -188,7 +188,7 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       beta1: 0.9,
       beta2: 0.999,
       epsilon: 1e-8,
-      decay: 0)
+      decay: 0.01)
 
     var model = Model(
       predictor: predictor,
@@ -198,7 +198,7 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       useIncrementalNeighborhoodExpansion: false,
       initializationMethod: .labelPropagation,
       stepCount: 10000,
-      preTrainingStepCount: 100,
+      preTrainingStepCount: 0,
       evaluationStepCount: nil,
       evaluationConvergenceStepCount: parsedArguments.get(evaluationConvergenceStepCount),
       evaluationResultsAccumulator: ExactAccumulator(),
@@ -267,6 +267,7 @@ switch parsedArguments.get(model)! {
 case .mlp: runExperiments(predictor: { MLPPredictor(
   graph: $0,
   hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+  confusionLatentSize: parsedArguments.get(qHiddenUnitCounts)![0],
   dropout: parsedArguments.get(dropout) ?? 0.5) })
 case .decoupledMLP: runExperiments(predictor: { DecoupledMLPPredictor(
   graph: $0,

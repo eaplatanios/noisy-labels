@@ -58,26 +58,26 @@ extension Array where Element == Result {
 
 public func evaluate<P: GraphPredictor, O: Optimizer>(
   model: Model<P, O>,
-  using graph: Graph,
   usePrior: Bool = false
 ) -> Result where O.Model == P {
   func evaluate(_ indices: [Int32], _ labels: [Int]) -> Float {
-    let probabilities = model.labelProbabilities(for: indices, usePrior: usePrior)
+    let probabilities = model.labelLogits(forNodes: indices, usePrior: usePrior)
     let predictions = probabilities.argmax(squeezingAxis: -1).scalars.map(Int.init)
     return zip(predictions, labels).map {
       $0 == $1 ? 1.0 : 0.0
     }.reduce(0, +) / Float(predictions.count)
   }
+
   return Result(
     trainAccuracy: evaluate(
-      graph.trainNodes,
-      graph.trainNodes.map { graph.labels[$0]! }),
+      model.graph.trainNodes,
+      model.graph.trainNodes.map { model.graph.labels[$0]! }),
     validationAccuracy: evaluate(
-      graph.validationNodes,
-      graph.validationNodes.map { graph.labels[$0]! }),
+      model.graph.validationNodes,
+      model.graph.validationNodes.map { model.graph.labels[$0]! }),
     testAccuracy: evaluate(
-      graph.testNodes,
-      graph.testNodes.map { graph.labels[$0]! }))
+      model.graph.testNodes,
+      model.graph.testNodes.map { model.graph.labels[$0]! }))
 }
 
 public func evaluate(predictions: [Int32], using graph: Graph) -> Result {

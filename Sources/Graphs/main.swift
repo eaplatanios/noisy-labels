@@ -16,7 +16,7 @@ import Foundation
 import SPMUtility
 import TensorFlow
 
-// Example command: swift run -c release Graphs -r 5 -emc 5 --dataset citeseer --model decoupled-mlp --l-hidden 128 --q-hidden 128 -ls 0 -tbep 0.2 -sp 0.05 0.1
+// Example command: swift run -c release Graphs -r 5 -ecsc 5 --dataset citeseer --model decoupled-mlp --l-hidden 128 --q-hidden 128 -ls 0 -tbep 0.2 -sp 0.05 0.1
 
 // The first argument is always the executable, and so we drop it.
 let arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
@@ -69,11 +69,11 @@ let targetBadEdgeProportion: OptionArgument<Float> = parser.add(
   shortName: "-tbep",
   kind: Float.self,
   usage: "Target bad edge proportion.")
-let emConvergence: OptionArgument<Int> = parser.add(
-  option: "--em-convergence",
-  shortName: "-emc",
+let evaluationConvergenceStepCount: OptionArgument<Int> = parser.add(
+  option: "--evaluation-convergence-step-count",
+  shortName: "-ecsc",
   kind: Int.self,
-  usage: "Maximum number of EM steps without improvement on the validation set performance.")
+  usage: "Maximum number of steps without improvement on the validation set performance.")
 let runCount: OptionArgument<Int> = parser.add(
   option: "--run-count",
   shortName: "-r",
@@ -93,8 +93,7 @@ let dataDirectory = workingDirectory
   .appendingPathComponent("data")
   .appendingPathComponent(parsedArguments.get(dataset)!)
 let originalGraph = try Graph(loadFromDirectory: dataDirectory)
-let emStepCount = 100
-let emConvergenceStepCount = parsedArguments.get(emConvergence) ?? emStepCount
+//let originalGraph = makeSimpleGraph(10, 20)
 
 @discardableResult
 func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
@@ -127,41 +126,44 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
         using: &generator)
     }
 
+    var stepCount = 0
     var firstEvaluationResult: Result? = nil
     var firstPriorEvaluationResult: Result? = nil
     var bestEvaluationResult: Result? = nil
     var bestPriorEvaluationResult: Result? = nil
-    var emStepCallbackInvocationsWithoutImprovement = 0
-    var emStepCallbackInvocationsWithoutPriorImprovement = 0
+    var stepCallbackInvocationsWithoutImprovement = 0
+    var stepCallbackInvocationsWithoutPriorImprovement = 0
 
-    func emStepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) -> Bool {
-      let predictionsMAP = model.labelsApproximateMAP(maxStepCount: 10000)
+    func stepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) -> () {
+      stepCount += 1
+      if !(stepCount - 1).isMultiple(of: 10) { return }
+//      let predictionsMAP = model.labelsApproximateMAP(maxStepCount: 10000)
 //      let predictionsMAP = model.labelsGibbsMarginalMAP()
-      let evaluationResult = evaluate(predictions: predictionsMAP, using: graph)
-//      let evaluationResult = evaluate(model: model, using: graph, usePrior: false)
+//      let evaluationResult = evaluate(predictions: predictionsMAP, using: graph)
+      let evaluationResult = evaluate(model: model, usePrior: false)
       if firstEvaluationResult == nil { firstEvaluationResult = evaluationResult }
       if let bestResult = bestEvaluationResult {
         if evaluationResult.validationAccuracy > bestResult.validationAccuracy ||
-          (evaluationResult.validationAccuracy == bestResult.validationAccuracy &&
-          evaluationResult.testAccuracy > bestResult.testAccuracy) {
-          emStepCallbackInvocationsWithoutImprovement = 0
+             (evaluationResult.validationAccuracy == bestResult.validationAccuracy &&
+               evaluationResult.testAccuracy > bestResult.testAccuracy) {
+          stepCallbackInvocationsWithoutImprovement = 0
           bestEvaluationResult = evaluationResult
         } else {
-          emStepCallbackInvocationsWithoutImprovement += 1
+          stepCallbackInvocationsWithoutImprovement += 1
         }
       } else {
         bestEvaluationResult = evaluationResult
       }
-      let priorEvaluationResult = evaluate(model: model, using: graph, usePrior: true)
+      let priorEvaluationResult = evaluate(model: model, usePrior: true)
       if firstPriorEvaluationResult == nil { firstPriorEvaluationResult = priorEvaluationResult }
       if let bestResult = bestPriorEvaluationResult {
         if priorEvaluationResult.validationAccuracy > bestResult.validationAccuracy ||
-          (priorEvaluationResult.validationAccuracy == bestResult.validationAccuracy &&
-          priorEvaluationResult.testAccuracy > bestResult.testAccuracy) {
-          emStepCallbackInvocationsWithoutPriorImprovement = 0
+             (priorEvaluationResult.validationAccuracy == bestResult.validationAccuracy &&
+               priorEvaluationResult.testAccuracy > bestResult.testAccuracy) {
+          stepCallbackInvocationsWithoutPriorImprovement = 0
           bestPriorEvaluationResult = priorEvaluationResult
         } else {
-          emStepCallbackInvocationsWithoutPriorImprovement += 1
+          stepCallbackInvocationsWithoutPriorImprovement += 1
         }
       } else {
         bestPriorEvaluationResult = priorEvaluationResult
@@ -171,48 +173,39 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       logger.info("Current Prior Evaluation Result: \(priorEvaluationResult)")
       logger.info("Best Evaluation Result: \(String(describing: bestEvaluationResult))")
       logger.info("Best Prior Evaluation Result: \(String(describing: bestPriorEvaluationResult))")
-      if emStepCallbackInvocationsWithoutImprovement > 0 {
-        logger.info("Evaluation result has not improved in \(emStepCallbackInvocationsWithoutImprovement) EM-step callback invocations.")
+      if stepCallbackInvocationsWithoutImprovement > 0 {
+        logger.info("Evaluation result has not improved in \(stepCallbackInvocationsWithoutImprovement) step callback invocations.")
       }
-      if emStepCallbackInvocationsWithoutPriorImprovement > 0 {
-        logger.info("Prior evaluation result has not improved in \(emStepCallbackInvocationsWithoutPriorImprovement) EM-step callback invocations.")
+      if stepCallbackInvocationsWithoutPriorImprovement > 0 {
+        logger.info("Prior evaluation result has not improved in \(stepCallbackInvocationsWithoutPriorImprovement) step callback invocations.")
       }
-      return emStepCallbackInvocationsWithoutImprovement >= emConvergenceStepCount &&
-        emStepCallbackInvocationsWithoutPriorImprovement >= emConvergenceStepCount
     }
 
     let predictor = predictor(graph)
-
-    let optimizerFn = { () in
-      Adam<Predictor>(
-        for: predictor,
-        learningRate: 1e-2,
-        beta1: 0.9,
-        beta2: 0.99,
-        epsilon: 1e-8,
-        decay: 0)
-    }
+    let optimizer = Adam<Predictor>(
+      for: predictor,
+      learningRate: 1e-3,
+      beta1: 0.9,
+      beta2: 0.999,
+      epsilon: 1e-8,
+      decay: 0.1)
 
     var model = Model(
       predictor: predictor,
-      optimizerFn: optimizerFn,
-      entropyWeight: 0,
-      qualitiesRegularizationWeight: 0,
+      optimizer: optimizer,
       randomSeed: randomSeed,
       batchSize: parsedArguments.get(batchSize) ?? 128,
-      useWarmStarting: false,
       useIncrementalNeighborhoodExpansion: false,
-      labelSmoothing: parsedArguments.get(labelSmoothing) ?? 0.5,
-      resultAccumulator: ExactAccumulator(),
-      // resultAccumulator: MovingAverageAccumulator(weight: 0.1),
-      mStepCount: 100,
-      emStepCount: 100,
+      initializationMethod: .labelPropagation,
+      stepCount: 10000,
       evaluationStepCount: nil,
-      mStepLogCount: 10,
-      mConvergenceEvaluationCount: 5,
-      emStepCallback: { emStepCallback(model: $0) },
+      evaluationConvergenceStepCount: parsedArguments.get(evaluationConvergenceStepCount),
+      evaluationResultsAccumulator: ExactAccumulator(),
+      // evaluationResultsAccumulator: MovingAverageAccumulator(weight: 0.1),
+      stepCallback: { stepCallback(model: $0) },
+      logStepCount: 10,
       verbose: true)
-    model.train(using: graph)
+    model.train()
     return (
       firstPosteriorResult: firstEvaluationResult!,
       firstPriorResult: firstPriorEvaluationResult!,
@@ -274,20 +267,21 @@ case .mlp: runExperiments(predictor: { MLPPredictor(
   graph: $0,
   hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
   dropout: parsedArguments.get(dropout) ?? 0.5) })
-case .decoupledMLP: runExperiments(predictor: { DecoupledMLPPredictorV2(
-  graph: $0,
-  lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-  qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
-  dropout: parsedArguments.get(dropout) ?? 0.5) })
-case .gcn: runExperiments(predictor: { GCNPredictor(
-  graph: $0,
-  hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-  dropout: parsedArguments.get(dropout) ?? 0.5) })
-case .decoupledGCN: runExperiments(predictor: { DecoupledGCNPredictorV2(
-  graph: $0,
-  lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-  qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
-  dropout: parsedArguments.get(dropout) ?? 0.5) })
+default: fatalError("The specified model is not supported yet.")
+//case .decoupledMLP: runExperiments(predictor: { DecoupledMLPPredictorV2(
+//  graph: $0,
+//  lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+//  qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
+//  dropout: parsedArguments.get(dropout) ?? 0.5) })
+//case .gcn: runExperiments(predictor: { GCNPredictor(
+//  graph: $0,
+//  hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+//  dropout: parsedArguments.get(dropout) ?? 0.5) })
+//case .decoupledGCN: runExperiments(predictor: { DecoupledGCNPredictorV2(
+//  graph: $0,
+//  lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+//  qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
+//  dropout: parsedArguments.get(dropout) ?? 0.5) })
 }
 
 func configuration(graph: Graph) -> String {

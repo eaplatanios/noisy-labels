@@ -49,6 +49,8 @@ public struct Graph {
   public let testNodes: [Int32]
   public let unlabeledNodes: [Int32]
 
+  public var maxNodeDegree: Int { neighbors.map { $0.count }.max()! }
+
   public var labeledData: LabeledData {
     let nodeLabels = trainNodes.map { self.labels[$0]! }
     return LabeledData(
@@ -60,8 +62,8 @@ public struct Graph {
     Tensor<Int32>(validationNodes + testNodes + unlabeledNodes)
   }
 
-  public var allUnlabeledData: Tensor<Int32> {
-    Tensor<Int32>(trainNodes + validationNodes + testNodes + unlabeledNodes)
+  public var allNodes: Tensor<Int32> {
+    Tensor<Int32>((0..<Int32(nodeCount)))
   }
 
   public var unlabeledNodeIndices: Tensor<Int32> {

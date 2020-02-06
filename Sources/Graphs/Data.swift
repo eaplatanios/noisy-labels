@@ -16,24 +16,24 @@ import Foundation
 import TensorFlow
 
 public struct LabeledData: TensorGroup {
-  public let nodeIndices: Tensor<Int32>  // [BatchSize]
-  public let nodeLabels: Tensor<Int32>   // [BatchSize]
+  public let nodes: Tensor<Int32>  // [BatchSize]
+  public let labels: Tensor<Int32>   // [BatchSize]
 
   public init(nodeIndices: Tensor<Int32>, nodeLabels: Tensor<Int32>) {
-    self.nodeIndices = nodeIndices
-    self.nodeLabels = nodeLabels
+    self.nodes = nodeIndices
+    self.labels = nodeLabels
   }
 
   public init<C: RandomAccessCollection>(_handles: C) where C.Element: _AnyTensorHandle {
     precondition(_handles.count == 2)
     let niIndex = _handles.startIndex
     let nlIndex = _handles.index(niIndex, offsetBy: 1)
-    self.nodeIndices = Tensor<Int32>(handle: TensorHandle<Int32>(handle: _handles[niIndex]))
-    self.nodeLabels = Tensor<Int32>(handle: TensorHandle<Int32>(handle: _handles[nlIndex]))
+    self.nodes = Tensor<Int32>(handle: TensorHandle<Int32>(handle: _handles[niIndex]))
+    self.labels = Tensor<Int32>(handle: TensorHandle<Int32>(handle: _handles[nlIndex]))
   }
 
   public var _tensorHandles: [_AnyTensorHandle] {
-    nodeIndices._tensorHandles + nodeLabels._tensorHandles
+    nodes._tensorHandles + labels._tensorHandles
   }
 }
 

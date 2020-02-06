@@ -200,6 +200,7 @@ where Optimizer.Model == Predictor {
   public let useIncrementalNeighborhoodExpansion: Bool
   public let initializationMethod: ModelInitializationMethod
   public let stepCount: Int
+  public let preTrainingStepCount: Int
   public let evaluationStepCount: Int?
   public let evaluationConvergenceStepCount: Int?
   public let stepCallback: (Model) -> ()
@@ -226,6 +227,7 @@ where Optimizer.Model == Predictor {
     useIncrementalNeighborhoodExpansion: Bool = false,
     initializationMethod: ModelInitializationMethod = .labelPropagation,
     stepCount: Int = 1000,
+    preTrainingStepCount: Int = 1000,
     evaluationStepCount: Int? = 1,
     evaluationConvergenceStepCount: Int? = 10,
     evaluationResultsAccumulator: Accumulator = ExactAccumulator(),
@@ -240,6 +242,7 @@ where Optimizer.Model == Predictor {
     self.useIncrementalNeighborhoodExpansion = useIncrementalNeighborhoodExpansion
     self.initializationMethod = initializationMethod
     self.stepCount = stepCount
+    self.preTrainingStepCount = preTrainingStepCount
     self.evaluationStepCount = evaluationStepCount
     self.evaluationConvergenceStepCount = evaluationConvergenceStepCount
     self.evaluationResultsAccumulator = evaluationResultsAccumulator
@@ -287,6 +290,11 @@ where Optimizer.Model == Predictor {
   }
 
   public mutating func train() {
+    if preTrainingStepCount > 0 {
+      if verbose { logger.info("Starting model pre-training.") }
+      preTrainLabelsPredictor()
+    }
+
     if verbose { logger.info("Starting model training.") }
     // trainLabelPredictors()
     stepCallback(self)
@@ -340,9 +348,6 @@ where Optimizer.Model == Predictor {
           return lastSample
         }
 
-        // This is due to a compiler bug related to automatic differentiation.
-        negativeLogLikelihood = negativeLogLikelihood + predictions.qualityLogitsTransposed.sum() * 0
-
         return negativeLogLikelihood
       }
 
@@ -387,6 +392,63 @@ where Optimizer.Model == Predictor {
       }
 
       stepCallback(self)
+    }
+  }
+
+  private mutating func preTrainLabelsPredictor() {
+    var accumulatedLoss = Float(0.0)
+    var accumulatedSteps = 0
+    var dataIterator = Dataset(elements: graph.labeledData).repeated()
+      .shuffled(sampleCount: 10000, randomSeed: randomSeed)
+      .batched(batchSize)
+      .prefetched(count: 10)
+      .makeIterator()
+    for step in 0..<preTrainingStepCount {
+      let batch = dataIterator.next()!
+      let labels = Tensor<Float>(oneHotAtIndices: batch.labels, depth: predictor.classCount)
+      withLearningPhase(.training) {
+        let (loss, gradient) = valueWithGradient(at: predictor) { predictor -> Tensor<Float> in
+          let predictions = predictor.predictions(forNodes: batch.nodes)
+          let crossEntropy = softmaxCrossEntropy(
+            logits: predictions.labelLogits,
+            probabilities: labels)
+          return crossEntropy +
+          predictions.qualityLogits.sum() * 0.0 +
+          predictions.qualityLogitsTransposed.sum() * 0.0
+        }
+        optimizer.update(&predictor, along: gradient)
+        accumulatedLoss += loss.scalarized()
+        accumulatedSteps += 1
+        if verbose {
+          if let logStepCount = self.logStepCount, step % logStepCount == 0 ||
+            step == stepCount - 1 {
+            let nll = accumulatedLoss / Float(accumulatedSteps)
+            let message = "Supervised Step \(String(format: "%5d", step)) | " +
+              "Loss: \(String(format: "%.8f", nll))"
+            logger.info("\(message)")
+            accumulatedLoss = 0.0
+            accumulatedSteps = 0
+          }
+        }
+      }
+
+      // Keep track of the best predictor so far.
+      if let evaluationStepCount = self.evaluationStepCount, step % evaluationStepCount == 0 {
+        let result = evaluationResultsAccumulator.update(
+          with: evaluate(model: self, usePrior: true))
+        if let bestResult = self.bestResult {
+          if result.validationAccuracy > bestResult.validationAccuracy {
+            self.bestPredictor = predictor
+            self.bestResult = result
+          }
+        } else {
+          self.bestPredictor = predictor
+          self.bestResult = result
+        }
+      }
+    }
+    if evaluationStepCount != nil {
+      predictor = bestPredictor
     }
   }
 
@@ -455,73 +517,6 @@ where Optimizer.Model == Predictor {
     return samples
   }
 
-//  private mutating func performMStep(data: Dataset<LabeledData>, emStep: Int) {
-//    bestResult = nil
-//    resultAccumulator.reset()
-//    if !useWarmStarting {
-//      predictor.reset()
-//      optimizer = optimizerFn()
-//    }
-//    var accumulatedLoss = Float(0.0)
-//    var accumulatedSteps = 0
-//    var dataIterator = data.repeated()
-//      .shuffled(sampleCount: 10000, randomSeed: randomSeed &+ Int64(emStep))
-//      .batched(batchSize)
-//      .prefetched(count: 10)
-//      .makeIterator()
-//    for mStep in 0..<mStepCount {
-//      let batch = dataIterator.next()!
-//      let labels = (1 - labelSmoothing) * Tensor<Float>(
-//        oneHotAtIndices: batch.nodeLabels,
-//        depth: predictor.classCount
-//      ) + labelSmoothing / Float(predictor.classCount)
-//      withLearningPhase(.training) {
-//        let (loss, gradient) = valueWithGradient(at: predictor) { predictor -> Tensor<Float> in
-//          let predictions = predictor.labelProbabilitiesAndQualities(batch.nodeIndices.scalars)
-//          let crossEntropy = softmaxCrossEntropy(
-//            logits: predictions.labelProbabilities,
-//            probabilities: labels)
-//          let loss = crossEntropy +
-//            predictions.qualities.sum() * 0.0 +
-//            predictions.qualitiesTranspose.sum() * 0.0
-//          return loss / Float(predictions.labelProbabilities.shape[0])
-//        }
-//        optimizer.update(&predictor, along: gradient)
-//        accumulatedLoss += loss.scalarized()
-//        accumulatedSteps += 1
-//        if verbose {
-//          if let logSteps = mStepLogCount, mStep % logSteps == 0 || mStep == mStepCount - 1 {
-//            let nll = accumulatedLoss / Float(accumulatedSteps)
-//            let message = "Supervised M-Step \(String(format: "%5d", mStep)) | " +
-//              "Loss: \(String(format: "%.8f", nll))"
-//            logger.info("\(message)")
-//            accumulatedLoss = 0.0
-//            accumulatedSteps = 0
-//          }
-//        }
-//      }
-//      if let c = evaluationStepCount, mStep % c == 0 {
-//        let result = resultAccumulator.update(
-//          with: evaluate(model: self, using: predictor.graph, usePrior: true))
-//        if let bestResult = self.bestResult {
-//          if result.validationAccuracy > bestResult.validationAccuracy {
-//            self.bestExpectedLabels = expectedLabels
-//            self.bestPredictor = predictor
-//            self.bestResult = result
-//          }
-//        } else {
-//          self.bestExpectedLabels = expectedLabels
-//          self.bestPredictor = predictor
-//          self.bestResult = result
-//        }
-//      }
-//    }
-//    if evaluationStepCount != nil {
-//      expectedLabels = bestExpectedLabels
-//      predictor = bestPredictor
-//    }
-//  }
-//
 //  internal func labelsGibbsMarginalMAP() -> [Int32] {
 //    var modelCopy = self
 //    modelCopy.performGibbsEStep(using: predictor.graph)

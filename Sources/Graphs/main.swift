@@ -198,6 +198,7 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       useIncrementalNeighborhoodExpansion: false,
       initializationMethod: .labelPropagation,
       stepCount: 10000,
+      preTrainingStepCount: 100,
       evaluationStepCount: nil,
       evaluationConvergenceStepCount: parsedArguments.get(evaluationConvergenceStepCount),
       evaluationResultsAccumulator: ExactAccumulator(),
@@ -267,12 +268,12 @@ case .mlp: runExperiments(predictor: { MLPPredictor(
   graph: $0,
   hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
   dropout: parsedArguments.get(dropout) ?? 0.5) })
+case .decoupledMLP: runExperiments(predictor: { DecoupledMLPPredictor(
+  graph: $0,
+  lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+  qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
+  dropout: parsedArguments.get(dropout) ?? 0.5) })
 default: fatalError("The specified model is not supported yet.")
-//case .decoupledMLP: runExperiments(predictor: { DecoupledMLPPredictorV2(
-//  graph: $0,
-//  lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-//  qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
-//  dropout: parsedArguments.get(dropout) ?? 0.5) })
 //case .gcn: runExperiments(predictor: { GCNPredictor(
 //  graph: $0,
 //  hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,

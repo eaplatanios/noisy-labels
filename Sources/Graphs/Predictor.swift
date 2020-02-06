@@ -458,7 +458,6 @@ public struct MLPPredictor: GraphPredictor {
     let allNeighborLatentQ = neighborLatentLayer(allLatent)
     let nodesLatentQ = allNodeLatentQ.gathering(atIndices: indexMap.nodeIndices)
       .reshaped(toShape: Tensor<Int32>([-1, 1, C, C, L]))
-      .tiled(multiples: Tensor<Int32>([1, Int32(indexMap.neighborIndices.shape[1]), 1, 1, 1]))
     let neighborsLatentQ = allNeighborLatentQ.gathering(atIndices: indexMap.neighborIndices)
       .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C, L]))
     let qualityLogits = logSoftmax(
@@ -469,7 +468,6 @@ public struct MLPPredictor: GraphPredictor {
       .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C, L]))
     let neighborsLatentQTranspose = allNeighborLatentQ.gathering(atIndices: indexMap.nodeIndices)
       .reshaped(toShape: Tensor<Int32>([-1, 1, C, C, L]))
-      .tiled(multiples: Tensor<Int32>([1, Int32(indexMap.neighborIndices.shape[1]), 1, 1, 1]))
     let qualityLogitsTransposed = logSoftmax(
       withoutDerivative(at: nodesLatentQTranspose + neighborsLatentQTranspose) {
         $0.logSumExp(squeezingAxes: -1)
@@ -514,6 +512,7 @@ public struct DecoupledMLPPredictor: GraphPredictor {
   @noDerivative public let graph: Graph
   @noDerivative public let lHiddenUnitCounts: [Int]
   @noDerivative public let qHiddenUnitCounts: [Int]
+  @noDerivative public let confusionLatentSize: Int
   @noDerivative public let dropout: Float
 
   public var lHiddenLayers: [Sequential<Dropout<Float>, Dense<Float>>]
@@ -522,10 +521,17 @@ public struct DecoupledMLPPredictor: GraphPredictor {
   public var qNodeLayer: Dense<Float>
   public var qNeighborLayer: Dense<Float>
 
-  public init(graph: Graph, lHiddenUnitCounts: [Int], qHiddenUnitCounts: [Int], dropout: Float) {
+  public init(
+    graph: Graph,
+    lHiddenUnitCounts: [Int],
+    qHiddenUnitCounts: [Int],
+    confusionLatentSize: Int,
+    dropout: Float
+  ) {
     self.graph = graph
     self.lHiddenUnitCounts = lHiddenUnitCounts
     self.qHiddenUnitCounts = qHiddenUnitCounts
+    self.confusionLatentSize = confusionLatentSize
     self.dropout = dropout
 
     var lInputSize = graph.featureCount
@@ -547,8 +553,8 @@ public struct DecoupledMLPPredictor: GraphPredictor {
       qInputSize = hiddenUnitCount
     }
     self.predictionLayer = Dense<Float>(inputSize: lInputSize, outputSize: graph.classCount)
-    self.qNodeLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount)
-    self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount)
+    self.qNodeLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
+    self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
   }
 
   @differentiable(wrt: self)
@@ -565,22 +571,27 @@ public struct DecoupledMLPPredictor: GraphPredictor {
 
     // Split up into the nodes and their neighbors.
     let C = Int32(graph.classCount)
+    let L = Int32(confusionLatentSize)
     let allLatentQ = qHiddenLayers.differentiableReduce(allFeatures) { $1($0) }
     let nodesLatent = allLatentQ.gathering(atIndices: indexMap.nodeIndices)
     let neighborsLatent = allLatentQ.gathering(atIndices: indexMap.neighborIndices)
     let nodesLatentQ = qNodeLayer(nodesLatent)
-      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C]))
+      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C, L]))
     let neighborsLatentQ = qNeighborLayer(neighborsLatent)
-      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C]))
-    let qualityLogits = logSoftmax(nodesLatentQ + neighborsLatentQ, alongAxis: -2)
+      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C, L]))
+    let qualityLogits = logSoftmax(
+      (nodesLatentQ + neighborsLatentQ).logSumExp(squeezingAxes: -1),
+      alongAxis: -2)
 
     let nodesLatentQTranspose = qNodeLayer(neighborsLatent)
-      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C]))
+      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C, L]))
     let neighborsLatentQTranspose = qNeighborLayer(nodesLatent)
-      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C]))
+      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C, L]))
     let qualityLogitsTransposed = logSoftmax(
-      nodesLatentQTranspose + neighborsLatentQTranspose,
-      alongAxis: -2)
+      withoutDerivative(at: nodesLatentQTranspose + neighborsLatentQTranspose) {
+        $0.logSumExp(squeezingAxes: -1)
+      },
+      alongAxis: -1)
 
     return Predictions(
       graph: graph,
@@ -617,8 +628,8 @@ public struct DecoupledMLPPredictor: GraphPredictor {
       qInputSize = hiddenUnitCount
     }
     self.predictionLayer = Dense<Float>(inputSize: lInputSize, outputSize: graph.classCount)
-    self.qNodeLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount)
-    self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount)
+    self.qNodeLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
+    self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
   }
 }
 

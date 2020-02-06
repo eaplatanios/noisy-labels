@@ -146,7 +146,7 @@ public enum ModelInitializationMethod {
 @differentiable(wrt: predictions)
 public func estimateNormalizationConstant(
   using predictions: Predictions,
-  samples: [[Int32]]
+  samples: [[[Int32]]]
 ) -> Tensor<Float> {
   _vjpEstimateNormalizationConstant(using: predictions, samples: samples).value
 }
@@ -155,8 +155,9 @@ public func estimateNormalizationConstant(
 @usableFromInline
 internal func _vjpEstimateNormalizationConstant(
   using predictions: Predictions,
-  samples: [[Int32]]
+  samples: [[[Int32]]]
 ) -> (value: Tensor<Float>, pullback: (Tensor<Float>) -> Predictions.TangentVector) {
+  let samples = samples.flatMap({ $0 })
   var value = Tensor<Float>(0)
   var gradient = Predictions.TangentVector.zero
   for sample in samples {
@@ -198,6 +199,7 @@ where Optimizer.Model == Predictor {
   public let gibbsNormalizationSampleCount: Int
   public let gibbsNormalizationBurnInSampleCount: Int
   public let gibbsNormalizationThinningSampleCount: Int
+  public let gibbsChainCount: Int
   public let evaluationStepCount: Int?
   public let evaluationConvergenceStepCount: Int?
   public let stepCallback: (Model) -> ()
@@ -208,9 +210,9 @@ where Optimizer.Model == Predictor {
   public var optimizer: Optimizer
   public var evaluationResultsAccumulator: Accumulator
 
-  /// The last labels sample is an array that contains the label sampled in the last step,
-  /// for each node in the graph.
-  private var lastSample: [Int32]
+  /// The last labels sample is an array that contains arrays with the labels sampled in the last
+  ///step, for each node in the graph and for each Gibbs sampling chain.
+  private var lastSamples: [[Int32]]
   private var bestPredictor: Predictor
   private var bestResult: Result?
 
@@ -225,12 +227,13 @@ where Optimizer.Model == Predictor {
     initializationMethod: ModelInitializationMethod = .labelPropagation,
     stepCount: Int = 1000,
     preTrainingStepCount: Int = 1000,
-    gibbsLikelihoodSampleCount: Int = 10,
+    gibbsLikelihoodSampleCount: Int = 5,
     gibbsLikelihoodBurnInSampleCount: Int = 0,
-    gibbsLikelihoodThinningSampleCount: Int = 10,
-    gibbsNormalizationSampleCount: Int = 10,
+    gibbsLikelihoodThinningSampleCount: Int = 0,
+    gibbsNormalizationSampleCount: Int = 5,
     gibbsNormalizationBurnInSampleCount: Int = 10,
     gibbsNormalizationThinningSampleCount: Int = 0,
+    gibbsChainCount: Int = 5,
     evaluationStepCount: Int? = 1,
     evaluationConvergenceStepCount: Int? = 10,
     evaluationResultsAccumulator: Accumulator = ExactAccumulator(),
@@ -252,13 +255,20 @@ where Optimizer.Model == Predictor {
     self.gibbsNormalizationSampleCount = gibbsNormalizationSampleCount
     self.gibbsNormalizationBurnInSampleCount = gibbsNormalizationBurnInSampleCount
     self.gibbsNormalizationThinningSampleCount = gibbsNormalizationThinningSampleCount
+    self.gibbsChainCount = gibbsChainCount
     self.evaluationStepCount = evaluationStepCount
     self.evaluationConvergenceStepCount = evaluationConvergenceStepCount
     self.evaluationResultsAccumulator = evaluationResultsAccumulator
     self.stepCallback = stepCallback
     self.logStepCount = logStepCount
     self.verbose = verbose
-    self.lastSample = initializationMethod.initialSample(forGraph: predictor.graph)
+    self.lastSamples = [[Int32]]()
+    self.lastSamples.reserveCapacity(gibbsChainCount)
+    self.lastSamples.append(initializationMethod.initialSample(forGraph: predictor.graph))
+    for _ in 1..<gibbsChainCount {
+      self.lastSamples.append(ModelInitializationMethod.random.initialSample(
+        forGraph: predictor.graph))
+    }
     self.bestPredictor = predictor
     self.bestResult = nil
   }
@@ -301,9 +311,9 @@ where Optimizer.Model == Predictor {
         InMemoryPredictions(fromPredictions: $0, using: graph)
       }
       for _ in 0..<gibbsLikelihoodBurnInSampleCount {
-        lastSample = sampleLabels(
+        lastSamples = sampleLabels(
           using: inMemoryPredictions,
-          previousSample: lastSample,
+          previousSamples: lastSamples,
           sampleTrainLabels: false)
       }
     }
@@ -327,49 +337,53 @@ where Optimizer.Model == Predictor {
 
         let likelihoodSamples = sampleMultipleLabels(
           using: inMemoryPredictions,
-          previousSample: lastSample,
+          previousSamples: lastSamples,
           sampleTrainLabels: false,
           sampleCount: gibbsLikelihoodSampleCount,
           burnInSampleCount: gibbsLikelihoodBurnInSampleCount,
           thinningSampleCount: gibbsLikelihoodThinningSampleCount)
-        var negativeLogLikelihood = Tensor<Float>(0)
-        for sample in likelihoodSamples {
-          let y = Tensor<Int32>(sample)
-          let neighborY = y.gathering(atIndices: predictions.neighborIndices)                       // [BatchSize, MaxNeighborCount, ClassCount]
-          let gY = g.batchGathering(
-            atIndices: neighborY.expandingShape(at: -1),
-            alongAxis: 3,
-            batchDimensionCount: 2).squeezingShape(at: -1)                                          // [BatchSize, MaxNeighborCount, ClassCount]
-          let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                  // [BatchSize, ClassCount]
-          negativeLogLikelihood = negativeLogLikelihood - h.batchGathering(
-            atIndices: y.expandingShape(at: -1),
-            alongAxis: 1,
-            batchDimensionCount: 1).sum()
-          negativeLogLikelihood = negativeLogLikelihood - gYMasked.batchGathering(
-            atIndices: y.expandingShape(at: -1),
-            alongAxis: 1,
-            batchDimensionCount: 1).sum()
-          lastSample = sample
+        var negativeLogLikelihood = h.sum() * 0
+        for samples in likelihoodSamples {
+          for sample in samples {
+            let y = Tensor<Int32>(sample)
+            let neighborY = y.gathering(atIndices: predictions.neighborIndices)                     // [BatchSize, MaxNeighborCount, ClassCount]
+            let gY = g.batchGathering(
+              atIndices: neighborY.expandingShape(at: -1),
+              alongAxis: 3,
+              batchDimensionCount: 2).squeezingShape(at: -1)                                        // [BatchSize, MaxNeighborCount, ClassCount]
+            let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                // [BatchSize, ClassCount]
+            negativeLogLikelihood = negativeLogLikelihood - h.batchGathering(
+              atIndices: y.expandingShape(at: -1),
+              alongAxis: 1,
+              batchDimensionCount: 1).sum()
+            negativeLogLikelihood = negativeLogLikelihood - gYMasked.batchGathering(
+              atIndices: y.expandingShape(at: -1),
+              alongAxis: 1,
+              batchDimensionCount: 1).sum()
+          }
+          lastSamples = samples
         }
 
-        negativeLogLikelihood = negativeLogLikelihood / Float(gibbsLikelihoodSampleCount)
+        let likelihoodSampleCount = gibbsLikelihoodSampleCount * gibbsChainCount
+        negativeLogLikelihood = negativeLogLikelihood / Float(likelihoodSampleCount)
 
         // Compute the normalization term in the negative log-likelihood.
         negativeLogLikelihood = negativeLogLikelihood + estimateNormalizationConstant(
           using: predictions,
           samples: sampleMultipleLabels(
             using: inMemoryPredictions,
-            previousSample: lastSample,
+            previousSamples: lastSamples,
             sampleTrainLabels: true,
             sampleCount: gibbsNormalizationSampleCount,
             burnInSampleCount: gibbsNormalizationBurnInSampleCount,
-            thinningSampleCount: gibbsNormalizationThinningSampleCount))
+            thinningSampleCount: gibbsNormalizationThinningSampleCount
+          ))
 
         // Update the last sample.
         for _ in 0..<gibbsLikelihoodThinningSampleCount {
-          lastSample = sampleLabels(
+          lastSamples = sampleLabels(
             using: inMemoryPredictions,
-            previousSample: lastSample,
+            previousSamples: lastSamples,
             sampleTrainLabels: false)
         }
 
@@ -479,70 +493,73 @@ where Optimizer.Model == Predictor {
 
   private func sampleLabels(
     using predictions: InMemoryPredictions,
-    previousSample: [Int32],
+    previousSamples: [[Int32]],
     sampleTrainLabels: Bool = true
-  ) -> [Int32] {
-    var currentSample = previousSample
+  ) -> [[Int32]] {
     let nodeLevels = sampleTrainLabels ?
       [graph.nodes] :
       useIncrementalNeighborhoodExpansion ?
         graph.leveledData.suffix(from: 1) :
         [graph.unlabeledNodes]
-    for level in nodeLevels {
-      for node in level.shuffled() {
-        let g = predictions.qualityLogits[Int(node)]
-        let gT = predictions.qualityLogitsTransposed[Int(node)]
-        var labelLogits = predictions.labelLogits.labelLogits(forNode: Int(node))
-        for (neighborIndex, neighbor) in graph.neighbors[Int(node)].enumerated() {
+    var currentSamples = previousSamples
+    for chain in 0..<gibbsChainCount {
+      for level in nodeLevels {
+        for node in level.shuffled() {
+          let g = predictions.qualityLogits[Int(node)]
+          let gT = predictions.qualityLogitsTransposed[Int(node)]
+          var labelLogits = predictions.labelLogits.labelLogits(forNode: Int(node))
+          for (neighborIndex, neighbor) in graph.neighbors[Int(node)].enumerated() {
+            for k in 0..<graph.classCount {
+              labelLogits[k] += g.qualityLogit(
+                forNeighbor: Int(neighborIndex),
+                nodeLabel: k,
+                neighborLabel: Int(currentSamples[chain][Int(neighbor)]))
+              labelLogits[k] += gT.qualityLogit(
+                forNeighbor: Int(neighborIndex),
+                nodeLabel: Int(currentSamples[chain][Int(neighbor)]),
+                neighborLabel: k)
+            }
+          }
+          var maxIndex = 0
+          var maxValue = -Float.infinity
           for k in 0..<graph.classCount {
-            labelLogits[k] += g.qualityLogit(
-              forNeighbor: Int(neighborIndex),
-              nodeLabel: k,
-              neighborLabel: Int(currentSample[Int(neighbor)]))
-            labelLogits[k] += gT.qualityLogit(
-              forNeighbor: Int(neighborIndex),
-              nodeLabel: Int(currentSample[Int(neighbor)]),
-              neighborLabel: k)
+            // TODO: !!! Seed / random number generator.
+            let random = Float.random(in: 0..<1)
+            let value = labelLogits[k] - log(-log(random))
+            if value > maxValue {
+              maxIndex = k
+              maxValue = value
+            }
           }
+          currentSamples[chain][Int(node)] = Int32(maxIndex)
         }
-        var maxIndex = 0
-        var maxValue = -Float.infinity
-        for k in 0..<graph.classCount {
-          // TODO: !!! Seed / random number generator.
-          let random = Float.random(in: 0..<1)
-          let value = labelLogits[k] - log(-log(random))
-          if value > maxValue {
-            maxIndex = k
-            maxValue = value
-          }
-        }
-        currentSample[Int(node)] = Int32(maxIndex)
       }
     }
-    return currentSample
+    return currentSamples
   }
 
   private func sampleMultipleLabels(
     using predictions: InMemoryPredictions,
-    previousSample: [Int32]? = nil,
+    previousSamples: [[Int32]],
     sampleTrainLabels: Bool = true,
     sampleCount: Int = 10,
     burnInSampleCount: Int = 10,
     thinningSampleCount: Int = 0
-  ) -> [[Int32]] {
-    var currentSample = previousSample ?? initializationMethod.initialSample(forGraph: graph)
+  ) -> [[[Int32]]] {
+    var samples = [[[Int32]]](repeating: [[Int32]](), count: gibbsChainCount)
+    var currentSamples = previousSamples
     var currentSampleCount = 0
-    var samples = [[Int32]]()
-    samples.reserveCapacity(sampleCount)
-    while samples.count < sampleCount {
-      currentSample = sampleLabels(
+    while samples[0].count < sampleCount {
+      currentSamples = sampleLabels(
         using: predictions,
-        previousSample: currentSample,
+        previousSamples: currentSamples,
         sampleTrainLabels: sampleTrainLabels)
       currentSampleCount += 1
       if currentSampleCount > burnInSampleCount &&
            currentSampleCount.isMultiple(of: thinningSampleCount + 1) {
-        samples.append(currentSample)
+        for chain in 0..<gibbsChainCount {
+          samples[chain].append(currentSamples[chain])
+        }
       }
     }
     return samples

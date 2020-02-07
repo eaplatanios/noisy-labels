@@ -517,24 +517,26 @@ where Optimizer.Model == Predictor {
     for chain in 0..<previousSamples.count {
       for level in nodeLevels {
         for node in level.shuffled() {
+          let neighbors = graph.neighbors[Int(node)]
           let g = predictions.qualityLogits[Int(node)]
           let gT = predictions.qualityLogitsTransposed[Int(node)]
           var labelProbabilities = predictions.labelLogits.labelLogits(forNode: Int(node))
-          for (neighborIndex, neighbor) in graph.neighbors[Int(node)].enumerated() {
+          for (neighborIndex, neighbor) in neighbors.enumerated() {
             for k in 0..<graph.classCount {
               labelProbabilities[k] += g.qualityLogit(
                 forNeighbor: Int(neighborIndex),
                 nodeLabel: k,
-                neighborLabel: Int(currentSamples[chain][Int(neighbor)]))
+                neighborLabel: Int(currentSamples[chain][Int(neighbor)])) / Float(neighbors.count)
               labelProbabilities[k] += gT.qualityLogit(
                 forNeighbor: Int(neighborIndex),
                 nodeLabel: Int(currentSamples[chain][Int(neighbor)]),
-                neighborLabel: k)
+                neighborLabel: k) / Float(neighbors.count)
             }
           }
+          let labelProbabilitiesMax = labelProbabilities.max()!
           var sum = Float(0)
           for k in 0..<graph.classCount {
-            labelProbabilities[k] = exp(labelProbabilities[k])
+            labelProbabilities[k] = exp(labelProbabilities[k] - labelProbabilitiesMax)
             sum += labelProbabilities[k]
           }
           // TODO: !!! Seed / random number generator.

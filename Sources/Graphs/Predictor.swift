@@ -229,7 +229,7 @@ public struct InMemoryPredictions {
 
 extension InMemoryPredictions {
   public init(fromPredictions predictions: Predictions, using graph: Graph) {
-    let neighborCounts = predictions.neighborMask
+    let neighborCounts = Tensor<Int32>(predictions.neighborMask .> 0)
       .sum(squeezingAxes: -1)
       .unstacked(alongAxis: 0)
       .map { Int($0.scalarized()) }

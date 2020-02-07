@@ -52,19 +52,22 @@ func initialization(
   // Proceed in a breadth-first order from the labeled nodes.
   for level in graph.leveledData.suffix(from: 1) {
     for node in level {
+      let neighbors = graph.neighbors[Int(node)]
       var scores = labelLogits.labelLogits(forNode: Int(node))
-      for (index, neighbor) in graph.neighbors[Int(node)].enumerated() {
+      for (index, neighbor) in neighbors.enumerated() {
         let label = labels[Int(neighbor)]
         if label != -1 {
           for k in 0..<graph.classCount {
             scores[k] += qualityLogits[Int(node)].qualityLogit(
               forNeighbor: index,
               nodeLabel: k,
-              neighborLabel: Int(label))
+              neighborLabel: Int(label)) / Float(neighbors.count)
           }
         } else {
           for k in 0..<graph.classCount {
-            scores[k] += qualityLogits[Int(node)].maxQualityLogit(forNeighbor: index, nodeLabel: k)
+            scores[k] += qualityLogits[Int(node)].maxQualityLogit(
+              forNeighbor: index,
+              nodeLabel: k) / Float(neighbors.count)
           }
         }
       }

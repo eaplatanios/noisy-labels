@@ -17,7 +17,7 @@ import TensorFlow
 
 public struct LabeledData: TensorGroup {
   public let nodes: Tensor<Int32>  // [BatchSize]
-  public let labels: Tensor<Int32>   // [BatchSize]
+  public let labels: Tensor<Int32> // [BatchSize]
 
   public init(nodeIndices: Tensor<Int32>, nodeLabels: Tensor<Int32>) {
     self.nodes = nodeIndices

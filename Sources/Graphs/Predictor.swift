@@ -373,30 +373,35 @@ public struct QualityLogits {
 }
 
 public protocol GraphPredictor: Differentiable, KeyPathIterable {
-  var graph: Graph { get }
+  @differentiable(wrt: self)
+  func predictions(forNodes nodes: Tensor<Int32>, using graph: Graph) -> Predictions
 
   @differentiable(wrt: self)
-  func callAsFunction(_ nodes: Tensor<Int32>) -> Predictions
-
-  @differentiable(wrt: self)
-  func labelLogits(_ nodes: Tensor<Int32>) -> Tensor<Float>
+  func labelLogits(forNodes nodes: Tensor<Int32>, using graph: Graph) -> Tensor<Float>
 
   mutating func reset()
 }
 
 extension GraphPredictor {
-  public var nodeCount: Int { graph.nodeCount }
-  public var featureCount: Int { graph.featureCount }
-  public var classCount: Int { graph.classCount }
-
+  /// - Note: This is necessary due to a compiler automatic differentiation bug.
   @differentiable(wrt: self)
-  public func predictions(forNodes nodes: Tensor<Int32>) -> Predictions {
-    self(nodes)
+  public func predictionsHelper(forNodes nodes: Tensor<Int32>, using graph: Graph) -> Predictions {
+    self.predictions(forNodes: nodes, using: graph)
+  }
+
+  /// - Note: This is necessary due to a compiler automatic differentiation bug.
+  @differentiable(wrt: self)
+  public func labelLogitsHelper(
+    forNodes nodes: Tensor<Int32>,
+    using graph: Graph
+  ) -> Tensor<Float> {
+    self.labelLogits(forNodes: nodes, using: graph)
   }
 }
 
 public struct MLPPredictor: GraphPredictor {
-  @noDerivative public let graph: Graph
+  @noDerivative public let featureCount: Int
+  @noDerivative public let classCount: Int
   @noDerivative public let hiddenUnitCounts: [Int]
   @noDerivative public let confusionLatentSize: Int
   @noDerivative public let dropout: Float
@@ -407,13 +412,20 @@ public struct MLPPredictor: GraphPredictor {
   public var nodeLatentLayer: Dense<Float>
   public var neighborLatentLayer: Dense<Float>
 
-  public init(graph: Graph, hiddenUnitCounts: [Int], confusionLatentSize: Int, dropout: Float) {
-    self.graph = graph
+  public init(
+    featureCount: Int,
+    classCount: Int,
+    hiddenUnitCounts: [Int],
+    confusionLatentSize: Int,
+    dropout: Float
+  ) {
+    self.featureCount = featureCount
+    self.classCount = classCount
     self.hiddenUnitCounts = hiddenUnitCounts
     self.confusionLatentSize = confusionLatentSize
     self.dropout = dropout
 
-    var inputSize = graph.featureCount
+    var inputSize = featureCount
     self.hiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
     for hiddenUnitCount in hiddenUnitCounts {
       self.hiddenLayers.append(Sequential {
@@ -426,13 +438,13 @@ public struct MLPPredictor: GraphPredictor {
       inputSize = hiddenUnitCount
     }
     self.hiddenDropout = Dropout<Float>(probability: Double(dropout))
-    self.predictionLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
-    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
-    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
+    self.predictionLayer = Dense<Float>(inputSize: inputSize, outputSize: classCount)
+    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: classCount * classCount * confusionLatentSize)
+    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: classCount * classCount * confusionLatentSize)
   }
 
   @differentiable(wrt: self)
-  public func callAsFunction(_ nodes: Tensor<Int32>) -> Predictions {
+  public func predictions(forNodes nodes: Tensor<Int32>, using graph: Graph) -> Predictions {
     // We need features for all provided nodes and their neighbors.
     let nodeScalars = nodes.scalars
     let indexMap = NodeIndexMap(nodes: nodeScalars, graph: graph)
@@ -444,7 +456,7 @@ public struct MLPPredictor: GraphPredictor {
     let labelLogits = allLabelLogits.gathering(atIndices: indexMap.nodeIndices)
 
     // Split up into the nodes and their neighbors.
-    let C = Int32(graph.classCount)
+    let C = Int32(classCount)
     let L = Int32(confusionLatentSize)
     let allNodeLatentQ = nodeLatentLayer(allLatent)
     let allNeighborLatentQ = neighborLatentLayer(allLatent)
@@ -475,14 +487,14 @@ public struct MLPPredictor: GraphPredictor {
   }
 
   @differentiable(wrt: self)
-  public func labelLogits(_ nodes: Tensor<Int32>) -> Tensor<Float> {
+  public func labelLogits(forNodes nodes: Tensor<Int32>, using graph: Graph) -> Tensor<Float> {
     let nodeFeatures = graph.features.gathering(atIndices: nodes)
     let nodeLatent = hiddenLayers.differentiableReduce(nodeFeatures) { $1($0) }
     return logSoftmax(predictionLayer(nodeLatent))
   }
 
   public mutating func reset() {
-    var inputSize = graph.featureCount
+    var inputSize = featureCount
     self.hiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
     for hiddenUnitCount in hiddenUnitCounts {
       self.hiddenLayers.append(Sequential {
@@ -494,136 +506,136 @@ public struct MLPPredictor: GraphPredictor {
       })
       inputSize = hiddenUnitCount
     }
-    self.predictionLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount)
-    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
-    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
+    self.predictionLayer = Dense<Float>(inputSize: inputSize, outputSize: classCount)
+    self.nodeLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: classCount * classCount * confusionLatentSize)
+    self.neighborLatentLayer = Dense<Float>(inputSize: inputSize, outputSize: classCount * classCount * confusionLatentSize)
   }
 }
 
-public struct DecoupledMLPPredictor: GraphPredictor {
-  @noDerivative public let graph: Graph
-  @noDerivative public let lHiddenUnitCounts: [Int]
-  @noDerivative public let qHiddenUnitCounts: [Int]
-  @noDerivative public let confusionLatentSize: Int
-  @noDerivative public let dropout: Float
-
-  public var lHiddenLayers: [Sequential<Dropout<Float>, Dense<Float>>]
-  public var qHiddenLayers: [Sequential<Dropout<Float>, Dense<Float>>]
-  public var predictionLayer: Dense<Float>
-  public var qNodeLayer: Dense<Float>
-  public var qNeighborLayer: Dense<Float>
-
-  public init(
-    graph: Graph,
-    lHiddenUnitCounts: [Int],
-    qHiddenUnitCounts: [Int],
-    confusionLatentSize: Int,
-    dropout: Float
-  ) {
-    self.graph = graph
-    self.lHiddenUnitCounts = lHiddenUnitCounts
-    self.qHiddenUnitCounts = qHiddenUnitCounts
-    self.confusionLatentSize = confusionLatentSize
-    self.dropout = dropout
-
-    var lInputSize = graph.featureCount
-    self.lHiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
-    for lHiddenUnitCount in lHiddenUnitCounts {
-      self.lHiddenLayers.append(Sequential {
-        Dropout<Float>(probability: Double(dropout))
-        Dense<Float>(inputSize: lInputSize, outputSize: lHiddenUnitCount, activation: gelu)
-      })
-      lInputSize = lHiddenUnitCount
-    }
-    var qInputSize = graph.featureCount
-    self.qHiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
-    for hiddenUnitCount in qHiddenUnitCounts {
-      self.qHiddenLayers.append(Sequential {
-        Dropout<Float>(probability: Double(dropout))
-        Dense<Float>(inputSize: qInputSize, outputSize: hiddenUnitCount, activation: gelu)
-      })
-      qInputSize = hiddenUnitCount
-    }
-    self.predictionLayer = Dense<Float>(inputSize: lInputSize, outputSize: graph.classCount)
-    self.qNodeLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
-    self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
-  }
-
-  @differentiable(wrt: self)
-  public func callAsFunction(_ nodes: Tensor<Int32>) -> Predictions {
-    // We need features for all provided nodes and their neighbors.
-    let nodeScalars = nodes.scalars
-    let indexMap = NodeIndexMap(nodes: nodeScalars, graph: graph)
-
-    // Compute features, label probabilities, and qualities for all requested nodes.
-    let allFeatures = graph.features.gathering(atIndices: indexMap.uniqueNodeIndices)
-    let allLatent = lHiddenLayers.differentiableReduce(allFeatures) { $1($0) }
-    let allLogits = logSoftmax(predictionLayer(allLatent))
-    let labelLogits = allLogits.gathering(atIndices: indexMap.nodeIndices)
-
-    // Split up into the nodes and their neighbors.
-    let C = Int32(graph.classCount)
-    let L = Int32(confusionLatentSize)
-    let allLatentQ = qHiddenLayers.differentiableReduce(allFeatures) { $1($0) }
-    let nodesLatent = allLatentQ.gathering(atIndices: indexMap.nodeIndices)
-    let neighborsLatent = allLatentQ.gathering(atIndices: indexMap.neighborIndices)
-    let nodesLatentQ = qNodeLayer(nodesLatent)
-      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C, L]))
-    let neighborsLatentQ = qNeighborLayer(neighborsLatent)
-      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C, L]))
-    let qualityLogits = logSoftmax(
-      (nodesLatentQ + neighborsLatentQ).logSumExp(squeezingAxes: -1),
-      alongAxis: -2)
-
-    let nodesLatentQTranspose = qNodeLayer(neighborsLatent)
-      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C, L]))
-    let neighborsLatentQTranspose = qNeighborLayer(nodesLatent)
-      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C, L]))
-    let qualityLogitsTransposed = logSoftmax(
-      withoutDerivative(at: nodesLatentQTranspose + neighborsLatentQTranspose) {
-        $0.logSumExp(squeezingAxes: -1)
-      },
-      alongAxis: -1)
-
-    return Predictions(
-      graph: graph,
-      nodes: nodeScalars,
-      labelLogits: labelLogits,
-      qualityLogits: qualityLogits,
-      qualityLogitsTransposed: qualityLogitsTransposed)
-  }
-
-  @differentiable(wrt: self)
-  public func labelLogits(_ nodes: Tensor<Int32>) -> Tensor<Float> {
-    let nodeFeatures = graph.features.gathering(atIndices: nodes)
-    let nodeLatent = lHiddenLayers.differentiableReduce(nodeFeatures) { $1($0) }
-    return logSoftmax(predictionLayer(nodeLatent))
-  }
-
-  public mutating func reset() {
-    var lInputSize = graph.featureCount
-    self.lHiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
-    for lHiddenUnitCount in lHiddenUnitCounts {
-      self.lHiddenLayers.append(Sequential {
-        Dropout<Float>(probability: Double(dropout))
-        Dense<Float>(inputSize: lInputSize, outputSize: lHiddenUnitCount, activation: gelu)
-      })
-      lInputSize = lHiddenUnitCount
-    }
-    var qInputSize = graph.featureCount
-    self.qHiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
-    for hiddenUnitCount in qHiddenUnitCounts {
-      self.qHiddenLayers.append(Sequential {
-        Dropout<Float>(probability: Double(dropout))
-        Dense<Float>(inputSize: qInputSize, outputSize: hiddenUnitCount, activation: gelu)
-      })
-      qInputSize = hiddenUnitCount
-    }
-    self.predictionLayer = Dense<Float>(inputSize: lInputSize, outputSize: graph.classCount)
-    self.qNodeLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
-    self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
-  }
-}
+//public struct DecoupledMLPPredictor: GraphPredictor {
+//  @noDerivative public let graph: Graph
+//  @noDerivative public let lHiddenUnitCounts: [Int]
+//  @noDerivative public let qHiddenUnitCounts: [Int]
+//  @noDerivative public let confusionLatentSize: Int
+//  @noDerivative public let dropout: Float
+//
+//  public var lHiddenLayers: [Sequential<Dropout<Float>, Dense<Float>>]
+//  public var qHiddenLayers: [Sequential<Dropout<Float>, Dense<Float>>]
+//  public var predictionLayer: Dense<Float>
+//  public var qNodeLayer: Dense<Float>
+//  public var qNeighborLayer: Dense<Float>
+//
+//  public init(
+//    graph: Graph,
+//    lHiddenUnitCounts: [Int],
+//    qHiddenUnitCounts: [Int],
+//    confusionLatentSize: Int,
+//    dropout: Float
+//  ) {
+//    self.graph = graph
+//    self.lHiddenUnitCounts = lHiddenUnitCounts
+//    self.qHiddenUnitCounts = qHiddenUnitCounts
+//    self.confusionLatentSize = confusionLatentSize
+//    self.dropout = dropout
+//
+//    var lInputSize = graph.featureCount
+//    self.lHiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
+//    for lHiddenUnitCount in lHiddenUnitCounts {
+//      self.lHiddenLayers.append(Sequential {
+//        Dropout<Float>(probability: Double(dropout))
+//        Dense<Float>(inputSize: lInputSize, outputSize: lHiddenUnitCount, activation: gelu)
+//      })
+//      lInputSize = lHiddenUnitCount
+//    }
+//    var qInputSize = graph.featureCount
+//    self.qHiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
+//    for hiddenUnitCount in qHiddenUnitCounts {
+//      self.qHiddenLayers.append(Sequential {
+//        Dropout<Float>(probability: Double(dropout))
+//        Dense<Float>(inputSize: qInputSize, outputSize: hiddenUnitCount, activation: gelu)
+//      })
+//      qInputSize = hiddenUnitCount
+//    }
+//    self.predictionLayer = Dense<Float>(inputSize: lInputSize, outputSize: graph.classCount)
+//    self.qNodeLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
+//    self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
+//  }
+//
+//  @differentiable(wrt: self)
+//  public func callAsFunction(_ nodes: Tensor<Int32>) -> Predictions {
+//    // We need features for all provided nodes and their neighbors.
+//    let nodeScalars = nodes.scalars
+//    let indexMap = NodeIndexMap(nodes: nodeScalars, graph: graph)
+//
+//    // Compute features, label probabilities, and qualities for all requested nodes.
+//    let allFeatures = graph.features.gathering(atIndices: indexMap.uniqueNodeIndices)
+//    let allLatent = lHiddenLayers.differentiableReduce(allFeatures) { $1($0) }
+//    let allLogits = logSoftmax(predictionLayer(allLatent))
+//    let labelLogits = allLogits.gathering(atIndices: indexMap.nodeIndices)
+//
+//    // Split up into the nodes and their neighbors.
+//    let C = Int32(graph.classCount)
+//    let L = Int32(confusionLatentSize)
+//    let allLatentQ = qHiddenLayers.differentiableReduce(allFeatures) { $1($0) }
+//    let nodesLatent = allLatentQ.gathering(atIndices: indexMap.nodeIndices)
+//    let neighborsLatent = allLatentQ.gathering(atIndices: indexMap.neighborIndices)
+//    let nodesLatentQ = qNodeLayer(nodesLatent)
+//      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C, L]))
+//    let neighborsLatentQ = qNeighborLayer(neighborsLatent)
+//      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C, L]))
+//    let qualityLogits = logSoftmax(
+//      (nodesLatentQ + neighborsLatentQ).logSumExp(squeezingAxes: -1),
+//      alongAxis: -2)
+//
+//    let nodesLatentQTranspose = qNodeLayer(neighborsLatent)
+//      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C, L]))
+//    let neighborsLatentQTranspose = qNeighborLayer(nodesLatent)
+//      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C, L]))
+//    let qualityLogitsTransposed = logSoftmax(
+//      withoutDerivative(at: nodesLatentQTranspose + neighborsLatentQTranspose) {
+//        $0.logSumExp(squeezingAxes: -1)
+//      },
+//      alongAxis: -1)
+//
+//    return Predictions(
+//      graph: graph,
+//      nodes: nodeScalars,
+//      labelLogits: labelLogits,
+//      qualityLogits: qualityLogits,
+//      qualityLogitsTransposed: qualityLogitsTransposed)
+//  }
+//
+//  @differentiable(wrt: self)
+//  public func labelLogits(_ nodes: Tensor<Int32>) -> Tensor<Float> {
+//    let nodeFeatures = graph.features.gathering(atIndices: nodes)
+//    let nodeLatent = lHiddenLayers.differentiableReduce(nodeFeatures) { $1($0) }
+//    return logSoftmax(predictionLayer(nodeLatent))
+//  }
+//
+//  public mutating func reset() {
+//    var lInputSize = graph.featureCount
+//    self.lHiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
+//    for lHiddenUnitCount in lHiddenUnitCounts {
+//      self.lHiddenLayers.append(Sequential {
+//        Dropout<Float>(probability: Double(dropout))
+//        Dense<Float>(inputSize: lInputSize, outputSize: lHiddenUnitCount, activation: gelu)
+//      })
+//      lInputSize = lHiddenUnitCount
+//    }
+//    var qInputSize = graph.featureCount
+//    self.qHiddenLayers = [Sequential<Dropout<Float>, Dense<Float>>]()
+//    for hiddenUnitCount in qHiddenUnitCounts {
+//      self.qHiddenLayers.append(Sequential {
+//        Dropout<Float>(probability: Double(dropout))
+//        Dense<Float>(inputSize: qInputSize, outputSize: hiddenUnitCount, activation: gelu)
+//      })
+//      qInputSize = hiddenUnitCount
+//    }
+//    self.predictionLayer = Dense<Float>(inputSize: lInputSize, outputSize: graph.classCount)
+//    self.qNodeLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
+//    self.qNeighborLayer = Dense<Float>(inputSize: qInputSize, outputSize: graph.classCount * graph.classCount * confusionLatentSize)
+//  }
+//}
 
 //public struct GCNPredictor: GraphPredictor {
 //  @noDerivative public let graph: Graph

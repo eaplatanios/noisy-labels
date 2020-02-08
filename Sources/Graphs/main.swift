@@ -136,11 +136,11 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
 
     func stepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) -> () {
       stepCount += 1
-      if !(stepCount - 1).isMultiple(of: 10) { return }
+      if !(stepCount - 1).isMultiple(of: 1) { return }
 //      let predictionsMAP = model.labelsApproximateMAP(maxStepCount: 10000)
 //      let predictionsMAP = model.labelsGibbsMarginalMAP()
 //      let evaluationResult = evaluate(predictions: predictionsMAP, using: graph)
-      let evaluationResult = evaluate(model: model, usePrior: false)
+      let evaluationResult = evaluate(model: model, using: graph, usePrior: false)
       if firstEvaluationResult == nil { firstEvaluationResult = evaluationResult }
       if let bestResult = bestEvaluationResult {
         if evaluationResult.validationAccuracy > bestResult.validationAccuracy ||
@@ -154,7 +154,7 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       } else {
         bestEvaluationResult = evaluationResult
       }
-      let priorEvaluationResult = evaluate(model: model, usePrior: true)
+      let priorEvaluationResult = evaluate(model: model, using: graph, usePrior: true)
       if firstPriorEvaluationResult == nil { firstPriorEvaluationResult = priorEvaluationResult }
       if let bestResult = bestPriorEvaluationResult {
         if priorEvaluationResult.validationAccuracy > bestResult.validationAccuracy ||
@@ -191,6 +191,7 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       decay: 0)
 
     var model = Model(
+      graph: graph,
       predictor: predictor,
       optimizer: optimizer,
       randomSeed: randomSeed,
@@ -198,7 +199,7 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       useIncrementalNeighborhoodExpansion: false,
       initializationMethod: .labelPropagation,
       stepCount: 10000,
-      preTrainingStepCount: 0,
+      preTrainingStepCount: 10,
       evaluationStepCount: nil,
       evaluationConvergenceStepCount: parsedArguments.get(evaluationConvergenceStepCount),
       evaluationResultsAccumulator: ExactAccumulator(),
@@ -265,17 +266,17 @@ func runExperiments<Predictor: GraphPredictor>(predictor: (Graph) -> Predictor) 
 
 switch parsedArguments.get(model)! {
 case .mlp: runExperiments(predictor: { MLPPredictor(
-  graph: $0,
+  featureCount: $0.featureCount,
+  classCount: $0.classCount,
   hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
   confusionLatentSize: parsedArguments.get(qHiddenUnitCounts)![0],
   dropout: parsedArguments.get(dropout) ?? 0.5) })
-case .decoupledMLP: runExperiments(predictor: { DecoupledMLPPredictor(
-  graph: $0,
-  lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-  qHiddenUnitCounts: [Int](parsedArguments.get(qHiddenUnitCounts)!.suffix(from: 1)),
-  confusionLatentSize: parsedArguments.get(qHiddenUnitCounts)![0], // TODO: !!! Fix this hack.
-  dropout: parsedArguments.get(dropout) ?? 0.5) })
-default: fatalError("The specified model is not supported yet.")
+//case .decoupledMLP: runExperiments(predictor: { DecoupledMLPPredictor(
+//  graph: $0,
+//  lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+//  qHiddenUnitCounts: [Int](parsedArguments.get(qHiddenUnitCounts)!.suffix(from: 1)),
+//  confusionLatentSize: parsedArguments.get(qHiddenUnitCounts)![0], // TODO: !!! Fix this hack.
+//  dropout: parsedArguments.get(dropout) ?? 0.5) })
 //case .gcn: runExperiments(predictor: { GCNPredictor(
 //  graph: $0,
 //  hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
@@ -285,6 +286,7 @@ default: fatalError("The specified model is not supported yet.")
 //  lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
 //  qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
 //  dropout: parsedArguments.get(dropout) ?? 0.5) })
+default: fatalError("The specified model is not supported yet.")
 }
 
 func configuration(graph: Graph) -> String {

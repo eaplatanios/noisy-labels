@@ -16,13 +16,14 @@ func iteratedConditionalModes(
     var changed = 0
     for level in leveledData {
       for node in level.shuffled() {
+        let neighbors = graph.neighbors[Int(node)]
         var scores = labelLogits.labelLogits(forNode: Int(node))
-        for (index, neighbor) in graph.neighbors[Int(node)].enumerated() {
+        for (index, neighbor) in neighbors.enumerated() {
           for k in 0..<graph.classCount {
             scores[k] += qualityLogits[Int(node)].qualityLogit(
               forNeighbor: index,
               nodeLabel: k,
-              neighborLabel: Int(labels[Int(neighbor)]))
+              neighborLabel: Int(labels[Int(neighbor)])) / Float(neighbors.count)
           }
         }
         let label = Int32(scores.indexOfMax!)

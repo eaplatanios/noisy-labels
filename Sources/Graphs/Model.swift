@@ -145,23 +145,29 @@ public enum ModelInitializationMethod {
 
 @differentiable(wrt: predictions)
 public func estimateNormalizationConstant(
-  using predictions: Predictions,
+  using subGraph: SubGraph,
+  predictions: Predictions,
   samples: [[[Int32]]]
 ) -> Tensor<Float> {
-  _vjpEstimateNormalizationConstant(using: predictions, samples: samples).value
+  _vjpEstimateNormalizationConstant(
+    using: subGraph,
+    predictions: predictions,
+    samples: samples
+  ).value
 }
 
 @derivative(of: estimateNormalizationConstant)
 @usableFromInline
 internal func _vjpEstimateNormalizationConstant(
-  using predictions: Predictions,
+  using subGraph: SubGraph,
+  predictions: Predictions,
   samples: [[[Int32]]]
 ) -> (value: Tensor<Float>, pullback: (Tensor<Float>) -> Predictions.TangentVector) {
   let samples = samples.flatMap({ $0 })
   var value = Tensor<Float>(0)
   var gradient = Predictions.TangentVector.zero
   for sample in samples {
-    let sampleTensor = Tensor<Int32>(sample)
+    let sampleTensor = Tensor<Int32>(subGraph.transformOriginalSample(sample))
     let (sampleValue, sampleGradient) = valueWithGradient(at: predictions) {
       predictions -> Tensor<Float> in
       let h = predictions.labelLogits                                                               // [BatchSize, ClassCount]
@@ -306,9 +312,6 @@ where Optimizer.Model == Predictor {
   }
 
   public mutating func train() {
-    var graph = self.graph
-    var nodes = graph.nodesTensor
-
     if preTrainingStepCount > 0 {
       if verbose { logger.info("Starting model pre-training.") }
       preTrainLabelsPredictor()
@@ -320,32 +323,43 @@ where Optimizer.Model == Predictor {
 
     // Burn some samples before starting to use them for estimating the likelihood function.
     if gibbsLikelihoodBurnInSampleCount > 0 {
-      let predictions = predictor.predictionsHelper(forNodes: nodes, using: graph)
+      let predictions = predictor.predictionsHelper(forNodes: graph.nodesTensor, using: graph)
       let inMemoryPredictions = withoutDerivative(at: predictions) {
         InMemoryPredictions(fromPredictions: $0, using: graph)
       }
       for _ in 0..<gibbsLikelihoodBurnInSampleCount {
         lastLikelihoodSamples = sampleLabels(
-          using: graph,
+          using: SubGraph(graph: graph, mapFromOriginalIndex: nil),
           predictions: inMemoryPredictions,
           previousSamples: lastLikelihoodSamples,
           sampleTrainLabels: false)
       }
     }
 
+    var previousGraphExpansion = 0
+    var subGraph = SubGraph(graph: graph, mapFromOriginalIndex: nil)
+    var nodes = subGraph.nodesTensor
     var convergenceStepCount = 0
     bestResult = nil
     evaluationResultsAccumulator.reset()
     var accumulatedNLL = Float(0.0)
     var accumulatedSteps = 0
     for step in 0..<stepCount {
-      // TODO: Find a way to train on only part of the graph.
-      if useIncrementalNeighborhoodExpansion { nodes = graph.data(atDepth: (step / 100) + 1) }
+      if useIncrementalNeighborhoodExpansion {
+        // TODO: !!! Make this schedule configurable.
+        let graphDepth = (step / 10) + 1
+        if previousGraphExpansion < graphDepth {
+          previousGraphExpansion = graphDepth
+          subGraph = graph.subGraph(upToDepth: graphDepth)
+          nodes = subGraph.nodesTensor
+          logger.info("Training on \(subGraph.nodeCount) / \(graph.nodeCount) nodes.")
+        }
+      }
       let (negativeLogLikelihood, gradient) = valueWithGradient(at: predictor) {
         predictor -> Tensor<Float> in
-        let predictions = predictor.predictionsHelper(forNodes: nodes, using: graph)
+        let predictions = predictor.predictionsHelper(forNodes: nodes, using: subGraph.graph)
         let inMemoryPredictions = withoutDerivative(at: predictions) {
-          InMemoryPredictions(fromPredictions: $0, using: graph)
+          InMemoryPredictions(fromPredictions: $0, using: subGraph.graph)
         }
 
         let h = predictions.labelLogits
@@ -353,7 +367,7 @@ where Optimizer.Model == Predictor {
         let gMask = predictions.neighborMask                                                        // [BatchSize, MaxNeighborCount]
 
         let likelihoodSamples = sampleMultipleLabels(
-          using: graph,
+          using: subGraph,
           predictions: inMemoryPredictions,
           previousSamples: lastLikelihoodSamples,
           sampleTrainLabels: false,
@@ -363,7 +377,7 @@ where Optimizer.Model == Predictor {
         var negativeLogLikelihood = (h * exp(h)).sum() * 0 // TODO: !!!
         for samples in likelihoodSamples {
           for sample in samples {
-            let y = Tensor<Int32>(sample)
+            let y = Tensor<Int32>(subGraph.transformOriginalSample(sample))
             let neighborY = y.gathering(atIndices: predictions.neighborIndices)                     // [BatchSize, MaxNeighborCount, ClassCount]
             let gY = g.batchGathering(
               atIndices: neighborY.expandingShape(at: -1),
@@ -387,7 +401,7 @@ where Optimizer.Model == Predictor {
 
         // Compute the normalization term in the negative log-likelihood.
         let normalizationSamples = sampleMultipleLabels(
-          using: graph,
+          using: subGraph,
           predictions: inMemoryPredictions,
           previousSamples: lastNormalizationSamples,
           sampleTrainLabels: true,
@@ -395,14 +409,15 @@ where Optimizer.Model == Predictor {
           burnInSampleCount: gibbsNormalizationBurnInSampleCount,
           thinningSampleCount: gibbsNormalizationThinningSampleCount)
         negativeLogLikelihood = negativeLogLikelihood + estimateNormalizationConstant(
-          using: predictions,
+          using: subGraph,
+          predictions: predictions,
           samples: normalizationSamples)
         lastNormalizationSamples = normalizationSamples.last!
 
         // Update the last sample.
         for _ in 0..<gibbsLikelihoodThinningSampleCount {
           lastLikelihoodSamples = sampleLabels(
-            using: graph,
+            using: subGraph,
             predictions: inMemoryPredictions,
             previousSamples: lastLikelihoodSamples,
             sampleTrainLabels: false)
@@ -510,49 +525,49 @@ where Optimizer.Model == Predictor {
   }
 
   private func sampleLabels(
-    using graph: Graph,
+    using subGraph: SubGraph,
     predictions: InMemoryPredictions,
     previousSamples: [[Int32]],
     sampleTrainLabels: Bool = true
   ) -> [[Int32]] {
-    let nodeLevels = sampleTrainLabels ? [graph.nodes] : [graph.unlabeledNodes]
+    let nodes = sampleTrainLabels ? subGraph.nodes : subGraph.unlabeledNodes
     var currentSamples = previousSamples
     for chain in 0..<previousSamples.count {
-      for level in nodeLevels {
-        for node in level.shuffled() {
-          let neighbors = graph.neighbors[Int(node)]
-          let g = predictions.qualityLogits[Int(node)]
-          let gT = predictions.qualityLogitsTransposed[Int(node)]
-          var labelProbabilities = predictions.labelLogits.labelLogits(forNode: Int(node))
-          for (neighborIndex, neighbor) in neighbors.enumerated() {
-            for k in 0..<graph.classCount {
-              labelProbabilities[k] += g.qualityLogit(
-                forNeighbor: Int(neighborIndex),
-                nodeLabel: k,
-                neighborLabel: Int(currentSamples[chain][Int(neighbor)])) / Float(neighbors.count)
-              labelProbabilities[k] += gT.qualityLogit(
-                forNeighbor: Int(neighborIndex),
-                nodeLabel: Int(currentSamples[chain][Int(neighbor)]),
-                neighborLabel: k) / Float(neighbors.count)
-            }
+      for node in nodes.shuffled() {
+        let neighbors = subGraph.neighbors[Int(node)]
+        let g = predictions.qualityLogits[Int(node)]
+        let gT = predictions.qualityLogitsTransposed[Int(node)]
+        var labelProbabilities = predictions.labelLogits.labelLogits(forNode: Int(node))
+        for (neighborIndex, neighbor) in neighbors.enumerated() {
+          let originalNeighborIndex = Int(subGraph.originalIndex(ofNode: neighbor))
+          let neighborLabel = Int(currentSamples[chain][originalNeighborIndex])
+          for k in 0..<subGraph.classCount {
+            labelProbabilities[k] += g.qualityLogit(
+              forNeighbor: Int(neighborIndex),
+              nodeLabel: k,
+              neighborLabel: neighborLabel) / Float(neighbors.count)
+            labelProbabilities[k] += gT.qualityLogit(
+              forNeighbor: Int(neighborIndex),
+              nodeLabel: neighborLabel,
+              neighborLabel: k) / Float(neighbors.count)
           }
-          let labelProbabilitiesMax = labelProbabilities.max()!
-          var sum = Float(0)
-          for k in 0..<graph.classCount {
-            labelProbabilities[k] = exp(labelProbabilities[k] - labelProbabilitiesMax)
-            sum += labelProbabilities[k]
-          }
-          // TODO: !!! Seed / random number generator.
-          let random = sum > 0 ?
-            Float.random(in: 0..<sum) :
-            Float.random(in: 0..<Float(graph.classCount))
-          var accumulator: Float = 0
-          for k in 0..<graph.classCount {
-            accumulator += sum > 0 ? labelProbabilities[k] : 1
-            if random < accumulator {
-              currentSamples[chain][Int(node)] = Int32(k)
-              break
-            }
+        }
+        let labelProbabilitiesMax = labelProbabilities.max()!
+        var sum = Float(0)
+        for k in 0..<subGraph.classCount {
+          labelProbabilities[k] = exp(labelProbabilities[k] - labelProbabilitiesMax)
+          sum += labelProbabilities[k]
+        }
+        // TODO: !!! Seed / random number generator.
+        let random = sum > 0 ?
+          Float.random(in: 0..<sum) :
+          Float.random(in: 0..<Float(subGraph.classCount))
+        var accumulator: Float = 0
+        for k in 0..<subGraph.classCount {
+          accumulator += sum > 0 ? labelProbabilities[k] : 1
+          if random < accumulator {
+            currentSamples[chain][Int(subGraph.originalIndex(ofNode: node))] = Int32(k)
+            break
           }
         }
       }
@@ -561,7 +576,7 @@ where Optimizer.Model == Predictor {
   }
 
   private func sampleMultipleLabels(
-    using graph: Graph,
+    using subGraph: SubGraph,
     predictions: InMemoryPredictions,
     previousSamples: [[Int32]],
     sampleTrainLabels: Bool = true,
@@ -574,7 +589,7 @@ where Optimizer.Model == Predictor {
     var currentSampleCount = 0
     while samples[0].count < sampleCount {
       currentSamples = sampleLabels(
-        using: graph,
+        using: subGraph,
         predictions: predictions,
         previousSamples: currentSamples,
         sampleTrainLabels: sampleTrainLabels)

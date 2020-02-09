@@ -136,7 +136,7 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
 
     func stepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) -> () {
       stepCount += 1
-      if !(stepCount - 1).isMultiple(of: 1) { return }
+      if !(stepCount - 1).isMultiple(of: 10) { return }
 //      let predictionsMAP = model.labelsApproximateMAP(maxStepCount: 10000)
 //      let predictionsMAP = model.labelsGibbsMarginalMAP()
 //      let evaluationResult = evaluate(predictions: predictionsMAP, using: graph)
@@ -199,13 +199,13 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       useIncrementalNeighborhoodExpansion: false,
       initializationMethod: .labelPropagation,
       stepCount: 10000,
-      preTrainingStepCount: 10,
+      preTrainingStepCount: 0,
       evaluationStepCount: nil,
       evaluationConvergenceStepCount: parsedArguments.get(evaluationConvergenceStepCount),
       evaluationResultsAccumulator: ExactAccumulator(),
       // evaluationResultsAccumulator: MovingAverageAccumulator(weight: 0.1),
       stepCallback: { stepCallback(model: $0) },
-      logStepCount: 10,
+      logStepCount: 1,
       verbose: true)
     model.train()
     return (

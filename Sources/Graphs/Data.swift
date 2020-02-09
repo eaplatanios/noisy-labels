@@ -48,14 +48,61 @@ public struct Graph {
   public let validationNodes: [Int32]
   public let testNodes: [Int32]
   public let otherNodes: [Int32]
+  public let groupedNodes: [[Int32]]
+
+  public init(
+    nodeCount: Int,
+    featureCount: Int,
+    classCount: Int,
+    features: Tensor<Float>,
+    neighbors: [[Int32]],
+    labels: [Int32: Int],
+    trainNodes: [Int32],
+    validationNodes: [Int32],
+    testNodes: [Int32],
+    otherNodes: [Int32]
+  ) {
+    self.nodeCount = nodeCount
+    self.featureCount = featureCount
+    self.classCount = classCount
+    self.features = features
+    self.neighbors = neighbors
+    self.labels = labels
+    self.trainNodes = trainNodes
+    self.validationNodes = validationNodes
+    self.testNodes = testNodes
+    self.otherNodes = otherNodes
+
+    // Compute the grouped nodes.
+    var groupedNodes = [[Int32]]()
+    var allNodes = Set<Int32>(trainNodes)
+    var groupNodes = Set<Int32>(trainNodes)
+    groupedNodes.append([Int32](groupNodes))
+    while groupNodes.count < nodeCount && groupNodes.count > 0 {
+      groupNodes = Set(groupNodes.flatMap { neighbors[Int($0)] })
+        .filter { !allNodes.contains($0) }
+      let newLevel: [Int32] = [Int32](groupNodes).map {
+        ($0, Set(neighbors[Int($0)]).filter { allNodes.contains($0) }.count)
+      }.sorted { $0.1 < $1.1 }.map { $0.0 }
+      if !newLevel.isEmpty {
+        groupedNodes.append(newLevel)
+        allNodes = allNodes.union(newLevel)
+      }
+    }
+    if allNodes.count < nodeCount {
+      groupedNodes.append((validationNodes + testNodes + otherNodes).filter {
+        !allNodes.contains($0)
+      })
+    }
+    self.groupedNodes = groupedNodes
+  }
 
   public var maxNodeDegree: Int { neighbors.map { $0.count }.max()! }
 
   public var labeledData: LabeledData {
-    let nodeLabels = trainNodes.map { self.labels[$0]! }
-    return LabeledData(
+    LabeledData(
       nodeIndices: Tensor<Int32>(trainNodes),
-      nodeLabels: Tensor<Int32>(nodeLabels.map(Int32.init)))
+      nodeLabels: Tensor<Int32>(trainNodes.map { Int32(labels[$0]!) }))
   }
 
   public var nodes: [Int32] { [Int32](0..<Int32(nodeCount)) }
@@ -63,43 +110,6 @@ public struct Graph {
 
   public var nodesTensor: Tensor<Int32> { Tensor<Int32>(nodes) }
   public var unlabeledNodesTensor: Tensor<Int32> { Tensor<Int32>(unlabeledNodes) }
-
-  public var unlabeledNodeIndices: Tensor<Int32> {
-    Tensor<Int32>(validationNodes + testNodes + otherNodes)
-  }
-
-  public var maxBatchNeighborCount: Int { maxNeighborCount }
-
-  public var maxNeighborCount: Int { neighbors.map { $0.count }.max()! }
-
-  public var leveledData: [[Int32]] {
-    var leveledData = [[Int32]]()
-    var allNodes = Set<Int32>(trainNodes)
-    var nodes = Set<Int32>(trainNodes)
-    leveledData.append([Int32](nodes))
-    while nodes.count < nodeCount && nodes.count > 0 {
-      nodes = Set(nodes.flatMap { Set(neighbors[Int($0)]) }).filter { !allNodes.contains($0) }
-      let newLevel: [Int32] = [Int32](nodes).map {
-        ($0, Set(neighbors[Int($0)]).filter { allNodes.contains($0) }.count)
-      }.sorted { $0.1 < $1.1 }.map { $0.0 }
-      if !newLevel.isEmpty {
-        leveledData.append(newLevel)
-        allNodes = allNodes.union(newLevel)
-      }
-    }
-    if allNodes.count < nodeCount {
-      leveledData.append((validationNodes + testNodes + otherNodes).filter {
-        !allNodes.contains($0)
-      })
-    }
-    return leveledData
-  }
-
-  public func data(atDepth depth: Int) -> Tensor<Int32> {
-    let nodes = leveledData.prefix(depth).flatMap { $0 }
-    print("Training on \(nodes.count) / \(nodeCount) nodes.")
-    return Tensor<Int32>(nodes)
-  }
 }
 
 extension Graph {
@@ -125,7 +135,7 @@ extension Graph {
     var trainNodes = [Int32]()
     var validationNodes = [Int32]()
     var testNodes = [Int32]()
-    var unlabeledNodes = [Int32]()
+    var otherNodes = [Int32]()
     var labels = [Int32: Int]()
     var classCount = 0
     for lineParts in try parse(tsvFileAt: directory.appendingPathComponent("labels.txt")) {
@@ -135,11 +145,11 @@ extension Graph {
       labels[node] = label
       classCount = max(classCount, label + 1)
       switch lineParts[2] {
-        case "train": trainNodes.append(node)
-        case "val": validationNodes.append(node)
-        case "test": testNodes.append(node)
-        case "unlabeled": unlabeledNodes.append(node)
-        default: ()
+      case "train": trainNodes.append(node)
+      case "val": validationNodes.append(node)
+      case "test": testNodes.append(node)
+      case "unlabeled": otherNodes.append(node)
+      default: ()
       }
     }
 
@@ -161,31 +171,24 @@ extension Graph {
     // self.features = (Tensor<Float>(stacking: featureVectors, alongAxis: 0) - featuresMean) / featuresStd
 
     let featureVectors = features.map { f in Tensor<Float>(shape: [f.count], scalars: f) }
-    // self.features = Tensor<Float>(stacking: featureVectors, alongAxis: 0)
-    self.features = Tensor<Float>(
-      stacking: featureVectors.map { f -> Tensor<Float> in
-        let sum = sqrt(f.squared().sum())
-        return f / sum.replacing(with: Tensor<Float>(onesLike: sum), where: sum .== 0)
-      },
-      alongAxis: 0)
 
-    self.nodeCount = features.count
-    self.featureCount = features[0].count
-    self.classCount = classCount
-    // let ff: [Tensor<Float>] = features.map { f in Tensor<Float>(shape: [f.count], scalars: f) }
-    // self.features = Tensor<Float>(
-    //   stacking: ff,
-    //   // stacking: ff.map { f -> Tensor<Float> in
-    //   //   let sum = f.sum()
-    //   //   return f / sum.replacing(with: Tensor<Float>(onesLike: sum), where: sum .== 0)
-    //   // },
-    //   alongAxis: 0)
-    self.neighbors = neighbors
-    self.labels = labels
-    self.trainNodes = trainNodes
-    self.validationNodes = validationNodes
-    self.testNodes = testNodes
-    self.otherNodes = unlabeledNodes
+    self.init(
+      nodeCount: features.count,
+      featureCount: features[0].count,
+      classCount: classCount,
+      features: Tensor<Float>(stacking: featureVectors, alongAxis: 0),
+//      features: Tensor<Float>(
+//        stacking: featureVectors.map { f -> Tensor<Float> in
+//          let sum = sqrt(f.squared().sum())
+//          return f / sum.replacing(with: Tensor<Float>(onesLike: sum), where: sum .== 0)
+//        },
+//        alongAxis: 0),
+      neighbors: neighbors,
+      labels: labels,
+      trainNodes: trainNodes,
+      validationNodes: validationNodes,
+      testNodes: testNodes,
+      otherNodes: otherNodes)
   }
 }
 
@@ -288,6 +291,92 @@ extension Graph {
       validationNodes: validationNodes,
       testNodes: testNodes,
       otherNodes: otherNodes)
+  }
+}
+
+public struct SubGraph {
+  @usableFromInline internal let graph: Graph
+  @usableFromInline internal let mapFromOriginalIndex: [Int: Int]?
+  @usableFromInline internal let mapToOriginalIndex: [Int]?
+
+  @inlinable public var nodeCount: Int { graph.nodeCount }
+  @inlinable public var featureCount: Int { graph.featureCount }
+  @inlinable public var classCount: Int { graph.classCount }
+  @inlinable public var features: Tensor<Float> { graph.features }
+  @inlinable public var neighbors: [[Int32]] { graph.neighbors }
+  @inlinable public var labels: [Int32: Int] { graph.labels }
+  @inlinable public var trainNodes: [Int32] { graph.trainNodes }
+  @inlinable public var validationNodes: [Int32] { graph.validationNodes }
+  @inlinable public var testNodes: [Int32] { graph.testNodes }
+  @inlinable public var otherNodes: [Int32] { graph.otherNodes }
+  @inlinable public var maxNodeDegree: Int { graph.maxNodeDegree }
+  @inlinable public var labeledData: LabeledData { graph.labeledData }
+  @inlinable public var nodes: [Int32] { graph.nodes }
+  @inlinable public var unlabeledNodes: [Int32] { graph.unlabeledNodes }
+  @inlinable public var nodesTensor: Tensor<Int32> { graph.nodesTensor }
+  @inlinable public var unlabeledNodesTensor: Tensor<Int32> { graph.unlabeledNodesTensor }
+
+  @usableFromInline
+  internal init(graph: Graph, mapFromOriginalIndex: [Int: Int]?) {
+    self.graph = graph
+    self.mapFromOriginalIndex = mapFromOriginalIndex
+    if let mapFromOriginalIndex = mapFromOriginalIndex {
+      var mapToOriginalIndex = [Int](repeating: 0, count: graph.nodeCount)
+      for (originalIndex, newIndex) in mapFromOriginalIndex {
+        mapToOriginalIndex[newIndex] = originalIndex
+      }
+      self.mapToOriginalIndex = mapToOriginalIndex
+    } else {
+      self.mapToOriginalIndex = nil
+    }
+  }
+
+  @inlinable
+  public func originalIndex(ofNode node: Int32) -> Int32 {
+    if let mapToOriginalIndex = mapToOriginalIndex { return Int32(mapToOriginalIndex[Int(node)]) }
+    return node
+  }
+
+  @inlinable
+  public func transformOriginalSample(_ sample: [Int32]) -> [Int32] {
+    if let mapFromOriginalIndex = mapFromOriginalIndex {
+      var newSample = [Int32](repeating: 0, count: nodeCount)
+      for (originalIndex, newIndex) in mapFromOriginalIndex {
+        newSample[newIndex] = sample[originalIndex]
+      }
+      return newSample
+    }
+    return sample
+  }
+}
+
+extension Graph {
+  public func subGraph(upToDepth depth: Int) -> SubGraph {
+    if depth >= groupedNodes.count { return SubGraph(graph: self, mapFromOriginalIndex: nil) }
+    let nodesToKeep = groupedNodes.prefix(depth).flatMap { $0 }
+    let nodesToKeepTensor = Tensor<Int32>(nodesToKeep)
+    var mapFromOriginalIndex = [Int: Int]()
+    mapFromOriginalIndex.reserveCapacity(nodesToKeep.count)
+    for (index, node) in nodesToKeep.enumerated() {
+      mapFromOriginalIndex[Int(node)] = index
+    }
+    let graph = Graph(
+      nodeCount: nodesToKeep.count,
+      featureCount: featureCount,
+      classCount: classCount,
+      features: features.gathering(atIndices: nodesToKeepTensor),
+      neighbors: nodesToKeep.map {
+        self.neighbors[Int($0)].compactMap { mapFromOriginalIndex[Int($0)] }.map(Int32.init)
+      },
+      labels: [Int32: Int](
+        uniqueKeysWithValues: [Int32](self.labels.keys)
+          .filter { mapFromOriginalIndex.keys.contains(Int($0)) }
+          .map { ($0, self.labels[Int32(mapFromOriginalIndex[Int($0)]!)]!) }),
+      trainNodes: trainNodes.compactMap { mapFromOriginalIndex[Int($0)] }.map(Int32.init),
+      validationNodes: validationNodes.compactMap { mapFromOriginalIndex[Int($0)] }.map(Int32.init),
+      testNodes: testNodes.compactMap { mapFromOriginalIndex[Int($0)] }.map(Int32.init),
+      otherNodes: otherNodes.compactMap { mapFromOriginalIndex[Int($0)] }.map(Int32.init))
+    return SubGraph(graph: graph, mapFromOriginalIndex: mapFromOriginalIndex)
   }
 }
 

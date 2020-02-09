@@ -37,5 +37,4 @@ func makeSimpleGraph(_ firstComponentSize: Int, _ secondComponentSize: Int) -> G
     validationNodes: validationNodes,
     testNodes: testNodes,
     otherNodes: otherNodes)
-
 }

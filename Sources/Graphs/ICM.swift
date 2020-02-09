@@ -11,7 +11,7 @@ func iteratedConditionalModes(
     labelLogits: labelLogits,
     qualityLogits: qualityLogits,
     graph: graph)
-  let leveledData = graph.leveledData.suffix(from: 1)
+  let leveledData = graph.groupedNodes.suffix(from: 1)
   for _ in 0..<maxStepCount {
     var changed = 0
     for level in leveledData {
@@ -51,7 +51,7 @@ func initialization(
   }
 
   // Proceed in a breadth-first order from the labeled nodes.
-  for level in graph.leveledData.suffix(from: 1) {
+  for level in graph.groupedNodes.suffix(from: 1) {
     for node in level {
       let neighbors = graph.neighbors[Int(node)]
       var scores = labelLogits.labelLogits(forNode: Int(node))

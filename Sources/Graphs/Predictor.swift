@@ -158,6 +158,7 @@ public struct Predictions: Differentiable {
   @noDerivative public var neighborIndices: Tensor<Int32>
   @noDerivative public var neighborMask: Tensor<Float>
   public var labelLogits: Tensor<Float>
+  public var neighborLabelLogits: Tensor<Float>
   public var qualityLogits: Tensor<Float>
 
   /// This is marked with `@noDerivative` because its gradients are never needed when training.
@@ -170,6 +171,7 @@ public struct Predictions: Differentiable {
     neighborIndices: Tensor<Int32>,
     neighborMask: Tensor<Float>,
     labelLogits: Tensor<Float>,
+    neighborLabelLogits: Tensor<Float>,
     qualityLogits: Tensor<Float>,
     qualityLogitsTransposed: Tensor<Float>
   ) {
@@ -177,6 +179,7 @@ public struct Predictions: Differentiable {
     self.neighborIndices = neighborIndices
     self.neighborMask = neighborMask
     self.labelLogits = labelLogits
+    self.neighborLabelLogits = neighborLabelLogits
     self.qualityLogits = qualityLogits
     self.qualityLogitsTransposed = qualityLogitsTransposed
   }
@@ -189,6 +192,7 @@ extension Predictions {
     graph: Graph,
     nodes: [Int32],
     labelLogits: Tensor<Float>,
+    neighborLabelLogits: Tensor<Float>,
     qualityLogits: Tensor<Float>,
     qualityLogitsTransposed: Tensor<Float>
   ) {
@@ -216,6 +220,7 @@ extension Predictions {
     self.neighborIndices = neighborIndices
     self.neighborMask = neighborMask
     self.labelLogits = labelLogits
+    self.neighborLabelLogits = neighborLabelLogits
     self.qualityLogits = qualityLogits
     self.qualityLogitsTransposed = qualityLogitsTransposed
   }
@@ -454,6 +459,7 @@ public struct MLPPredictor: GraphPredictor {
     let allLatent = hiddenDropout(hiddenLayers.differentiableReduce(allFeatures) { $1($0) })
     let allLabelLogits = logSoftmax(predictionLayer(allLatent))
     let labelLogits = allLabelLogits.gathering(atIndices: indexMap.nodeIndices)
+    let neighborLabelLogits = allLabelLogits.gathering(atIndices: indexMap.neighborIndices)
 
     // Split up into the nodes and their neighbors.
     let C = Int32(classCount)
@@ -482,6 +488,7 @@ public struct MLPPredictor: GraphPredictor {
       graph: graph,
       nodes: nodeScalars,
       labelLogits: labelLogits,
+      neighborLabelLogits: neighborLabelLogits,
       qualityLogits: qualityLogits,
       qualityLogitsTransposed: qualityLogitsTransposed)
   }

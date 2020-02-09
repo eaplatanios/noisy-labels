@@ -92,8 +92,8 @@ let workingDirectory = URL(fileURLWithPath: FileManager.default.currentDirectory
 let dataDirectory = workingDirectory
   .appendingPathComponent("data")
   .appendingPathComponent(parsedArguments.get(dataset)!)
-let originalGraph = try Graph(loadFromDirectory: dataDirectory)
-//let originalGraph = makeSimpleGraph(10, 20)
+//let originalGraph = try Graph(loadFromDirectory: dataDirectory)
+let originalGraph = makeSimpleGraph(10, 20)
 
 @discardableResult
 func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
@@ -134,12 +134,9 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
     var stepCallbackInvocationsWithoutImprovement = 0
     var stepCallbackInvocationsWithoutPriorImprovement = 0
 
-    func stepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) -> () {
+    func emStepCallback<P: GraphPredictor, O: Optimizer>(model: Model<P, O>) -> () {
       stepCount += 1
-      if !(stepCount - 1).isMultiple(of: 10) { return }
-//      let predictionsMAP = model.labelsApproximateMAP(maxStepCount: 10000)
-//      let predictionsMAP = model.labelsGibbsMarginalMAP()
-//      let evaluationResult = evaluate(predictions: predictionsMAP, using: graph)
+      if !(stepCount - 1).isMultiple(of: 1) { return }
       let evaluationResult = evaluate(model: model, using: graph, usePrior: false)
       if firstEvaluationResult == nil { firstEvaluationResult = evaluationResult }
       if let bestResult = bestEvaluationResult {
@@ -193,19 +190,21 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
     var model = Model(
       graph: graph,
       predictor: predictor,
-      optimizer: optimizer,
+      optimizerFn: { () in optimizer },
       randomSeed: randomSeed,
       batchSize: parsedArguments.get(batchSize) ?? 128,
+      useWarmStarting: false,
       useIncrementalNeighborhoodExpansion: false,
       initializationMethod: .labelPropagation,
-      stepCount: 10000,
-      preTrainingStepCount: 0,
-      evaluationStepCount: nil,
+      mStepCount: 1000,
+      emStepCount: 1000,
+      preTrainingStepCount: 200,
+      evaluationStepCount: 1,
       evaluationConvergenceStepCount: parsedArguments.get(evaluationConvergenceStepCount),
       evaluationResultsAccumulator: ExactAccumulator(),
       // evaluationResultsAccumulator: MovingAverageAccumulator(weight: 0.1),
-      stepCallback: { stepCallback(model: $0) },
-      logStepCount: 1,
+      emStepCallback: { emStepCallback(model: $0) },
+      mStepLogCount: 100,
       verbose: true)
     model.train()
     return (

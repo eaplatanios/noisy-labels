@@ -74,13 +74,17 @@ public enum ModelInitializationMethod {
   case random
   case labelPropagation
 
-  public func initialSample(forGraph graph: Graph) -> [Int32] {
+  public func initialExpectedLabels(forGraph graph: Graph) -> Tensor<Float> {
     switch self {
-    case .groundTruth: return graph.labels.sorted { $0.key < $1.key }.map { Int32($0.value) }
+    case .groundTruth:
+      return Tensor<Float>(
+        oneHotAtIndices: Tensor<Int32>(
+          graph.labels.sorted { $0.key < $1.key }.map { Int32($0.value) }),
+        depth: graph.classCount)
     case .random:
       var sample = (0..<graph.nodeCount).map { _ in Int32.random(in: 0..<Int32(graph.classCount)) }
       for node in graph.trainNodes { sample[Int(node)] = Int32(graph.labels[node]!) }
-      return sample
+      return Tensor<Float>(oneHotAtIndices: Tensor<Int32>(sample), depth: graph.classCount)
     case .labelPropagation:
       var labelScores = Tensor<Float>(zeros: [graph.nodeCount, graph.classCount])
       var labeledNodes = Set<Int32>()
@@ -138,156 +142,76 @@ public enum ModelInitializationMethod {
             shape: [1, graph.classCount]))
       }
 
-      return labelScores.argmax(squeezingAxis: -1).scalars
+      return labelScores
     }
   }
-}
-
-@differentiable(wrt: predictions)
-public func estimateNormalizationConstant(
-  using subGraph: SubGraph,
-  predictions: Predictions,
-  samples: [[[Int32]]]
-) -> Tensor<Float> {
-  _vjpEstimateNormalizationConstant(
-    using: subGraph,
-    predictions: predictions,
-    samples: samples
-  ).value
-}
-
-@derivative(of: estimateNormalizationConstant)
-@usableFromInline
-internal func _vjpEstimateNormalizationConstant(
-  using subGraph: SubGraph,
-  predictions: Predictions,
-  samples: [[[Int32]]]
-) -> (value: Tensor<Float>, pullback: (Tensor<Float>) -> Predictions.TangentVector) {
-  let samples = samples.flatMap({ $0 })
-  var value = Tensor<Float>(0)
-  var gradient = Predictions.TangentVector.zero
-  for sample in samples {
-    let sampleTensor = Tensor<Int32>(subGraph.transformOriginalSample(sample))
-    let (sampleValue, sampleGradient) = valueWithGradient(at: predictions) {
-      predictions -> Tensor<Float> in
-      let h = predictions.labelLogits                                                               // [BatchSize, ClassCount]
-      let g = predictions.qualityLogits                                                             // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-      let gMask = predictions.neighborMask                                                          // [BatchSize, MaxNeighborCount]
-      let gY = g.batchGathering(
-        atIndices: sampleTensor.gathering(
-          atIndices: predictions.neighborIndices
-        ).expandingShape(at: -1),
-        alongAxis: 3,
-        batchDimensionCount: 2).squeezingShape(at: -1)                                              // [BatchSize, MaxNeighborCount, ClassCount]
-      let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                      // [BatchSize, ClassCount]
-      return (h + gYMasked).batchGathering(
-        atIndices: sampleTensor.expandingShape(at: -1),
-        alongAxis: 1,
-        batchDimensionCount: 1).sum() / Float(samples.count)
-    }
-    value += sampleValue
-    gradient += sampleGradient
-  }
-  return (value: value, pullback: { _ in gradient })
 }
 
 public struct Model<Predictor: GraphPredictor, Optimizer: TensorFlow.Optimizer>
 where Optimizer.Model == Predictor {
+  private let graph: Graph
+
+  public let optimizerFn: () -> Optimizer
   public let randomSeed: Int64
-  /// TODO: !!! Clarify that this is currently only a pre-training batch size.
   public let batchSize: Int
+  public let useWarmStarting: Bool
   public let useIncrementalNeighborhoodExpansion: Bool
   public let initializationMethod: ModelInitializationMethod
-  public let stepCount: Int
+  public let mStepCount: Int
+  public let emStepCount: Int
   public let preTrainingStepCount: Int
-  public let gibbsLikelihoodChainCount: Int
-  public let gibbsLikelihoodSampleCount: Int
-  public let gibbsLikelihoodBurnInSampleCount: Int
-  public let gibbsLikelihoodThinningSampleCount: Int
-  public let gibbsNormalizationChainCount: Int
-  public let gibbsNormalizationSampleCount: Int
-  public let gibbsNormalizationBurnInSampleCount: Int
-  public let gibbsNormalizationThinningSampleCount: Int
   public let evaluationStepCount: Int?
   public let evaluationConvergenceStepCount: Int?
-  public let stepCallback: (Model) -> ()
-  public let logStepCount: Int?
+  public let emStepCallback: (Model) -> ()
+  public let mStepLogCount: Int?
   public let verbose: Bool
 
   public var predictor: Predictor
   public var optimizer: Optimizer
   public var evaluationResultsAccumulator: Accumulator
 
-  private let graph: Graph
-
-  /// The last labels sample is an array that contains arrays with the labels sampled in the last
-  /// step, for each node in the graph and for each Gibbs sampling chain.
-  private var lastLikelihoodSamples: [[Int32]]
-  private var lastNormalizationSamples: [[Int32]]
+  private var expectedLabels: Tensor<Float>
   private var bestPredictor: Predictor
   private var bestResult: Result?
 
   public init(
     graph: Graph,
     predictor: Predictor,
-    optimizer: Optimizer,
+    optimizerFn: @escaping () -> Optimizer,
     randomSeed: Int64,
     batchSize: Int = 128,
+    useWarmStarting: Bool = false,
     useIncrementalNeighborhoodExpansion: Bool = false,
     initializationMethod: ModelInitializationMethod = .labelPropagation,
-    stepCount: Int = 1000,
+    mStepCount: Int = 1000,
+    emStepCount: Int = 1000,
     preTrainingStepCount: Int = 1000,
-    gibbsLikelihoodChainCount: Int = 5,
-    gibbsLikelihoodSampleCount: Int = 5,
-    gibbsLikelihoodBurnInSampleCount: Int = 0,
-    gibbsLikelihoodThinningSampleCount: Int = 0,
-    gibbsNormalizationChainCount: Int = 5,
-    gibbsNormalizationSampleCount: Int = 5,
-    gibbsNormalizationBurnInSampleCount: Int = 10,
-    gibbsNormalizationThinningSampleCount: Int = 0,
     evaluationStepCount: Int? = 1,
     evaluationConvergenceStepCount: Int? = 10,
     evaluationResultsAccumulator: Accumulator = ExactAccumulator(),
-    stepCallback: @escaping (Model) -> () = { _ in () },
-    logStepCount: Int? = 100,
+    emStepCallback: @escaping (Model) -> () = { _ in () },
+    mStepLogCount: Int? = 100,
     verbose: Bool = false
   ) {
     self.graph = graph
-    self.predictor = predictor
-    self.optimizer = optimizer
+    self.optimizerFn = optimizerFn
     self.randomSeed = randomSeed
     self.batchSize = batchSize
+    self.useWarmStarting = useWarmStarting
     self.useIncrementalNeighborhoodExpansion = useIncrementalNeighborhoodExpansion
     self.initializationMethod = initializationMethod
-    self.stepCount = stepCount
+    self.mStepCount = mStepCount
+    self.emStepCount = emStepCount
     self.preTrainingStepCount = preTrainingStepCount
-    self.gibbsLikelihoodChainCount = gibbsLikelihoodChainCount
-    self.gibbsLikelihoodSampleCount = gibbsLikelihoodSampleCount
-    self.gibbsLikelihoodBurnInSampleCount = gibbsLikelihoodBurnInSampleCount
-    self.gibbsLikelihoodThinningSampleCount = gibbsLikelihoodThinningSampleCount
-    self.gibbsNormalizationChainCount = gibbsNormalizationChainCount
-    self.gibbsNormalizationSampleCount = gibbsNormalizationSampleCount
-    self.gibbsNormalizationBurnInSampleCount = gibbsNormalizationBurnInSampleCount
-    self.gibbsNormalizationThinningSampleCount = gibbsNormalizationThinningSampleCount
     self.evaluationStepCount = evaluationStepCount
     self.evaluationConvergenceStepCount = evaluationConvergenceStepCount
-    self.evaluationResultsAccumulator = evaluationResultsAccumulator
-    self.stepCallback = stepCallback
-    self.logStepCount = logStepCount
+    self.emStepCallback = emStepCallback
+    self.mStepLogCount = mStepLogCount
     self.verbose = verbose
-    self.lastLikelihoodSamples = [[Int32]]()
-    self.lastLikelihoodSamples.reserveCapacity(gibbsLikelihoodChainCount)
-    self.lastLikelihoodSamples.append(initializationMethod.initialSample(forGraph: graph))
-    for _ in 1..<gibbsLikelihoodChainCount {
-      self.lastLikelihoodSamples.append(ModelInitializationMethod.random.initialSample(
-        forGraph: graph))
-    }
-    self.lastNormalizationSamples = [[Int32]]()
-    self.lastNormalizationSamples.reserveCapacity(gibbsNormalizationChainCount)
-    for _ in 0..<gibbsNormalizationChainCount {
-      self.lastNormalizationSamples.append(ModelInitializationMethod.random.initialSample(
-        forGraph: graph))
-    }
+    self.predictor = predictor
+    self.optimizer = optimizerFn()
+    self.evaluationResultsAccumulator = evaluationResultsAccumulator
+    self.expectedLabels = initializationMethod.initialExpectedLabels(forGraph: graph)
     self.bestPredictor = predictor
     self.bestResult = nil
   }
@@ -295,20 +219,15 @@ where Optimizer.Model == Predictor {
   public func labelLogits(forNodes nodes: [Int32], usePrior: Bool = false) -> Tensor<Float> {
     let nodes = Tensor<Int32>(nodes)
     if usePrior { return predictor.labelLogits(forNodes: nodes, using: graph) }
-
-    // Estimate MAP using iterated conditional modes.
-    // The following is inefficient.
-    let predictions = InMemoryPredictions(
-      fromPredictions: predictor.predictionsHelper(forNodes: graph.nodesTensor, using: graph),
-      using: graph)
-    return Tensor<Float>(
-      oneHotAtIndices: Tensor<Int32>(iteratedConditionalModes(
-        labelLogits: predictions.labelLogits,
-        qualityLogits: predictions.qualityLogits,
-        graph: graph,
-        maxStepCount: 100)
-      ).gathering(atIndices: nodes),
-      depth: graph.classCount)
+//    let predictions = predictor.predictions(forNodes: Tensor<Int32>(nodes), using: graph)
+//    let neighborY = exp(predictions.neighborLabelLogits)                                            // [BatchSize, MaxNeighborCount, ClassCount]
+//    let h = predictions.labelLogits                                                                 // [BatchSize, ClassCount]
+//    let g = predictions.qualityLogits                                                               // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+//    let gMask = predictions.neighborMask                                                            // [BatchSize, MaxNeighborCount]
+//    let gY = (g * neighborY.expandingShape(at: 2)).sum(squeezingAxes: -1)                           // [BatchSize, MaxNeighborCount, ClassCount]
+//    let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                        // [BatchSize, ClassCount]
+//    return h + gYMasked
+    return expectedLabels.gathering(atIndices: Tensor<Int32>(nodes))
   }
 
   public mutating func train() {
@@ -317,156 +236,29 @@ where Optimizer.Model == Predictor {
       preTrainLabelsPredictor()
     }
 
+    emStepCallback(self)
     if verbose { logger.info("Starting model training.") }
-    // trainLabelPredictors()
-    stepCallback(self)
-
-    // Burn some samples before starting to use them for estimating the likelihood function.
-    if gibbsLikelihoodBurnInSampleCount > 0 {
-      let predictions = predictor.predictionsHelper(forNodes: graph.nodesTensor, using: graph)
-      let inMemoryPredictions = withoutDerivative(at: predictions) {
-        InMemoryPredictions(fromPredictions: $0, using: graph)
-      }
-      for _ in 0..<gibbsLikelihoodBurnInSampleCount {
-        lastLikelihoodSamples = sampleLabels(
-          using: SubGraph(graph: graph, mapFromOriginalIndex: nil),
-          predictions: inMemoryPredictions,
-          previousSamples: lastLikelihoodSamples,
-          sampleTrainLabels: false)
-      }
-    }
 
     var previousGraphExpansion = 0
     var subGraph = SubGraph(graph: graph, mapFromOriginalIndex: nil)
-    var nodes = subGraph.nodesTensor
-    var convergenceStepCount = 0
-    bestResult = nil
-    evaluationResultsAccumulator.reset()
-    var accumulatedNLL = Float(0.0)
-    var accumulatedSteps = 0
-    for step in 0..<stepCount {
+    for emStep in 0..<emStepCount {
       if useIncrementalNeighborhoodExpansion {
         // TODO: !!! Make this schedule configurable.
-        let graphDepth = (step / 10) + 1
+        let graphDepth = (emStep / 10) + 1
         if previousGraphExpansion < graphDepth {
           previousGraphExpansion = graphDepth
           subGraph = graph.subGraph(upToDepth: graphDepth)
-          nodes = subGraph.nodesTensor
           logger.info("Training on \(subGraph.nodeCount) / \(graph.nodeCount) nodes.")
         }
       }
-      let (negativeLogLikelihood, gradient) = valueWithGradient(at: predictor) {
-        predictor -> Tensor<Float> in
-        let predictions = predictor.predictionsHelper(forNodes: nodes, using: subGraph.graph)
-        let inMemoryPredictions = withoutDerivative(at: predictions) {
-          InMemoryPredictions(fromPredictions: $0, using: subGraph.graph)
-        }
 
-        let h = predictions.labelLogits
-        let g = predictions.qualityLogits                                                           // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-        let gMask = predictions.neighborMask                                                        // [BatchSize, MaxNeighborCount]
+      if verbose { logger.info("Iteration \(emStep) - Running M-Step") }
+      performMStep(using: subGraph, randomSeed: randomSeed &+ Int64(emStep))
 
-        let likelihoodSamples = sampleMultipleLabels(
-          using: subGraph,
-          predictions: inMemoryPredictions,
-          previousSamples: lastLikelihoodSamples,
-          sampleTrainLabels: false,
-          sampleCount: gibbsLikelihoodSampleCount,
-          burnInSampleCount: gibbsLikelihoodBurnInSampleCount,
-          thinningSampleCount: gibbsLikelihoodThinningSampleCount)
-        var negativeLogLikelihood = (h * exp(h)).sum() * 0 // TODO: !!!
-        for samples in likelihoodSamples {
-          for sample in samples {
-            let y = Tensor<Int32>(subGraph.transformOriginalSample(sample))
-            let neighborY = y.gathering(atIndices: predictions.neighborIndices)                     // [BatchSize, MaxNeighborCount, ClassCount]
-            let gY = g.batchGathering(
-              atIndices: neighborY.expandingShape(at: -1),
-              alongAxis: 3,
-              batchDimensionCount: 2).squeezingShape(at: -1)                                        // [BatchSize, MaxNeighborCount, ClassCount]
-            let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                // [BatchSize, ClassCount]
-            negativeLogLikelihood = negativeLogLikelihood - h.batchGathering(
-              atIndices: y.expandingShape(at: -1),
-              alongAxis: 1,
-              batchDimensionCount: 1).sum()
-            negativeLogLikelihood = negativeLogLikelihood - gYMasked.batchGathering(
-              atIndices: y.expandingShape(at: -1),
-              alongAxis: 1,
-              batchDimensionCount: 1).sum()
-          }
-          lastLikelihoodSamples = samples
-        }
+      if verbose { logger.info("Iteration \(emStep) - Running E-Step") }
+      performEStep(using: subGraph, randomSeed: randomSeed &+ Int64(emStep))
 
-        let likelihoodSampleCount = gibbsLikelihoodSampleCount * gibbsLikelihoodChainCount
-        negativeLogLikelihood = negativeLogLikelihood / Float(likelihoodSampleCount)
-
-        // Compute the normalization term in the negative log-likelihood.
-        let normalizationSamples = sampleMultipleLabels(
-          using: subGraph,
-          predictions: inMemoryPredictions,
-          previousSamples: lastNormalizationSamples,
-          sampleTrainLabels: true,
-          sampleCount: gibbsNormalizationSampleCount,
-          burnInSampleCount: gibbsNormalizationBurnInSampleCount,
-          thinningSampleCount: gibbsNormalizationThinningSampleCount)
-        negativeLogLikelihood = negativeLogLikelihood + estimateNormalizationConstant(
-          using: subGraph,
-          predictions: predictions,
-          samples: normalizationSamples)
-        lastNormalizationSamples = normalizationSamples.last!
-
-        // Update the last sample.
-        for _ in 0..<gibbsLikelihoodThinningSampleCount {
-          lastLikelihoodSamples = sampleLabels(
-            using: subGraph,
-            predictions: inMemoryPredictions,
-            previousSamples: lastLikelihoodSamples,
-            sampleTrainLabels: false)
-        }
-
-        return negativeLogLikelihood
-      }
-
-      optimizer.update(&predictor, along: gradient)
-      accumulatedNLL += negativeLogLikelihood.scalarized()
-      accumulatedSteps += 1
-      if verbose {
-        if let logStepCount = self.logStepCount, step % logStepCount == 0 || step == stepCount - 1 {
-          let nll = accumulatedNLL / Float(accumulatedSteps)
-          let message = "Step \(String(format: "%5d", step)) " +
-            "Negative Log-Likelihood: \(String(format: "%.8f", nll))"
-          logger.info("\(message)")
-          accumulatedNLL = 0.0
-          accumulatedSteps = 0
-        }
-      }
-
-      // Check for early stopping.
-      if let evaluationStepCount = self.evaluationStepCount, step % evaluationStepCount == 0 {
-        let evaluationResult = evaluate(model: self, using: graph, usePrior: true)
-        let result = evaluationResultsAccumulator.update(with: evaluationResult)
-        if let bestResult = self.bestResult {
-          if result.validationAccuracy > bestResult.validationAccuracy {
-            let message = "Best predictor accuracy: \(evaluationResult.validationAccuracy) | " +
-              "\(result.validationAccuracy)"
-            logger.info("\(message)")
-            self.bestPredictor = predictor
-            self.bestResult = result
-            convergenceStepCount = 0
-          } else {
-            convergenceStepCount += 1
-            if let evaluationConvergenceStepCount = self.evaluationConvergenceStepCount,
-               convergenceStepCount > evaluationConvergenceStepCount {
-              predictor = bestPredictor
-              return
-            }
-          }
-        } else {
-          self.bestPredictor = predictor
-          self.bestResult = result
-        }
-      }
-
-      stepCallback(self)
+      emStepCallback(self)
     }
   }
 
@@ -492,8 +284,8 @@ where Optimizer.Model == Predictor {
         accumulatedLoss += loss.scalarized()
         accumulatedSteps += 1
         if verbose {
-          if let logStepCount = self.logStepCount, step % logStepCount == 0 ||
-            step == stepCount - 1 {
+          if let logStepCount = self.mStepLogCount, step % logStepCount == 0 ||
+            step == preTrainingStepCount - 1 {
             let nll = accumulatedLoss / Float(accumulatedSteps)
             let message = "Supervised Step \(String(format: "%5d", step)) | " +
               "Loss: \(String(format: "%.8f", nll))"
@@ -524,84 +316,133 @@ where Optimizer.Model == Predictor {
     }
   }
 
-  private func sampleLabels(
-    using subGraph: SubGraph,
-    predictions: InMemoryPredictions,
-    previousSamples: [[Int32]],
-    sampleTrainLabels: Bool = true
-  ) -> [[Int32]] {
-    let nodes = sampleTrainLabels ? subGraph.nodes : subGraph.unlabeledNodes
-    var currentSamples = previousSamples
-    for chain in 0..<previousSamples.count {
-      for node in nodes.shuffled() {
-        let neighbors = subGraph.neighbors[Int(node)]
-        let g = predictions.qualityLogits[Int(node)]
-        let gT = predictions.qualityLogitsTransposed[Int(node)]
-        var labelProbabilities = predictions.labelLogits.labelLogits(forNode: Int(node))
-        for (neighborIndex, neighbor) in neighbors.enumerated() {
-          let originalNeighborIndex = Int(subGraph.originalIndex(ofNode: neighbor))
-          let neighborLabel = Int(currentSamples[chain][originalNeighborIndex])
-          for k in 0..<subGraph.classCount {
-            labelProbabilities[k] += g.qualityLogit(
-              forNeighbor: Int(neighborIndex),
-              nodeLabel: k,
-              neighborLabel: neighborLabel) / Float(neighbors.count)
-            labelProbabilities[k] += gT.qualityLogit(
-              forNeighbor: Int(neighborIndex),
-              nodeLabel: neighborLabel,
-              neighborLabel: k) / Float(neighbors.count)
-          }
-        }
-        let labelProbabilitiesMax = labelProbabilities.max()!
-        var sum = Float(0)
-        for k in 0..<subGraph.classCount {
-          labelProbabilities[k] = exp(labelProbabilities[k] - labelProbabilitiesMax)
-          sum += labelProbabilities[k]
-        }
-        // TODO: !!! Seed / random number generator.
-        let random = sum > 0 ?
-          Float.random(in: 0..<sum) :
-          Float.random(in: 0..<Float(subGraph.classCount))
-        var accumulator: Float = 0
-        for k in 0..<subGraph.classCount {
-          accumulator += sum > 0 ? labelProbabilities[k] : 1
-          if random < accumulator {
-            currentSamples[chain][Int(subGraph.originalIndex(ofNode: node))] = Int32(k)
-            break
-          }
-        }
-      }
+  private mutating func performEStep(using subGraph: SubGraph, randomSeed: Int64) {
+    // Set the labeled node labels to their true labels.
+    for batch in Dataset(elements: subGraph.labeledData).batched(batchSize) {
+      expectedLabels = _Raw.tensorScatterUpdate(
+        expectedLabels,
+        indices: batch.nodes.expandingShape(at: -1),
+        updates: Tensor<Float>(
+          oneHotAtIndices: batch.labels,
+          depth: subGraph.classCount,
+          onValue: 0,
+          offValue: -100000000))
     }
-    return currentSamples
+
+    // Compute expectations for the labels of the unlabeled nodes.
+    let unlabeledData = Dataset(elements: subGraph.unlabeledNodesTensor)
+      .shuffled(sampleCount: 10000, randomSeed: randomSeed)
+      .batched(batchSize)
+    for batch in unlabeledData {
+      let predictions = predictor.predictions(forNodes: batch, using: subGraph.graph)
+//      let neighborY = exp(predictions.neighborLabelLogits)                                          // [BatchSize, MaxNeighborCount, ClassCount]
+      let neighborY = exp(expectedLabels.gathering(atIndices: predictions.neighborIndices))         // [BatchSize, MaxNeighborCount, ClassCount]
+      let h = predictions.labelLogits                                                               // [BatchSize, ClassCount]
+      let g = predictions.qualityLogits                                                             // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+      let gMask = predictions.neighborMask                                                          // [BatchSize, MaxNeighborCount]
+      let gY = (g * neighborY.expandingShape(at: 2)).sum(squeezingAxes: -1)                         // [BatchSize, MaxNeighborCount, ClassCount]
+      let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                      // [BatchSize, ClassCount]
+
+      let gT = predictions.qualityLogitsTransposed                                                  // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+      let gTY = (gT * neighborY.expandingShape(at: 3)).sum(squeezingAxes: -2)                       // [BatchSize, MaxNeighborCount, ClassCount]
+      let gTYMasked = (gTY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                    // [BatchSize, ClassCount]
+
+      expectedLabels = _Raw.tensorScatterUpdate(
+        expectedLabels,
+        indices: batch.expandingShape(at: -1),
+        updates: logSoftmax(h + gYMasked + gTYMasked, alongAxis: -1))
+    }
   }
 
-  private func sampleMultipleLabels(
-    using subGraph: SubGraph,
-    predictions: InMemoryPredictions,
-    previousSamples: [[Int32]],
-    sampleTrainLabels: Bool = true,
-    sampleCount: Int = 10,
-    burnInSampleCount: Int = 10,
-    thinningSampleCount: Int = 0
-  ) -> [[[Int32]]] {
-    var samples = [[[Int32]]](repeating: [[Int32]](), count: previousSamples.count)
-    var currentSamples = previousSamples
-    var currentSampleCount = 0
-    while samples[0].count < sampleCount {
-      currentSamples = sampleLabels(
-        using: subGraph,
-        predictions: predictions,
-        previousSamples: currentSamples,
-        sampleTrainLabels: sampleTrainLabels)
-      currentSampleCount += 1
-      if currentSampleCount > burnInSampleCount &&
-           currentSampleCount.isMultiple(of: thinningSampleCount + 1) {
-        for chain in 0..<previousSamples.count {
-          samples[chain].append(currentSamples[chain])
+  public mutating func performMStep(using subGraph: SubGraph, randomSeed: Int64) {
+    let expectedLabels = self.expectedLabels
+    var dataIterator = Dataset(elements: subGraph.nodesTensor).repeated()
+      .shuffled(sampleCount: 10000, randomSeed: randomSeed)
+      .batched(batchSize)
+      .prefetched(count: 10)
+      .makeIterator()
+    var convergenceStepCount = 0
+    bestResult = nil
+    evaluationResultsAccumulator.reset()
+    if !useWarmStarting {
+      predictor.reset()
+      optimizer = optimizerFn()
+    }
+    var accumulatedNLL = Float(0.0)
+    var accumulatedSteps = 0
+    for mStep in 0..<mStepCount {
+      let batch = dataIterator.next()!
+      withLearningPhase(.training) {
+        let (negativeLogLikelihood, gradient) = valueWithGradient(at: predictor) {
+          predictor -> Tensor<Float> in
+          let predictions = predictor.predictionsHelper(forNodes: batch, using: subGraph.graph)
+          let y = exp(expectedLabels.gathering(atIndices: batch))                                   // [BatchSize, ClassCount]
+//          let neighborY = exp(predictions.neighborLabelLogits)                                      // [BatchSize, MaxNeighborCount, ClassCount]
+          let neighborY = exp(expectedLabels.gathering(atIndices: predictions.neighborIndices))     // [BatchSize, MaxNeighborCount, ClassCount]
+          let h = predictions.labelLogits                                                           // [BatchSize, ClassCount]
+          let g = predictions.qualityLogits                                                         // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          let gMask = predictions.neighborMask                                                      // [BatchSize, MaxNeighborCount]
+          let gY = (g * neighborY.expandingShape(at: 2)).sum(squeezingAxes: -1)                     // [BatchSize, MaxNeighborCount, ClassCount]
+
+          let gT = predictions.qualityLogitsTransposed                                              // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          let gTY = (gT * neighborY.expandingShape(at: 3)).sum(squeezingAxes: -2)                   // [BatchSize, MaxNeighborCount, ClassCount]
+          let gTYMasked = (gTY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                // [BatchSize, ClassCount]
+
+          let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                  // [BatchSize, ClassCount]
+          let compilerBug = predictions.neighborLabelLogits.sum() * 0
+          return compilerBug + softmaxCrossEntropy(
+            logits: h + gYMasked + gTYMasked,
+            probabilities: y,
+            reduction: { $0.mean() })
+        }
+        optimizer.update(&predictor, along: gradient)
+        accumulatedNLL += negativeLogLikelihood.scalarized()
+        accumulatedSteps += 1
+        if verbose {
+          if let logStepCount = self.mStepLogCount, mStep % logStepCount == 0 || mStep == mStepCount - 1 {
+            let nll = accumulatedNLL / Float(accumulatedSteps)
+            let message = "M-Step \(String(format: "%5d", mStep)) " +
+              "Negative Log-Likelihood: \(String(format: "%.8f", nll))"
+            logger.info("\(message)")
+            accumulatedNLL = 0.0
+            accumulatedSteps = 0
+          }
+        }
+      }
+
+      // Check for early stopping.
+      if let evaluationStepCount = self.evaluationStepCount, mStep % evaluationStepCount == 0 {
+        var modelCopy = self
+        modelCopy.performEStep(
+          using: SubGraph(graph: graph, mapFromOriginalIndex: nil),
+          randomSeed: randomSeed)
+        let evaluationResult = evaluate(model: modelCopy, using: graph, usePrior: false)
+        let result = evaluationResultsAccumulator.update(with: evaluationResult)
+        if let bestResult = self.bestResult {
+          if result.validationAccuracy > bestResult.validationAccuracy {
+            let message = "Best predictor accuracy: \(evaluationResult.validationAccuracy) | " +
+              "\(result.validationAccuracy)"
+            logger.info("\(message)")
+            self.bestPredictor = predictor
+            self.bestResult = result
+            convergenceStepCount = 0
+          } else {
+            convergenceStepCount += 1
+            if let evaluationConvergenceStepCount = self.evaluationConvergenceStepCount,
+               convergenceStepCount > evaluationConvergenceStepCount {
+              predictor = bestPredictor
+              return
+            }
+          }
+        } else {
+          self.bestPredictor = predictor
+          self.bestResult = result
         }
       }
     }
-    return samples
+    if evaluationStepCount != nil {
+      predictor = bestPredictor
+    }
   }
 
 //  internal func labelsGibbsMarginalMAP() -> [Int32] {

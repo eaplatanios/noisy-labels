@@ -158,11 +158,7 @@ public struct Predictions: Differentiable {
   @noDerivative public var neighborIndices: Tensor<Int32>
   @noDerivative public var neighborMask: Tensor<Float>
   public var labelLogits: Tensor<Float>
-  public var neighborLabelLogits: Tensor<Float>
   public var qualityLogits: Tensor<Float>
-
-  /// This is marked with `@noDerivative` because its gradients are never needed when training.
-  @noDerivative public var qualityLogitsTransposed: Tensor<Float>
 
   @inlinable
   @differentiable(wrt: (labelLogits, qualityLogits))
@@ -171,17 +167,13 @@ public struct Predictions: Differentiable {
     neighborIndices: Tensor<Int32>,
     neighborMask: Tensor<Float>,
     labelLogits: Tensor<Float>,
-    neighborLabelLogits: Tensor<Float>,
-    qualityLogits: Tensor<Float>,
-    qualityLogitsTransposed: Tensor<Float>
+    qualityLogits: Tensor<Float>
   ) {
     self.nodes = nodes
     self.neighborIndices = neighborIndices
     self.neighborMask = neighborMask
     self.labelLogits = labelLogits
-    self.neighborLabelLogits = neighborLabelLogits
     self.qualityLogits = qualityLogits
-    self.qualityLogitsTransposed = qualityLogitsTransposed
   }
 }
 
@@ -192,9 +184,7 @@ extension Predictions {
     graph: Graph,
     nodes: [Int32],
     labelLogits: Tensor<Float>,
-    neighborLabelLogits: Tensor<Float>,
-    qualityLogits: Tensor<Float>,
-    qualityLogitsTransposed: Tensor<Float>
+    qualityLogits: Tensor<Float>
   ) {
     let neighborIndices = Tensor<Int32>(
       stacking: withoutDerivative(at: nodes) {
@@ -220,16 +210,13 @@ extension Predictions {
     self.neighborIndices = neighborIndices
     self.neighborMask = neighborMask
     self.labelLogits = labelLogits
-    self.neighborLabelLogits = neighborLabelLogits
     self.qualityLogits = qualityLogits
-    self.qualityLogitsTransposed = qualityLogitsTransposed
   }
 }
 
 public struct InMemoryPredictions {
   public let labelLogits: LabelLogits
   public let qualityLogits: [QualityLogits]
-  public let qualityLogitsTransposed: [QualityLogits]
 }
 
 extension InMemoryPredictions {
@@ -242,20 +229,11 @@ extension InMemoryPredictions {
     let q = zip(predictions.qualityLogits.unstacked(alongAxis: 0), neighborCounts).map {
       $0[0..<$1]
     }
-    let qT = zip(predictions.qualityLogitsTransposed.unstacked(alongAxis: 0), neighborCounts).map {
-      $0[0..<$1]
-    }
     self.labelLogits = LabelLogits(
       logits: h,
       nodeCount: graph.nodeCount,
       labelCount: graph.classCount)
     self.qualityLogits = q.map {
-      QualityLogits(
-        logits: $0.scalars,
-        nodeCount: $0.shape[0],
-        labelCount: graph.classCount)
-    }
-    self.qualityLogitsTransposed = qT.map {
       QualityLogits(
         logits: $0.scalars,
         nodeCount: $0.shape[0],
@@ -457,9 +435,7 @@ public struct MLPPredictor: GraphPredictor {
     // Compute features, label probabilities, and qualities for all requested nodes.
     let allFeatures = graph.features.gathering(atIndices: indexMap.uniqueNodeIndices)
     let allLatent = hiddenDropout(hiddenLayers.differentiableReduce(allFeatures) { $1($0) })
-    let allLabelLogits = logSoftmax(predictionLayer(allLatent))
-    let labelLogits = allLabelLogits.gathering(atIndices: indexMap.nodeIndices)
-    let neighborLabelLogits = allLabelLogits.gathering(atIndices: indexMap.neighborIndices)
+    let labelLogits = logSoftmax(predictionLayer(allLatent.gathering(atIndices: indexMap.nodeIndices)))
 
     // Split up into the nodes and their neighbors.
     let C = Int32(classCount)
@@ -474,23 +450,11 @@ public struct MLPPredictor: GraphPredictor {
       (nodesLatentQ + neighborsLatentQ).logSumExp(squeezingAxes: -1),
       alongAxis: -2)
 
-    let nodesLatentQTranspose = allNodeLatentQ.gathering(atIndices: indexMap.neighborIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, Int32(indexMap.neighborIndices.shape[1]), C, C, L]))
-    let neighborsLatentQTranspose = allNeighborLatentQ.gathering(atIndices: indexMap.nodeIndices)
-      .reshaped(toShape: Tensor<Int32>([-1, 1, C, C, L]))
-    let qualityLogitsTransposed = logSoftmax(
-      withoutDerivative(at: nodesLatentQTranspose + neighborsLatentQTranspose) {
-        $0.logSumExp(squeezingAxes: -1)
-      },
-      alongAxis: -1)
-
     return Predictions(
       graph: graph,
       nodes: nodeScalars,
       labelLogits: labelLogits,
-      neighborLabelLogits: neighborLabelLogits,
-      qualityLogits: qualityLogits,
-      qualityLogitsTransposed: qualityLogitsTransposed)
+      qualityLogits: qualityLogits)
   }
 
   @differentiable(wrt: self)

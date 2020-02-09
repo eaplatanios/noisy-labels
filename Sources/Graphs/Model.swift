@@ -335,26 +335,20 @@ where Optimizer.Model == Predictor {
       .batched(batchSize)
     for batch in unlabeledData {
       let predictions = predictor.predictions(forNodes: batch, using: subGraph.graph)
-//      let neighborY = exp(predictions.neighborLabelLogits)                                          // [BatchSize, MaxNeighborCount, ClassCount]
       let neighborY = exp(expectedLabels.gathering(atIndices: predictions.neighborIndices))         // [BatchSize, MaxNeighborCount, ClassCount]
       let h = predictions.labelLogits                                                               // [BatchSize, ClassCount]
       let g = predictions.qualityLogits                                                             // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
       let gMask = predictions.neighborMask                                                          // [BatchSize, MaxNeighborCount]
       let gY = (g * neighborY.expandingShape(at: 2)).sum(squeezingAxes: -1)                         // [BatchSize, MaxNeighborCount, ClassCount]
       let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                      // [BatchSize, ClassCount]
-
-      let gT = predictions.qualityLogitsTransposed                                                  // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-      let gTY = (gT * neighborY.expandingShape(at: 3)).sum(squeezingAxes: -2)                       // [BatchSize, MaxNeighborCount, ClassCount]
-      let gTYMasked = (gTY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                    // [BatchSize, ClassCount]
-
       expectedLabels = _Raw.tensorScatterUpdate(
         expectedLabels,
         indices: batch.expandingShape(at: -1),
-        updates: logSoftmax(h + gYMasked + gTYMasked, alongAxis: -1))
+        updates: logSoftmax(h + gYMasked, alongAxis: -1))
     }
   }
 
-  public mutating func performMStep(using subGraph: SubGraph, randomSeed: Int64) {
+  public mutating func performMStep(using subGraph: SubGraph, randomSeed: Int64, onlyH: Bool = false, onlyG: Bool = false) {
     let expectedLabels = self.expectedLabels
     var dataIterator = Dataset(elements: subGraph.nodesTensor).repeated()
       .shuffled(sampleCount: 10000, randomSeed: randomSeed)
@@ -364,7 +358,7 @@ where Optimizer.Model == Predictor {
     var convergenceStepCount = 0
     bestResult = nil
     evaluationResultsAccumulator.reset()
-    if !useWarmStarting {
+    if !useWarmStarting && !onlyH && !onlyG {
       predictor.reset()
       optimizer = optimizerFn()
     }
@@ -377,21 +371,27 @@ where Optimizer.Model == Predictor {
           predictor -> Tensor<Float> in
           let predictions = predictor.predictionsHelper(forNodes: batch, using: subGraph.graph)
           let y = exp(expectedLabels.gathering(atIndices: batch))                                   // [BatchSize, ClassCount]
-//          let neighborY = exp(predictions.neighborLabelLogits)                                      // [BatchSize, MaxNeighborCount, ClassCount]
           let neighborY = exp(expectedLabels.gathering(atIndices: predictions.neighborIndices))     // [BatchSize, MaxNeighborCount, ClassCount]
           let h = predictions.labelLogits                                                           // [BatchSize, ClassCount]
           let g = predictions.qualityLogits                                                         // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
           let gMask = predictions.neighborMask                                                      // [BatchSize, MaxNeighborCount]
           let gY = (g * neighborY.expandingShape(at: 2)).sum(squeezingAxes: -1)                     // [BatchSize, MaxNeighborCount, ClassCount]
-
-          let gT = predictions.qualityLogitsTransposed                                              // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-          let gTY = (gT * neighborY.expandingShape(at: 3)).sum(squeezingAxes: -2)                   // [BatchSize, MaxNeighborCount, ClassCount]
-          let gTYMasked = (gTY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                // [BatchSize, ClassCount]
-
           let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                  // [BatchSize, ClassCount]
-          let compilerBug = predictions.neighborLabelLogits.sum() * 0
-          return compilerBug + softmaxCrossEntropy(
-            logits: h + gYMasked + gTYMasked,
+          if onlyH {
+            let compilerBug = gYMasked.sum() * 0
+            return compilerBug + softmaxCrossEntropy(
+              logits: h + withoutDerivative(at: gYMasked) { $0 },
+              probabilities: y,
+              reduction: { $0.mean() })
+          } else if onlyG {
+            let compilerBug = h.sum() * 0
+            return compilerBug + softmaxCrossEntropy(
+              logits: withoutDerivative(at: h) { $0 } + gYMasked,
+              probabilities: y,
+              reduction: { $0.mean() })
+          }
+          return softmaxCrossEntropy(
+            logits: h + gYMasked,
             probabilities: y,
             reduction: { $0.mean() })
         }
@@ -412,11 +412,18 @@ where Optimizer.Model == Predictor {
 
       // Check for early stopping.
       if let evaluationStepCount = self.evaluationStepCount, mStep % evaluationStepCount == 0 {
-        var modelCopy = self
-        modelCopy.performEStep(
-          using: SubGraph(graph: graph, mapFromOriginalIndex: nil),
-          randomSeed: randomSeed)
-        let evaluationResult = evaluate(model: modelCopy, using: graph, usePrior: false)
+        let usePrior = onlyH
+        let evaluationResult = { () -> Result in
+          if usePrior {
+            return evaluate(model: self, using: graph, usePrior: true)
+          } else {
+            var modelCopy = self
+            modelCopy.performEStep(
+              using: SubGraph(graph: graph, mapFromOriginalIndex: nil),
+              randomSeed: randomSeed)
+            return evaluate(model: modelCopy, using: graph, usePrior: false)
+          }
+        }()
         let result = evaluationResultsAccumulator.update(with: evaluationResult)
         if let bestResult = self.bestResult {
           if result.validationAccuracy > bestResult.validationAccuracy {

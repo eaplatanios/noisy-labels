@@ -268,14 +268,15 @@ case .mlp: runExperiments(predictor: { MLPPredictor(
   featureCount: $0.featureCount,
   classCount: $0.classCount,
   hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-  confusionLatentSize: parsedArguments.get(qHiddenUnitCounts)![0],
+  confusionLatentSize: parsedArguments.get(qHiddenUnitCounts)![0], // TODO: !!! Fix this hack.
   dropout: parsedArguments.get(dropout) ?? 0.5) })
-//case .decoupledMLP: runExperiments(predictor: { DecoupledMLPPredictor(
-//  graph: $0,
-//  lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-//  qHiddenUnitCounts: [Int](parsedArguments.get(qHiddenUnitCounts)!.suffix(from: 1)),
-//  confusionLatentSize: parsedArguments.get(qHiddenUnitCounts)![0], // TODO: !!! Fix this hack.
-//  dropout: parsedArguments.get(dropout) ?? 0.5) })
+case .decoupledMLP: runExperiments(predictor: { DecoupledMLPPredictor(
+  featureCount: $0.featureCount,
+  classCount: $0.classCount,
+  hHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+  gHiddenUnitCounts: [Int](parsedArguments.get(qHiddenUnitCounts)!.suffix(from: 1)),
+  confusionLatentSize: parsedArguments.get(qHiddenUnitCounts)![0], // TODO: !!! Fix this hack.
+  dropout: parsedArguments.get(dropout) ?? 0.5) })
 //case .gcn: runExperiments(predictor: { GCNPredictor(
 //  graph: $0,
 //  hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,

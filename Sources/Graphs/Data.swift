@@ -371,7 +371,8 @@ extension Graph {
       labels: [Int32: Int](
         uniqueKeysWithValues: [Int32](self.labels.keys)
           .filter { mapFromOriginalIndex.keys.contains(Int($0)) }
-          .map { ($0, self.labels[Int32(mapFromOriginalIndex[Int($0)]!)]!) }),
+          .map { Int32(mapFromOriginalIndex[Int($0)]!) }
+          .map { ($0, self.labels[$0]!) }),
       trainNodes: trainNodes.compactMap { mapFromOriginalIndex[Int($0)] }.map(Int32.init),
       validationNodes: validationNodes.compactMap { mapFromOriginalIndex[Int($0)] }.map(Int32.init),
       testNodes: testNodes.compactMap { mapFromOriginalIndex[Int($0)] }.map(Int32.init),

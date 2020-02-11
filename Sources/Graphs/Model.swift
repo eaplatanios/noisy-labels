@@ -261,6 +261,8 @@ where Optimizer.Model == Predictor {
       if verbose { logger.info("Iteration \(emStep) - Running E-Step") }
       performEStep(using: subGraph, randomSeed: randomSeed &+ Int64(emStep))
 
+      print("Y: \(exp(expectedLabels).gathering(atIndices: Tensor<Int32>(10)))")
+
       emStepCallback(self)
     }
   }
@@ -321,104 +323,104 @@ where Optimizer.Model == Predictor {
     }
   }
 
-  private mutating func performEStep(using subGraph: SubGraph, randomSeed: Int64) {
-    // Set the labeled node labels to their true labels.
-    for batch in Dataset(elements: subGraph.labeledData).batched(batchSize) {
-      expectedLabels = _Raw.tensorScatterUpdate(
-        expectedLabels,
-        indices: batch.nodes.expandingShape(at: -1),
-        updates: Tensor<Float>(
-          oneHotAtIndices: batch.labels,
-          depth: subGraph.classCount,
-          onValue: 0,
-          offValue: -100000000))
-    }
-
-    // Compute expectations for the labels of the unlabeled nodes.
-    if subGraph.unlabeledNodes.count > 0 {
-//      let unlabeledData = Dataset(elements: subGraph.unlabeledNodesTensor)
-//        .shuffled(sampleCount: 10000, randomSeed: randomSeed)
-//        .batched(batchSize)
-      let unlabeledData = [subGraph.unlabeledNodesTensor]
-      for batch in unlabeledData {
-        let predictions = predictor.predictions(forNodes: batch, using: subGraph.graph)
-        let neighborY = exp(expectedLabels.gathering(atIndices: predictions.neighborIndices))       // [BatchSize, MaxNeighborCount, ClassCount]
-        let h = predictions.labelLogits                                                             // [BatchSize, ClassCount]
-        let g = predictions.qualityLogits                                                           // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
-        let gMask = predictions.neighborMask                                                        // [BatchSize, MaxNeighborCount]
-        let gY = (g * neighborY.expandingShape(at: 2)).sum(squeezingAxes: -1)                       // [BatchSize, MaxNeighborCount, ClassCount]
-        let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                    // [BatchSize, ClassCount]
-        expectedLabels = _Raw.tensorScatterUpdate(
-          expectedLabels,
-          indices: batch.expandingShape(at: -1),
-          updates: logSoftmax(h + gYMasked, alongAxis: -1))
-      }
-    }
-  }
-
 //  private mutating func performEStep(using subGraph: SubGraph, randomSeed: Int64) {
-//    let predictions = InMemoryPredictions(
-//      fromPredictions: predictor.predictions(
-//        forNodes: subGraph.nodesTensor,
-//        using: subGraph.graph),
-//      using: subGraph.graph)
-//
-//    // Flat array representation of a tensor with shape [NodeCount, ClassCount].
-//    var expectedLabels = self.expectedLabels.scalars
-//
 //    // Set the labeled node labels to their true labels.
-//    for node in subGraph.trainNodes {
-//      let label = subGraph.labels[node]!
-//      for k in 0..<subGraph.classCount {
-//        expectedLabels[Int(node) * subGraph.classCount + k] = label == k ? 0 : -100000000
-//      }
+//    for batch in Dataset(elements: subGraph.labeledData).batched(batchSize) {
+//      expectedLabels = _Raw.tensorScatterUpdate(
+//        expectedLabels,
+//        indices: batch.nodes.expandingShape(at: -1),
+//        updates: Tensor<Float>(
+//          oneHotAtIndices: batch.labels,
+//          depth: subGraph.classCount,
+//          onValue: 0,
+//          offValue: -100000000))
 //    }
 //
 //    // Compute expectations for the labels of the unlabeled nodes.
-//    for node in subGraph.unlabeledNodes.shuffled() {
-//      let nodeOffset = Int(node) * subGraph.classCount
-//      for k in 0..<subGraph.classCount {
-//        expectedLabels[nodeOffset + k] =
-//          predictions.labelLogits.labelLogit(node: Int(node), label: k)
-//      }
-//      let neighbors = subGraph.neighbors[Int(node)]
-//      let neighborCount = Float(neighbors.count)
-//      for (neighborIndex, neighbor) in neighbors.enumerated() {
-//        for k in 0..<subGraph.classCount {
-//          for l in 0..<subGraph.classCount {
-//            let neighborLabel = exp(expectedLabels[Int(neighbor) * subGraph.classCount + l])
-//            expectedLabels[nodeOffset + k] +=
-//              predictions.qualityLogits[Int(node)].qualityLogit(
-//                forNeighbor: neighborIndex,
-//                nodeLabel: k,
-//                neighborLabel: l) * Float(neighborLabel) / neighborCount
-//          }
-//        }
-//      }
-//
-//      // Normalize the node label distribution.
-//      var maxLogit = -Float.infinity
-//      for k in 0..<subGraph.classCount {
-//        let logit = expectedLabels[nodeOffset + k]
-//        if logit > maxLogit {
-//          maxLogit = logit
-//        }
-//      }
-//      var logitExpSum: Float = 0
-//      for k in 0..<subGraph.classCount {
-//        let logit = expectedLabels[nodeOffset + k]
-//        logitExpSum += exp(logit - maxLogit)
-//      }
-//      let logSumExp = log(logitExpSum) + maxLogit
-//      for k in 0..<subGraph.classCount {
-//        expectedLabels[nodeOffset + k] -= logSumExp
+//    if subGraph.unlabeledNodes.count > 0 {
+////      let unlabeledData = Dataset(elements: subGraph.unlabeledNodesTensor)
+////        .shuffled(sampleCount: 10000, randomSeed: randomSeed)
+////        .batched(batchSize)
+//      let unlabeledData = [subGraph.unlabeledNodesTensor]
+//      for batch in unlabeledData {
+//        let predictions = predictor.predictions(forNodes: batch, using: subGraph.graph)
+//        let neighborY = exp(expectedLabels.gathering(atIndices: predictions.neighborIndices))       // [BatchSize, MaxNeighborCount, ClassCount]
+//        let h = predictions.labelLogits                                                             // [BatchSize, ClassCount]
+//        let g = predictions.qualityLogits                                                           // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+//        let gMask = predictions.neighborMask                                                        // [BatchSize, MaxNeighborCount]
+//        let gY = (g * neighborY.expandingShape(at: 2)).sum(squeezingAxes: -1)                       // [BatchSize, MaxNeighborCount, ClassCount]
+//        let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                    // [BatchSize, ClassCount]
+//        expectedLabels = _Raw.tensorScatterUpdate(
+//          expectedLabels,
+//          indices: batch.expandingShape(at: -1),
+//          updates: logSoftmax(h + gYMasked, alongAxis: -1))
 //      }
 //    }
-//
-//    self.expectedLabels = Tensor<Float>(
-//      shape: self.expectedLabels.shape,
-//      scalars: expectedLabels)
 //  }
+
+  private mutating func performEStep(using subGraph: SubGraph, randomSeed: Int64) {
+    let predictions = InMemoryPredictions(
+      fromPredictions: predictor.predictions(
+        forNodes: subGraph.nodesTensor,
+        using: subGraph.graph),
+      using: subGraph.graph)
+
+    // Flat array representation of a tensor with shape [NodeCount, ClassCount].
+    var expectedLabels = self.expectedLabels.scalars
+
+    // Set the labeled node labels to their true labels.
+    for node in subGraph.trainNodes {
+      let label = subGraph.labels[node]!
+      for k in 0..<subGraph.classCount {
+        expectedLabels[Int(node) * subGraph.classCount + k] = label == k ? 0 : -100000000
+      }
+    }
+
+    // Compute expectations for the labels of the unlabeled nodes.
+    for node in subGraph.unlabeledNodes.shuffled() {
+      let nodeOffset = Int(node) * subGraph.classCount
+      for k in 0..<subGraph.classCount {
+        expectedLabels[nodeOffset + k] =
+          predictions.labelLogits.labelLogit(node: Int(node), label: k)
+      }
+      let neighbors = subGraph.neighbors[Int(node)]
+      let neighborCount = Float(neighbors.count)
+      for (neighborIndex, neighbor) in neighbors.enumerated() {
+        for k in 0..<subGraph.classCount {
+          for l in 0..<subGraph.classCount {
+            let neighborLabel = exp(expectedLabels[Int(neighbor) * subGraph.classCount + l])
+            expectedLabels[nodeOffset + k] +=
+              predictions.qualityLogits[Int(node)].qualityLogit(
+                forNeighbor: neighborIndex,
+                nodeLabel: k,
+                neighborLabel: l) * Float(neighborLabel) / neighborCount
+          }
+        }
+      }
+
+      // Normalize the node label distribution.
+      var maxLogit = -Float.infinity
+      for k in 0..<subGraph.classCount {
+        let logit = expectedLabels[nodeOffset + k]
+        if logit > maxLogit {
+          maxLogit = logit
+        }
+      }
+      var logitExpSum: Float = 0
+      for k in 0..<subGraph.classCount {
+        let logit = expectedLabels[nodeOffset + k]
+        logitExpSum += exp(logit - maxLogit)
+      }
+      let logSumExp = log(logitExpSum) + maxLogit
+      for k in 0..<subGraph.classCount {
+        expectedLabels[nodeOffset + k] -= logSumExp
+      }
+    }
+
+    self.expectedLabels = Tensor<Float>(
+      shape: self.expectedLabels.shape,
+      scalars: expectedLabels)
+  }
 
   public mutating func performMStep(using subGraph: SubGraph, randomSeed: Int64, onlyH: Bool = false, onlyG: Bool = false) {
     let expectedLabels = self.expectedLabels
@@ -462,29 +464,29 @@ where Optimizer.Model == Predictor {
               probabilities: y,
               reduction: { $0.mean() })
           }
-//          return softmaxCrossEntropy(
-//            logits: h + gYMasked,
-//            probabilities: y,
-//            reduction: { $0.mean() })
+          return softmaxCrossEntropy(
+            logits: h + gYMasked,
+            probabilities: y,
+            reduction: { $0.mean() })
 
-          let neighbors = predictions.neighborIndices
-          let neighborLabelLogits = withoutDerivative(at: predictor) {
-            $0.labelLogits(forNodes: neighbors.flattened(), using: subGraph.graph)
-          }
-          let neighborLabelSamples = Tensor<Float>(
-            oneHotAtIndices: Tensor<Int32>(
-              randomCategorialLogits: neighborLabelLogits,
-              sampleCount: 100),
-            depth: subGraph.classCount
-          ).reshaped(to: TensorShape(
-            [neighbors.shape[0], neighbors.shape[1], 100, subGraph.classCount]))                    // [BatchSize, MaxNeighborCount, SampleCount, ClassCount]
-          let gYSamples = (g.expandingShape(at: 2) * neighborLabelSamples.expandingShape(at: -2))
-            .sum(squeezingAxes: -1)                                                                 // [BatchSize, MaxNeighborCount, SampleCount, ClassCount]
-          let gYSamplesMasked = (gYSamples * gMask.expandingShape(at: -1, -2)).sum(squeezingAxes: 1)// [BatchSize, SampleCount, ClassCount]
-          let hgYSamplesMasked = 2 * h.expandingShape(at: 1) + gYSamplesMasked
-          let normalizingConstant = hgYSamplesMasked.logSumExp(squeezingAxes: -1).mean(squeezingAxes: 1)
-
-          return (-((2 * h + gYMasked) * y).sum(squeezingAxes: -1) + normalizingConstant).mean()
+//          let neighbors = predictions.neighborIndices
+//          let neighborLabelLogits = withoutDerivative(at: predictor) {
+//            $0.labelLogits(forNodes: neighbors.flattened(), using: subGraph.graph)
+//          }
+//          let neighborLabelSamples = Tensor<Float>(
+//            oneHotAtIndices: Tensor<Int32>(
+//              randomCategorialLogits: neighborLabelLogits,
+//              sampleCount: 100),
+//            depth: subGraph.classCount
+//          ).reshaped(to: TensorShape(
+//            [neighbors.shape[0], neighbors.shape[1], 100, subGraph.classCount]))                    // [BatchSize, MaxNeighborCount, SampleCount, ClassCount]
+//          let gYSamples = (g.expandingShape(at: 2) * neighborLabelSamples.expandingShape(at: -2))
+//            .sum(squeezingAxes: -1)                                                                 // [BatchSize, MaxNeighborCount, SampleCount, ClassCount]
+//          let gYSamplesMasked = (gYSamples * gMask.expandingShape(at: -1, -2)).sum(squeezingAxes: 1)// [BatchSize, SampleCount, ClassCount]
+//          let hgYSamplesMasked = h.expandingShape(at: 1) + gYSamplesMasked
+//          let normalizingConstant = hgYSamplesMasked.logSumExp(squeezingAxes: -1).mean(squeezingAxes: 1)
+//
+//          return (-((h + gYMasked) * y).sum(squeezingAxes: -1) + normalizingConstant).mean()
         }
         optimizer.update(&predictor, along: gradient)
         accumulatedNLL += negativeLogLikelihood.scalarized()

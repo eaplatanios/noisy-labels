@@ -12,59 +12,6 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-// 6: Modularity?
-// 6: Computational power could have been a reason.
-// 6: "..." when you fast forward in the time scale.
-// 7: Trained using many examples is not necessarily the difference.
-// 8: More like parametric vs nonparametric models.
-// 8: I disagree that the meaning is lost. It's more about how you compress that meaning.
-// 14: Only applies to context-free structures.
-// 19: Function evaluation? Why is that interesting?
-// 20: Tree-structured not chain-structured, right?
-// 20: The one-hot embeddings are local representations, right?
-// 22: How many examples do you need? How did you generate training data? What about curriculum?
-// 27: This simply has to do with moving complexity around to programming language features.
-// 28: Shouldn't it be the same stack for everyone?
-// 33: Is Sympy good? How does a better solver like Mathematica do?
-// 44: Make that a single animation.
-// 45: Yoda speaking.
-// 45: Why use the right to left notation in your slides?
-// 45: I don't get this example in the end? Can you keep using a running example instead of letter symbols?
-// 46: What about uncertainty in k_t? Isn't that a big challenge with symbolic systems too?
-// 47: Do these representations really generalize? As in, what does a vector mean when it lies between three logical expressions?
-// 49: Mizaitis and Mitchel are misspelled in the bottom.
-// 50: Underscore?
-// 50: How many did you have in total? Was the domain limited? How were the data collected?
-// 53: Does no feedback also means no supervision at all?
-// 57: Mizaitis in the bottom.
-// 58: Mitchel in the bottom.
-// 58: Make it prettier.
-// 61: P(Y|X) and P(Y, X) are not needed. Just explain what the two terms mean intuitively.
-// 62: Weird jump back to the math part and the motivation for that.
-
-
-
-// Symbolic solvers disadvantage: slow because of discrete search with heuristics.
-// Maybe mention big challenges that symbolic solvers cannot handle.
-
-// How do these math problems relate to difficult real-world problems with noisy structures?
-// Why talk about the math stuff if there are no future directions or connections to future directions for that part?
-
-
-
-
-
-
-
-// 16: Can be compressed by just evaluating that expression. How much information do you want to keep? Do you want to be able to reconstruct the original expression?
-// 23: What is the representation of the prediction? Is that a structured prediction problem?
-// 25: Are the mistakes between LSTM and Sympy the same? What do they look like?
-// 25: How do you determine failure in the symbolic solver? Is it time based?
-// 23: Bi-directional LSTM? Transformer? That would be more about directionality rather than about hierarchical structure in the data.
-
-
-
-
 import Foundation
 import Progress
 import TensorFlow
@@ -261,8 +208,6 @@ where Optimizer.Model == Predictor {
       if verbose { logger.info("Iteration \(emStep) - Running E-Step") }
       performEStep(using: subGraph, randomSeed: randomSeed &+ Int64(emStep))
 
-      print("Y: \(exp(expectedLabels).gathering(atIndices: Tensor<Int32>(10)))")
-
       emStepCallback(self)
     }
   }
@@ -285,7 +230,9 @@ where Optimizer.Model == Predictor {
           let predictions = predictor.predictionsHelper(forNodes: batch.nodes, using: graph)
           return softmaxCrossEntropy(
             logits: predictions.labelLogits,
-            probabilities: labels) + predictions.qualityLogits.sum() * 0
+            probabilities: labels) +
+            predictions.qualityLogits.sum() * 0 +
+            predictions.qualityLogitsTranspose.sum() * 0
         }
         optimizer.update(&predictor, along: gradient)
         accumulatedLoss += loss.scalarized()
@@ -377,7 +324,7 @@ where Optimizer.Model == Predictor {
     }
 
     // Compute expectations for the labels of the unlabeled nodes.
-    for node in subGraph.unlabeledNodes.shuffled() {
+    for node in subGraph.unlabeledNodes {
       let nodeOffset = Int(node) * subGraph.classCount
       for k in 0..<subGraph.classCount {
         expectedLabels[nodeOffset + k] =
@@ -394,6 +341,11 @@ where Optimizer.Model == Predictor {
                 forNeighbor: neighborIndex,
                 nodeLabel: k,
                 neighborLabel: l) * Float(neighborLabel) / neighborCount
+            expectedLabels[nodeOffset + k] +=
+              predictions.qualityLogitsTranspose[Int(neighbor)].qualityLogit(
+                forNeighbor: subGraph.neighbors[Int(neighbor)].firstIndex(of: node)!,
+                nodeLabel: l,
+                neighborLabel: k) * Float(neighborLabel) / neighborCount
           }
         }
       }
@@ -422,7 +374,7 @@ where Optimizer.Model == Predictor {
       scalars: expectedLabels)
   }
 
-  public mutating func performMStep(using subGraph: SubGraph, randomSeed: Int64, onlyH: Bool = false, onlyG: Bool = false) {
+  public mutating func performMStep(using subGraph: SubGraph, randomSeed: Int64) {
     let expectedLabels = self.expectedLabels
     var dataIterator = Dataset(elements: subGraph.nodesTensor).repeated()
       .shuffled(sampleCount: 10000, randomSeed: randomSeed)
@@ -432,7 +384,7 @@ where Optimizer.Model == Predictor {
     var convergenceStepCount = 0
     bestResult = nil
     evaluationResultsAccumulator.reset()
-    if !useWarmStarting && !onlyH && !onlyG {
+    if !useWarmStarting {
       predictor.reset()
       optimizer = optimizerFn()
     }
@@ -448,45 +400,36 @@ where Optimizer.Model == Predictor {
           let neighborY = exp(expectedLabels.gathering(atIndices: predictions.neighborIndices))     // [BatchSize, MaxNeighborCount, ClassCount]
           let h = predictions.labelLogits                                                           // [BatchSize, ClassCount]
           let g = predictions.qualityLogits                                                         // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
+          let gT = predictions.qualityLogitsTranspose                                               // [BatchSize, MaxNeighborCount, ClassCount, ClassCount]
           let gMask = predictions.neighborMask                                                      // [BatchSize, MaxNeighborCount]
-          let gY = (g * neighborY.expandingShape(at: 2)).sum(squeezingAxes: -1)                     // [BatchSize, MaxNeighborCount, ClassCount]
+          let gY = (g * neighborY.expandingShape(at: -2)).sum(squeezingAxes: -1)                    // [BatchSize, MaxNeighborCount, ClassCount]
+          let gTY = (gT * neighborY.expandingShape(at: -1)).sum(squeezingAxes: -2)                  // [BatchSize, MaxNeighborCount, ClassCount]
           let gYMasked = (gY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                  // [BatchSize, ClassCount]
-          if onlyH {
-            let compilerBug = gYMasked.sum() * 0
-            return compilerBug + softmaxCrossEntropy(
-              logits: h + withoutDerivative(at: gYMasked) { $0 },
-              probabilities: y,
-              reduction: { $0.mean() })
-          } else if onlyG {
-            let compilerBug = h.sum() * 0
-            return compilerBug + softmaxCrossEntropy(
-              logits: withoutDerivative(at: h) { $0 } + gYMasked,
-              probabilities: y,
-              reduction: { $0.mean() })
-          }
-          return softmaxCrossEntropy(
-            logits: h + gYMasked,
-            probabilities: y,
-            reduction: { $0.mean() })
+          let gTYMasked = (gTY * gMask.expandingShape(at: -1)).sum(squeezingAxes: 1)                // [BatchSize, ClassCount]
 
-//          let neighbors = predictions.neighborIndices
-//          let neighborLabelLogits = withoutDerivative(at: predictor) {
-//            $0.labelLogits(forNodes: neighbors.flattened(), using: subGraph.graph)
-//          }
-//          let neighborLabelSamples = Tensor<Float>(
-//            oneHotAtIndices: Tensor<Int32>(
-//              randomCategorialLogits: neighborLabelLogits,
-//              sampleCount: 100),
-//            depth: subGraph.classCount
-//          ).reshaped(to: TensorShape(
-//            [neighbors.shape[0], neighbors.shape[1], 100, subGraph.classCount]))                    // [BatchSize, MaxNeighborCount, SampleCount, ClassCount]
-//          let gYSamples = (g.expandingShape(at: 2) * neighborLabelSamples.expandingShape(at: -2))
-//            .sum(squeezingAxes: -1)                                                                 // [BatchSize, MaxNeighborCount, SampleCount, ClassCount]
-//          let gYSamplesMasked = (gYSamples * gMask.expandingShape(at: -1, -2)).sum(squeezingAxes: 1)// [BatchSize, SampleCount, ClassCount]
-//          let hgYSamplesMasked = h.expandingShape(at: 1) + gYSamplesMasked
-//          let normalizingConstant = hgYSamplesMasked.logSumExp(squeezingAxes: -1).mean(squeezingAxes: 1)
-//
-//          return (-((h + gYMasked) * y).sum(squeezingAxes: -1) + normalizingConstant).mean()
+//          return softmaxCrossEntropy(
+//            logits: h + gYMasked,
+//            probabilities: y,
+//            reduction: { $0.mean() })
+
+          let neighbors = predictions.neighborIndices
+          let neighborLabelSamples = Tensor<Float>(
+            oneHotAtIndices: Tensor<Int32>(
+              randomCategorialLogits: expectedLabels.gathering(atIndices: neighbors.flattened()),
+              sampleCount: 100),
+            depth: subGraph.classCount
+          ).reshaped(to: TensorShape(
+            [neighbors.shape[0], neighbors.shape[1], 100, subGraph.classCount]))                    // [BatchSize, MaxNeighborCount, SampleCount, ClassCount]
+          let gYSamples = (g.expandingShape(at: 2) * neighborLabelSamples.expandingShape(at: -2))
+            .sum(squeezingAxes: -1)                                                                 // [BatchSize, MaxNeighborCount, SampleCount, ClassCount]
+          let gTYSamples = (gT.expandingShape(at: 2) * neighborLabelSamples.expandingShape(at: -1))
+            .sum(squeezingAxes: -2)                                                                 // [BatchSize, MaxNeighborCount, SampleCount, ClassCount]
+          let gYSamplesMasked = (gYSamples * gMask.expandingShape(at: -1, -2)).sum(squeezingAxes: 1) // [BatchSize, SampleCount, ClassCount]
+          let gTYSamplesMasked = (gTYSamples * gMask.expandingShape(at: -1, -2)).sum(squeezingAxes: 1) // [BatchSize, SampleCount, ClassCount]
+          let hgYgTYSamplesMasked = h.expandingShape(at: 1) + gYSamplesMasked + gTYSamplesMasked
+          let normalizingConstant = hgYgTYSamplesMasked.logSumExp(squeezingAxes: -1).mean(squeezingAxes: 1)
+
+          return (-((h + gYMasked + gTYMasked) * y).sum(squeezingAxes: -1) + normalizingConstant).mean()
         }
         optimizer.update(&predictor, along: gradient)
         accumulatedNLL += negativeLogLikelihood.scalarized()
@@ -505,18 +448,11 @@ where Optimizer.Model == Predictor {
 
       // Check for early stopping.
       if let evaluationStepCount = self.evaluationStepCount, mStep % evaluationStepCount == 0 {
-        let usePrior = onlyH
-        let evaluationResult = { () -> Result in
-          if usePrior {
-            return evaluate(model: self, using: graph, usePrior: true)
-          } else {
-            var modelCopy = self
-            modelCopy.performEStep(
-              using: SubGraph(graph: graph, mapFromOriginalIndex: nil),
-              randomSeed: randomSeed)
-            return evaluate(model: modelCopy, using: graph, usePrior: false)
-          }
-        }()
+        var modelCopy = self
+        modelCopy.performEStep(
+          using: SubGraph(graph: graph, mapFromOriginalIndex: nil),
+          randomSeed: randomSeed)
+        let evaluationResult = evaluate(model: modelCopy, using: graph, usePrior: false)
         let result = evaluationResultsAccumulator.update(with: evaluationResult)
         if let bestResult = self.bestResult {
           if result.validationAccuracy > bestResult.validationAccuracy {

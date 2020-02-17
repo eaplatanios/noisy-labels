@@ -309,6 +309,7 @@ public struct SubGraph {
   @inlinable public var validationNodes: [Int32] { graph.validationNodes }
   @inlinable public var testNodes: [Int32] { graph.testNodes }
   @inlinable public var otherNodes: [Int32] { graph.otherNodes }
+  @inlinable public var groupedNodes: [[Int32]] { graph.groupedNodes }
   @inlinable public var maxNodeDegree: Int { graph.maxNodeDegree }
   @inlinable public var labeledData: LabeledData { graph.labeledData }
   @inlinable public var nodes: [Int32] { graph.nodes }

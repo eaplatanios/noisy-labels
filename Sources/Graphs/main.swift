@@ -92,8 +92,8 @@ let workingDirectory = URL(fileURLWithPath: FileManager.default.currentDirectory
 let dataDirectory = workingDirectory
   .appendingPathComponent("data")
   .appendingPathComponent(parsedArguments.get(dataset)!)
-//let originalGraph = try Graph(loadFromDirectory: dataDirectory)
-let originalGraph = makeSimpleGraph(10, 20)
+let originalGraph = try Graph(loadFromDirectory: dataDirectory)
+//let originalGraph = makeSimpleGraph(10, 20)
 
 @discardableResult
 func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
@@ -197,7 +197,7 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       useIncrementalNeighborhoodExpansion: false,
       initializationMethod: .labelPropagation,
       mStepCount: 1000,
-      emStepCount: 1000,
+      emStepCount: 100,
       preTrainingStepCount: 200,
       evaluationStepCount: 1,
       evaluationConvergenceStepCount: parsedArguments.get(evaluationConvergenceStepCount),
@@ -277,16 +277,26 @@ case .decoupledMLP: runExperiments(predictor: { DecoupledMLPPredictor(
   gHiddenUnitCounts: [Int](parsedArguments.get(qHiddenUnitCounts)!.suffix(from: 1)),
   confusionLatentSize: parsedArguments.get(qHiddenUnitCounts)![0], // TODO: !!! Fix this hack.
   dropout: parsedArguments.get(dropout) ?? 0.5) })
-//case .gcn: runExperiments(predictor: { GCNPredictor(
-//  graph: $0,
-//  hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-//  dropout: parsedArguments.get(dropout) ?? 0.5) })
-//case .decoupledGCN: runExperiments(predictor: { DecoupledGCNPredictorV2(
-//  graph: $0,
-//  lHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
-//  qHiddenUnitCounts: parsedArguments.get(qHiddenUnitCounts)!,
-//  dropout: parsedArguments.get(dropout) ?? 0.5) })
-default: fatalError("The specified model is not supported yet.")
+case .gcn: runExperiments(predictor: { GCNPredictor(
+  featureCount: $0.featureCount,
+  classCount: $0.classCount,
+  hiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+  confusionLatentSize: parsedArguments.get(qHiddenUnitCounts)![0], // TODO: !!! Fix this hack.
+  dropout: parsedArguments.get(dropout) ?? 0.5) })
+case .decoupledGCN: runExperiments(predictor: { DecoupledGCNPredictor(
+  featureCount: $0.featureCount,
+  classCount: $0.classCount,
+  hHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+  gHiddenUnitCounts: [Int](parsedArguments.get(qHiddenUnitCounts)!.suffix(from: 1)),
+  confusionLatentSize: parsedArguments.get(qHiddenUnitCounts)![0], // TODO: !!! Fix this hack.
+  dropout: parsedArguments.get(dropout) ?? 0.5) })
+case .decoupledGCNV2: runExperiments(predictor: { DecoupledGCNPredictorV2(
+  featureCount: $0.featureCount,
+  classCount: $0.classCount,
+  hHiddenUnitCounts: parsedArguments.get(lHiddenUnitCounts)!,
+  gHiddenUnitCounts: [Int](parsedArguments.get(qHiddenUnitCounts)!.suffix(from: 1)),
+  confusionLatentSize: parsedArguments.get(qHiddenUnitCounts)![0], // TODO: !!! Fix this hack.
+  dropout: parsedArguments.get(dropout) ?? 0.5) })
 }
 
 func configuration(graph: Graph) -> String {
@@ -326,6 +336,7 @@ enum ModelName: String, StringEnumArgument {
   case decoupledMLP = "decoupled-mlp"
   case gcn = "gcn"
   case decoupledGCN = "decoupled-gcn"
+  case decoupledGCNV2 = "decoupled-gcn-v2"
 
   public static let completion: ShellCompletion = .none
 }

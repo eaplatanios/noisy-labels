@@ -171,18 +171,21 @@ extension Graph {
     // self.features = (Tensor<Float>(stacking: featureVectors, alongAxis: 0) - featuresMean) / featuresStd
 
     let featureVectors = features.map { f in Tensor<Float>(shape: [f.count], scalars: f) }
+//    let featureVectors = features.map { f in
+//      Tensor<Float>(Tensor<Float>(shape: [f.count], scalars: f) .> 0)
+//    }
 
     self.init(
       nodeCount: features.count,
       featureCount: features[0].count,
       classCount: classCount,
-      features: Tensor<Float>(stacking: featureVectors, alongAxis: 0),
-//      features: Tensor<Float>(
-//        stacking: featureVectors.map { f -> Tensor<Float> in
-//          let sum = sqrt(f.squared().sum())
-//          return f / sum.replacing(with: Tensor<Float>(onesLike: sum), where: sum .== 0)
-//        },
-//        alongAxis: 0),
+//      features: Tensor<Float>(stacking: featureVectors, alongAxis: 0),
+      features: Tensor<Float>(
+        stacking: featureVectors.map { f -> Tensor<Float> in
+          let sum = sqrt(f.squared().sum())
+          return f / sum.replacing(with: Tensor<Float>(onesLike: sum), where: sum .== 0)
+        },
+        alongAxis: 0),
       neighbors: neighbors,
       labels: labels,
       trainNodes: trainNodes,

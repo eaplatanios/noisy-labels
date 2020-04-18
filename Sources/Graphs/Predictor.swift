@@ -654,7 +654,7 @@ public struct GCNPredictor: GraphPredictor {
   @noDerivative public let confusionLatentSize: Int
   @noDerivative public let dropout: Float
 
-  public var hiddenLayers: [DenseNoBias<Float>]
+  public var hiddenLayers: [Dense<Float>]
   @noDerivative public let hiddenDropout: Dropout<Float>
   public var predictionLayer: Dense<Float>
   public var nodeLatentLayer: Dense<Float>
@@ -674,9 +674,9 @@ public struct GCNPredictor: GraphPredictor {
     self.dropout = dropout
 
     var inputSize = featureCount
-    self.hiddenLayers = [DenseNoBias<Float>]()
+    self.hiddenLayers = [Dense<Float>]()
     for hiddenUnitCount in hiddenUnitCounts {
-      self.hiddenLayers.append(DenseNoBias<Float>(
+      self.hiddenLayers.append(Dense<Float>(
         inputSize: inputSize,
         outputSize: hiddenUnitCount))
       inputSize = hiddenUnitCount
@@ -704,7 +704,7 @@ public struct GCNPredictor: GraphPredictor {
     var allFeatures = graph.features.gathering(atIndices: projectionMatrices.nodeIndices)
     for i in 0..<hiddenUnitCounts.count {
       allFeatures = gelu(projectionMatrices.matrices[i].matmul(
-        withDense: hiddenDropout(hiddenLayers[i](allFeatures)),
+        withDense: hiddenLayers[i](hiddenDropout(allFeatures)),
         adjointA: true))
     }
     let allLatent = hiddenDropout(allFeatures)
@@ -750,7 +750,7 @@ public struct GCNPredictor: GraphPredictor {
     var allFeatures = graph.features.gathering(atIndices: projectionMatrices.nodeIndices)
     for i in 0..<hiddenUnitCounts.count {
       allFeatures = gelu(projectionMatrices.matrices[i].matmul(
-        withDense: hiddenDropout(hiddenLayers[i](allFeatures)),
+        withDense: hiddenLayers[i](hiddenDropout(allFeatures)),
         adjointA: true))
     }
     let nodeLatent = hiddenDropout(allFeatures.gathering(atIndices: indexMap.nodeIndices))
@@ -759,9 +759,9 @@ public struct GCNPredictor: GraphPredictor {
 
   public mutating func reset() {
     var inputSize = featureCount
-    self.hiddenLayers = [DenseNoBias<Float>]()
+    self.hiddenLayers = [Dense<Float>]()
     for hiddenUnitCount in hiddenUnitCounts {
-      self.hiddenLayers.append(DenseNoBias<Float>(
+      self.hiddenLayers.append(Dense<Float>(
         inputSize: inputSize,
         outputSize: hiddenUnitCount))
       inputSize = hiddenUnitCount
@@ -786,8 +786,8 @@ public struct DecoupledGCNPredictor: GraphPredictor {
   @noDerivative public let confusionLatentSize: Int
   @noDerivative public let dropout: Float
 
-  public var hHiddenLayers: [DenseNoBias<Float>]
-  public var gHiddenLayers: [DenseNoBias<Float>]
+  public var hHiddenLayers: [Dense<Float>]
+  public var gHiddenLayers: [Dense<Float>]
   @noDerivative public let hiddenDropout: Dropout<Float>
   public var predictionLayer: Dense<Float>
   public var nodeLatentLayer: Dense<Float>
@@ -809,17 +809,17 @@ public struct DecoupledGCNPredictor: GraphPredictor {
     self.dropout = dropout
 
     var hInputSize = featureCount
-    self.hHiddenLayers = [DenseNoBias<Float>]()
+    self.hHiddenLayers = [Dense<Float>]()
     for hiddenUnitCount in hHiddenUnitCounts {
-      self.hHiddenLayers.append(DenseNoBias<Float>(
+      self.hHiddenLayers.append(Dense<Float>(
         inputSize: hInputSize,
         outputSize: hiddenUnitCount))
       hInputSize = hiddenUnitCount
     }
     var gInputSize = featureCount
-    self.gHiddenLayers = [DenseNoBias<Float>]()
+    self.gHiddenLayers = [Dense<Float>]()
     for hiddenUnitCount in gHiddenUnitCounts {
-      self.gHiddenLayers.append(DenseNoBias<Float>(
+      self.gHiddenLayers.append(Dense<Float>(
         inputSize: gInputSize,
         outputSize: hiddenUnitCount))
       gInputSize = hiddenUnitCount
@@ -847,7 +847,7 @@ public struct DecoupledGCNPredictor: GraphPredictor {
     var hFeatures = graph.features.gathering(atIndices: hProjectionMatrices.nodeIndices)
     for i in 0..<hHiddenUnitCounts.count {
       hFeatures = gelu(hProjectionMatrices.matrices[i].matmul(
-        withDense: hiddenDropout(hHiddenLayers[i](hFeatures)),
+        withDense: hHiddenLayers[i](hiddenDropout(hFeatures)),
         adjointA: true))
     }
     let hLatent = hiddenDropout(hFeatures)
@@ -902,7 +902,7 @@ public struct DecoupledGCNPredictor: GraphPredictor {
     var hFeatures = graph.features.gathering(atIndices: hProjectionMatrices.nodeIndices)
     for i in 0..<hHiddenUnitCounts.count {
       hFeatures = gelu(hProjectionMatrices.matrices[i].matmul(
-        withDense: hiddenDropout(hHiddenLayers[i](hFeatures)),
+        withDense: hHiddenLayers[i](hiddenDropout(hFeatures)),
         adjointA: true))
     }
     let hLatent = hiddenDropout(hFeatures)
@@ -911,18 +911,18 @@ public struct DecoupledGCNPredictor: GraphPredictor {
 
   public mutating func reset() {
     var hInputSize = featureCount
-    self.hHiddenLayers = [DenseNoBias<Float>]()
+    self.hHiddenLayers = [Dense<Float>]()
     for hiddenUnitCount in hHiddenUnitCounts {
-      self.hHiddenLayers.append(DenseNoBias<Float>(
+      self.hHiddenLayers.append(Dense<Float>(
         inputSize: hInputSize,
         outputSize: hiddenUnitCount))
       hInputSize = hiddenUnitCount
     }
 
     var gInputSize = featureCount
-    self.gHiddenLayers = [DenseNoBias<Float>]()
+    self.gHiddenLayers = [Dense<Float>]()
     for hiddenUnitCount in gHiddenUnitCounts {
-      self.gHiddenLayers.append(DenseNoBias<Float>(
+      self.gHiddenLayers.append(Dense<Float>(
         inputSize: gInputSize,
         outputSize: hiddenUnitCount))
       gInputSize = hiddenUnitCount
@@ -942,7 +942,7 @@ public struct DecoupledGCNPredictorV2: GraphPredictor {
   @noDerivative public let confusionLatentSize: Int
   @noDerivative public let dropout: Float
 
-  public var hHiddenLayers: [DenseNoBias<Float>]
+  public var hHiddenLayers: [Dense<Float>]
   public var gHiddenLayers: [Sequential<Dropout<Float>, Dense<Float>>]
   @noDerivative public let hiddenDropout: Dropout<Float>
   public var predictionLayer: Dense<Float>
@@ -965,9 +965,9 @@ public struct DecoupledGCNPredictorV2: GraphPredictor {
     self.dropout = dropout
 
     var hInputSize = featureCount
-    self.hHiddenLayers = [DenseNoBias<Float>]()
+    self.hHiddenLayers = [Dense<Float>]()
     for hiddenUnitCount in hHiddenUnitCounts {
-      self.hHiddenLayers.append(DenseNoBias<Float>(
+      self.hHiddenLayers.append(Dense<Float>(
         inputSize: hInputSize,
         outputSize: hiddenUnitCount))
       hInputSize = hiddenUnitCount
@@ -1004,7 +1004,7 @@ public struct DecoupledGCNPredictorV2: GraphPredictor {
     var hFeatures = graph.features.gathering(atIndices: hProjectionMatrices.nodeIndices)
     for i in 0..<hHiddenUnitCounts.count {
       hFeatures = gelu(hProjectionMatrices.matrices[i].matmul(
-        withDense: hiddenDropout(hHiddenLayers[i](hFeatures)),
+        withDense: hHiddenLayers[i](hiddenDropout(hFeatures)),
         adjointA: true))
     }
     let hLatent = hiddenDropout(hFeatures)
@@ -1053,7 +1053,7 @@ public struct DecoupledGCNPredictorV2: GraphPredictor {
     var hFeatures = graph.features.gathering(atIndices: hProjectionMatrices.nodeIndices)
     for i in 0..<hHiddenUnitCounts.count {
       hFeatures = gelu(hProjectionMatrices.matrices[i].matmul(
-        withDense: hiddenDropout(hHiddenLayers[i](hFeatures)),
+        withDense: hHiddenLayers[i](hiddenDropout(hFeatures)),
         adjointA: true))
     }
     let hLatent = hiddenDropout(hFeatures)
@@ -1062,9 +1062,9 @@ public struct DecoupledGCNPredictorV2: GraphPredictor {
 
   public mutating func reset() {
     var hInputSize = featureCount
-    self.hHiddenLayers = [DenseNoBias<Float>]()
+    self.hHiddenLayers = [Dense<Float>]()
     for hiddenUnitCount in hHiddenUnitCounts {
-      self.hHiddenLayers.append(DenseNoBias<Float>(
+      self.hHiddenLayers.append(Dense<Float>(
         inputSize: hInputSize,
         outputSize: hiddenUnitCount))
       hInputSize = hiddenUnitCount

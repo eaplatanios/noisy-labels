@@ -192,7 +192,7 @@ func runExperiment<Predictor: GraphPredictor, G: RandomNumberGenerator>(
       predictor: predictor,
       optimizerFn: { () in optimizer },
       randomSeed: randomSeed,
-      batchSize: parsedArguments.get(batchSize) ?? 128,
+      batchSize: parsedArguments.get(batchSize) ?? 32,
       useWarmStarting: false,
       useIncrementalNeighborhoodExpansion: false,
       initializationMethod: .labelPropagation,

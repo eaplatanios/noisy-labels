@@ -324,7 +324,8 @@ where Optimizer.Model == Predictor {
     }
 
     // Compute expectations for the labels of the unlabeled nodes.
-    for node in subGraph.unlabeledNodes {
+//    var randomNumberGenerator = PhiloxRandomNumberGenerator(seed: randomSeed)
+    for node in subGraph.unlabeledNodes { //.shuffled(using: &randomNumberGenerator) {
       let nodeOffset = Int(node) * subGraph.classCount
       for k in 0..<subGraph.classCount {
         expectedLabels[nodeOffset + k] =
@@ -412,6 +413,13 @@ where Optimizer.Model == Predictor {
 //            probabilities: y,
 //            reduction: { $0.mean() })
 
+//          let hConstant = h.logSumExp(squeezingAxes: -1)
+//          let gConstant = (g.logSumExp(squeezingAxes: -1, -2) * gMask).sum(squeezingAxes: 1)
+//          let gTConstant = (gT.logSumExp(squeezingAxes: -1, -2) * gMask).sum(squeezingAxes: 1)
+//          let normalizingConstant = hConstant + gConstant + (gTYMasked.sum() + gTConstant.sum()) * 0
+//
+//          return (-((h + gYMasked) * y).sum(squeezingAxes: -1) + normalizingConstant).mean()
+
           let neighbors = predictions.neighborIndices
           let neighborLabelSamples = Tensor<Float>(
             oneHotAtIndices: Tensor<Int32>(
@@ -428,6 +436,10 @@ where Optimizer.Model == Predictor {
           let gTYSamplesMasked = (gTYSamples * gMask.expandingShape(at: -1, -2)).sum(squeezingAxes: 1) // [BatchSize, SampleCount, ClassCount]
           let hgYgTYSamplesMasked = h.expandingShape(at: 1) + gYSamplesMasked + gTYSamplesMasked
           let normalizingConstant = hgYgTYSamplesMasked.logSumExp(squeezingAxes: -1).mean(squeezingAxes: 1)
+
+//          let entropyTerm = 1 * (h * exp(h)).sum(squeezingAxes: -1)
+//          let logpy = logSoftmax(h + gYMasked + gTYMasked, alongAxis: -1)
+//          let entropyTerm = (logpy * exp(logpy)).sum(squeezingAxes: -1)
 
           return (-((h + gYMasked + gTYMasked) * y).sum(squeezingAxes: -1) + normalizingConstant).mean()
         }
@@ -448,11 +460,12 @@ where Optimizer.Model == Predictor {
 
       // Check for early stopping.
       if let evaluationStepCount = self.evaluationStepCount, mStep % evaluationStepCount == 0 {
-        var modelCopy = self
-        modelCopy.performEStep(
-          using: SubGraph(graph: graph, mapFromOriginalIndex: nil),
-          randomSeed: randomSeed)
-        let evaluationResult = evaluate(model: modelCopy, using: graph, usePrior: false)
+//        var modelCopy = self
+//        modelCopy.performEStep(
+//          using: SubGraph(graph: graph, mapFromOriginalIndex: nil),
+//          randomSeed: randomSeed)
+//        let evaluationResult = evaluate(model: modelCopy, using: graph, usePrior: false)
+        let evaluationResult = evaluate(model: self, using: graph, usePrior: true)
         let result = evaluationResultsAccumulator.update(with: evaluationResult)
         if let bestResult = self.bestResult {
           if result.validationAccuracy > bestResult.validationAccuracy {

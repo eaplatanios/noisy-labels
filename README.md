@@ -6,6 +6,16 @@ Build using:
 swift build
 ```
 
+Example run:
+
+```bash
+swift run -c release NoisyLabelsExperiments run \
+  --dataset weather-sentiment \
+  --synthetic-predictors-count 16 \
+  --use-synthetic-predictor-features \
+  --results-dir temp/results-synthetic
+```
+
 # Configurations
 
 For `medical-causes` and `medical-treats` we are using LIA

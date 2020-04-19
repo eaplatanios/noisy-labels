@@ -24,6 +24,85 @@ public func logSoftmax<T: TensorFlowFloatingPoint>(
   x - x.logSumExp(alongAxes: Tensor<Int32>(Int32(axis)))
 }
 
+/// Returns an identity matrix or a batch of matrices.
+///
+/// - Parameters:
+///   - rowCount: The number of rows in each batch matrix.
+///   - columnCount: The number of columns in each batch matrix.
+///   - batchShape: The leading batch dimensions of the returned tensor.
+public func eye<Scalar: Numeric>(
+  rowCount: Int,
+  columnCount: Int? = nil,
+  batchShape: [Int] = []
+) -> Tensor<Scalar> {
+  let columnCount = columnCount ?? rowCount
+  let diagonalSize = min(rowCount, columnCount)
+  let diagonalShape = batchShape + [diagonalSize]
+  let diagonalOnes = Tensor<Scalar>(ones: TensorShape(diagonalShape))
+  if rowCount == columnCount {
+    return diagonalOnes.diagonal()
+  }
+  let shape = batchShape + [rowCount, columnCount]
+  let zeroMatrix = Tensor<Scalar>(zeros: TensorShape(shape))
+  return zeroMatrix.withDiagonal(diagonalOnes)
+}
+
+extension Tensor where Scalar: TensorFlowNumeric {
+  /// Constructs a [batched] diagonal array.
+  /// For the tensor instance of the shape `[..., M]`, the output is a tensor of the shape
+  /// `[..., M, M]`.
+  ///
+  /// For example:
+  ///
+  /// ```
+  /// // 't' is [1, 2, 3, 4]
+  ///
+  /// t.diagonal()
+  /// // [[1, 0, 0, 0]
+  /// //  [0, 2, 0, 0]
+  /// //  [0, 0, 3, 0]
+  /// //  [0, 0, 0, 4]]
+  /// ```
+  @inlinable
+  public func diagonal() -> Tensor {
+    _Raw.matrixDiag(diagonal: self)
+  }
+
+  /// Returns `self` with new diagonal values, given that `self` is an optionally batched matrix.
+  ///
+  /// The returned tensor has the same shape and values as `self`, except for the specified
+  /// diagonals of the innermost matrices which are overwritten by the values in `diagonal`.
+  ///
+  /// Parameter diagonal: A tensor with rank `rank - 1` representing the new diagonal values.
+  @inlinable
+  public func withDiagonal(_ diagonal: Tensor<Scalar>) -> Tensor {
+    _Raw.matrixSetDiag(self, diagonal: diagonal)
+  }
+}
+
+public extension Tensor where Scalar: TensorFlowIndex {
+  /// Creates a tensor by drawing samples from a categorical distribution.
+  ///
+  /// - Parameters:
+  ///     - randomCategorialLogits: 2-D Tensor with shape `[batchSize, classCount]`.  Each slice `[i, :]`
+  ///         represents the unnormalized log probabilities for all classes.
+  ///     - sampleCount: 0-D.  Number of independent samples to draw for each row slice.
+  ///     - seed: The seed value.
+  ///
+  /// - Returns: 2-D Tensor with shape `[batchSize, sampleCount]`.  Each slice `[i, :]`
+  ///     contains the drawn class labels with range `[0, classCount)`.
+  init<T: TensorFlowNumeric>(
+    randomCategorialLogits: Tensor<T>,
+    sampleCount: Int32,
+    seed: TensorFlowSeed = Context.local.randomSeed
+  ) {
+    self = _Raw.statelessMultinomial(
+      logits: randomCategorialLogits, 
+      numSamples: Tensor<Int32>(sampleCount), 
+      seed: Tensor<Int32>([seed.graph, seed.op]))
+  }
+}
+
 public struct Pair<Element1: Differentiable, Element2: Differentiable>: Differentiable {
   public var first: Element1
   public var second: Element2

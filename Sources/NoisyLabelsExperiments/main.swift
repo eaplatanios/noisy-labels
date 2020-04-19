@@ -57,6 +57,14 @@ let datasetArgument: OptionArgument<String> = parser.add(
   option: "--dataset",
   kind: String.self,
   usage: "Dataset to use for this experiment.")
+let syntheticPredictorsCountArgument: OptionArgument<Int> = parser.add(
+  option: "--synthetic-predictors-count",
+  kind: Int.self,
+  usage: "Number of synthetic predictors to use.")
+let useSyntheticPredictorFeaturesArgument: OptionArgument<Bool> = parser.add(
+  option: "--use-synthetic-predictor-features",
+  kind: Bool.self,
+  usage: "Flag indicating whether to use the synthetic predictor features.")
 let parallelismArgument: OptionArgument<Int> = parser.add(
   option: "--parallelism",
   kind: Int.self,
@@ -78,6 +86,8 @@ let resultsDir: Foundation.URL = {
   }
   return currentDir.appendingPathComponent("temp/results")
 }()
+let syntheticPredictorsCount = parsedArguments.get(syntheticPredictorsCountArgument)
+let useSyntheticPredictorFeatures = parsedArguments.get(useSyntheticPredictorFeaturesArgument) ?? false
 let parallelismLimit = parsedArguments.get(parallelismArgument)
 
 switch parsedArguments.get(commandArgument) {
@@ -370,6 +380,46 @@ func featurizedLNLLearner<Instance, Predictor, Label>(
   }
 }
 
+func fullyFeaturizedLNLLearner<Instance, Predictor, Label>(
+  _ data: NoisyLabels.Data<Instance, Predictor, Label>,
+  instanceHiddenUnitCounts: [Int],
+  predictorHiddenUnitCounts: [Int],
+  confusionLatentSize: Int,
+  gamma: Float
+) -> Learner {
+  withRandomSeedForTensorFlow(tensorFlowRandomSeed()) {
+    let predictor = FullyFeaturizedLNLPredictor(
+      data: data,
+      instanceHiddenUnitCounts: instanceHiddenUnitCounts,
+      predictorHiddenUnitCounts: predictorHiddenUnitCounts,
+      confusionLatentSize: confusionLatentSize,
+      gamma: gamma)
+    let optimizer = Adam(
+      for: predictor,
+      learningRate: 1e-4,
+      beta1: 0.9,
+      beta2: 0.99,
+      epsilon: 1e-8,
+      decay: 0)
+    let model = EMModel(
+      predictor: predictor,
+      optimizer: optimizer,
+      entropyWeight: 0.0,
+      useSoftPredictions: true,
+      learningRateDecayFactor: 1.0)
+    return EMLearner(
+      for: model,
+      randomSeed: randomSeed,
+      batchSize: 128,
+      useWarmStarting: true,
+      mStepCount: 1000,
+      emStepCount: 2,
+      marginalStepCount: 1000,
+      mStepLogCount: 100,
+      verbose: true)
+  }
+}
+
 func decoupledLNLLearner<Instance, Predictor, Label>(
   _ data: NoisyLabels.Data<Instance, Predictor, Label>,
   predictorEmbeddingSize: Int,
@@ -383,6 +433,48 @@ func decoupledLNLLearner<Instance, Predictor, Label>(
     let predictor = DecoupledLNLPredictor(
       data: data,
       predictorEmbeddingSize: predictorEmbeddingSize,
+      instanceLHiddenUnitCounts: instanceLHiddenUnitCounts,
+      instanceQHiddenUnitCounts: instanceQHiddenUnitCounts,
+      predictorHiddenUnitCounts: predictorHiddenUnitCounts,
+      confusionLatentSize: confusionLatentSize,
+      gamma: gamma)
+    let optimizer = Adam(
+      for: predictor,
+      learningRate: 1e-3,
+      beta1: 0.9,
+      beta2: 0.99,
+      epsilon: 1e-8,
+      decay: 0)
+    let model = EMModel(
+      predictor: predictor,
+      optimizer: optimizer,
+      entropyWeight: 0.01,
+      useSoftPredictions: true,
+      learningRateDecayFactor: 1.0)
+    return EMLearner(
+      for: model,
+      randomSeed: randomSeed,
+      batchSize: 128,
+      useWarmStarting: true,
+      mStepCount: 1000,
+      emStepCount: 5,
+      marginalStepCount: 0,
+      mStepLogCount: 100,
+      verbose: true)
+  }
+}
+
+func fullyDecoupledLNLLearner<Instance, Predictor, Label>(
+  _ data: NoisyLabels.Data<Instance, Predictor, Label>,
+  instanceLHiddenUnitCounts: [Int],
+  instanceQHiddenUnitCounts: [Int],
+  predictorHiddenUnitCounts: [Int],
+  confusionLatentSize: Int,
+  gamma: Float
+) -> Learner {
+  withRandomSeedForTensorFlow(tensorFlowRandomSeed()) {
+    let predictor = FullyDecoupledLNLPredictor(
+      data: data,
       instanceLHiddenUnitCounts: instanceLHiddenUnitCounts,
       instanceQHiddenUnitCounts: instanceQHiddenUnitCounts,
       predictorHiddenUnitCounts: predictorHiddenUnitCounts,
@@ -474,6 +566,17 @@ where Dataset.Loader.Predictor: Equatable {
           gamma: 0.1)
       },
       requiresFeatures: true,
+      supportsMultiThreading: true)),
+    ("FullLNL", Experiment<Dataset>.Learner(
+      createFn: { data in
+        fullyFeaturizedLNLLearner(
+          data,
+          instanceHiddenUnitCounts: [16, 16, 16, 16],
+          predictorHiddenUnitCounts: [16, 16, 16, 16],
+          confusionLatentSize: 1,
+          gamma: 0.1)
+      },
+      requiresFeatures: true,
       supportsMultiThreading: true))
   ]
 
@@ -492,19 +595,28 @@ where Dataset.Loader.Predictor: Equatable {
 }
 
 func runExperiment<Dataset: NoisyLabelsExperiments.Dataset>(dataset: Dataset) throws
-where Dataset.Loader.Predictor: Equatable {
-  let experiment = try Experiment(dataDir: dataDir, dataset: dataset, learners: learners())
+where Dataset.Loader.Predictor == String {
+  let experiment = try withRandomSeedForTensorFlow(tensorFlowRandomSeed()) {
+    try Experiment(
+      dataDir: dataDir,
+      dataset: dataset,
+      syntheticPredictorsCount: syntheticPredictorsCount,
+      useSyntheticPredictorFeatures: useSyntheticPredictorFeatures,
+      learners: learners(),
+      using: &generator)
+  }
   let resultsURL = resultsDir.appendingPathComponent("\(dataset.description).tsv")
   let callback = try resultsWriter(at: resultsURL)
   experiment.run(
     callback: callback,
     runs: [
-//      .redundancy(maxRedundancy: 1, repetitionCount: 1),
-      .redundancy(maxRedundancy: 2, repetitionCount: 3),
-      .redundancy(maxRedundancy: 5, repetitionCount: 3),
-      .redundancy(maxRedundancy: 10, repetitionCount: 3),
-      .redundancy(maxRedundancy: 20, repetitionCount: 3),
-//      .redundancy(maxRedundancy: 40, repetitionCount: 1),
+      // .redundancy(maxRedundancy: 1, repetitionCount: 1),
+      // .redundancy(maxRedundancy: 2, repetitionCount: 3),
+      // .redundancy(maxRedundancy: 5, repetitionCount: 3),
+      // .redundancy(maxRedundancy: 10, repetitionCount: 3),
+      // .redundancy(maxRedundancy: 20, repetitionCount: 3),
+      // .redundancy(maxRedundancy: 40, repetitionCount: 1),
+      .predictorSubsampling(predictorCount: 100, repetitionCount: 10),
     ],
     parallelismLimit: parallelismLimit,
     using: &generator)

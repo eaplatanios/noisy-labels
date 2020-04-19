@@ -18,7 +18,7 @@ import Progress
 import TensorFlow
 
 public struct Experiment<Dataset: NoisyLabelsExperiments.Dataset>
-where Dataset.Loader.Predictor: Equatable {
+where Dataset.Loader.Predictor == String {
   public typealias Instance = Dataset.Loader.Instance
   public typealias Predictor = Dataset.Loader.Predictor
   public typealias Label = Dataset.Loader.Label
@@ -33,12 +33,26 @@ where Dataset.Loader.Predictor: Equatable {
   internal let dispatchGroup = DispatchGroup()
   internal let progressBarDispatchQueue = DispatchQueue(label: "Progress Bar")
 
-  public init(dataDir: URL, dataset: Dataset, learners: [(String, Learner)]) throws {
+  public init<G: RandomNumberGenerator>(
+    dataDir: URL,
+    dataset: Dataset,
+    syntheticPredictorsCount: Int?,
+    useSyntheticPredictorFeatures: Bool,
+    learners: [(String, Learner)],
+    using generator: inout G
+  ) throws {
     self.dataDir = dataDir
     self.dataset = dataset
     self.learners = learners
-    self.data = try dataset.loader(dataDir).load(
+    var data = try dataset.loader(dataDir).load(
       withFeatures: learners.contains(where: { $0.1.requiresFeatures }))
+    if let syntheticPredictorsCount = syntheticPredictorsCount {
+      data = SyntheticPredictorsDataGenerator(
+        predictorCount: syntheticPredictorsCount,
+        usePredictorFeatures: useSyntheticPredictorFeatures
+      ).generate(basedOn: data, using: &generator)
+    }
+    self.data = data
   }
 
   public func run<G: RandomNumberGenerator>(
@@ -104,7 +118,7 @@ where Dataset.Loader.Predictor: Equatable {
                   timeStamp: timeStamp,
                   learner: learnerName,
                   parameterType: .predictorCount,
-                  parameter: predictorSamples.count,
+                  parameter: predictorSamples[repetition].count,
                   metric: metric,
                   value: value))
               }

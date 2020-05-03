@@ -341,7 +341,8 @@ public struct TwoStepLearner<AggregationLearner: Learner, BaseLearner: Learner>:
       classCounts: data.classCounts,
       instanceFeatures: data.instanceFeatures,
       predictorFeatures: nil,
-      labelFeatures: data.labelFeatures)
+      labelFeatures: data.labelFeatures,
+      partitions: data.partitions)
     if verbose { logger.info("Training the main learner.") }
     baseLearner.train(using: aggregatedData)
   }
@@ -368,6 +369,7 @@ import Python
 // TODO: The Python interface is not thread-safe.
 internal let pythonDispatchSemaphore = DispatchSemaphore(value: 1)
 
+/// NOTE: This learner does not support data partitions.
 public struct SnorkelLearner: Learner {
   private var snorkelMarginals: [Tensor<Float>]!
   private var snorkelQualities: [QualitiesKey: Float]!
@@ -521,6 +523,7 @@ extension SnorkelLearner {
   }
 }
 
+/// NOTE: This learner does not support data partitions.
 public struct MetalLearner: Learner {
   private var metalMarginals: [Tensor<Float>]!
   private var metalQualities: [QualitiesKey: Float]!

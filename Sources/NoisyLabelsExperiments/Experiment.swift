@@ -36,6 +36,7 @@ where Dataset.Loader.Predictor == String {
   public init<G: RandomNumberGenerator>(
     dataDir: URL,
     dataset: Dataset,
+    trainDataPortion: Float?,
     syntheticPredictorsCount: Int?,
     useSyntheticPredictorFeatures: Bool,
     learners: [(String, Learner)],
@@ -46,6 +47,9 @@ where Dataset.Loader.Predictor == String {
     self.learners = learners
     var data = try dataset.loader(dataDir).load(
       withFeatures: learners.contains(where: { $0.1.requiresFeatures }))
+    if let trainDataPortion = trainDataPortion {
+      data = data.partitioned(trainPortion: trainDataPortion, using: &generator)
+    }
     if let syntheticPredictorsCount = syntheticPredictorsCount {
       data = SyntheticPredictorsDataGenerator(
         predictorCount: syntheticPredictorsCount,
@@ -102,25 +106,28 @@ where Dataset.Loader.Predictor == String {
                 keepInstances: true)
               var learner = learner.createFn(filteredData)
               learner.train(using: filteredData)
-              let result = EvaluationResult(merging: learner.evaluatePerLabel(using: filteredData))
+              let results = learner.evaluatePerLabel(using: filteredData)
+                .mapValues { EvaluationResult(merging: $0) }
               let dateFormatter = DateFormatter()
               dateFormatter.locale = Locale(identifier: "en_US_POSIX")
               dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZZZZZ"
               dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
               let timeStamp = dateFormatter.string(from: Date())
-              for (metric, value) in [
-                ("madErrorRank", result.madErrorRank),
-                ("madError", result.madError),
-                ("accuracy", result.accuracy),
-                ("auc", result.auc)
-              ] {
-                callback?(ExperimentResult(
-                  timeStamp: timeStamp,
-                  learner: learnerName,
-                  parameterType: .predictorCount,
-                  parameter: predictorSamples[repetition].count,
-                  metric: metric,
-                  value: value))
+              for (partition, result) in results {
+                for (metric, value) in [
+                  ("\(partition)-madErrorRank", result.madErrorRank),
+                  ("\(partition)-madError", result.madError),
+                  ("\(partition)-accuracy", result.accuracy),
+                  ("\(partition)-auc", result.auc)
+                ] {
+                  callback?(ExperimentResult(
+                    timeStamp: timeStamp,
+                    learner: learnerName,
+                    parameterType: .predictorCount,
+                    parameter: predictorSamples[repetition].count,
+                    metric: metric,
+                    value: value))
+                }
               }
             }
           }
@@ -136,25 +143,28 @@ where Dataset.Loader.Predictor == String {
               self.progressBarDispatchQueue.sync { progressBar.next() }
               var learner = learner.createFn(filteredData)
               learner.train(using: filteredData)
-              let result = EvaluationResult(merging: learner.evaluatePerLabel(using: filteredData))
+              let results = learner.evaluatePerLabel(using: filteredData)
+                .mapValues { EvaluationResult(merging: $0) }
               let dateFormatter = DateFormatter()
               dateFormatter.locale = Locale(identifier: "en_US_POSIX")
               dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZZZZZ"
               dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
               let timeStamp = dateFormatter.string(from: Date())
-              for (metric, value) in [
-                ("madErrorRank", result.madErrorRank),
-                ("madError", result.madError),
-                ("accuracy", result.accuracy),
-                ("auc", result.auc)
-              ] {
-                callback?(ExperimentResult(
-                  timeStamp: timeStamp,
-                  learner: learnerName,
-                  parameterType: .redundancy,
-                  parameter: maxRedundancy,
-                  metric: metric,
-                  value: value))
+              for (partition, result) in results {
+                for (metric, value) in [
+                  ("\(partition)-madErrorRank", result.madErrorRank),
+                  ("\(partition)-madError", result.madError),
+                  ("\(partition)-accuracy", result.accuracy),
+                  ("\(partition)-auc", result.auc)
+                ] {
+                  callback?(ExperimentResult(
+                    timeStamp: timeStamp,
+                    learner: learnerName,
+                    parameterType: .redundancy,
+                    parameter: maxRedundancy,
+                    metric: metric,
+                    value: value))
+                }
               }
             }
           }

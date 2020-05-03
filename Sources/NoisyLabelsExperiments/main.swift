@@ -57,6 +57,10 @@ let datasetArgument: OptionArgument<String> = parser.add(
   option: "--dataset",
   kind: String.self,
   usage: "Dataset to use for this experiment.")
+let trainDataPortionArgument: OptionArgument<Float> = parser.add(
+  option: "--train-data-portion",
+  kind: Float.self,
+  usage: "Proportion of the data (specifically, instances) to use for training.")
 let syntheticPredictorsCountArgument: OptionArgument<Int> = parser.add(
   option: "--synthetic-predictors-count",
   kind: Int.self,
@@ -86,6 +90,7 @@ let resultsDir: Foundation.URL = {
   }
   return currentDir.appendingPathComponent("temp/results")
 }()
+let trainDataPortion = parsedArguments.get(trainDataPortionArgument)
 let syntheticPredictorsCount = parsedArguments.get(syntheticPredictorsCountArgument)
 let useSyntheticPredictorFeatures = parsedArguments.get(useSyntheticPredictorFeaturesArgument) ?? false
 let parallelismLimit = parsedArguments.get(parallelismArgument)
@@ -530,18 +535,18 @@ where Dataset.Loader.Predictor: Equatable {
 //      },
 //      requiresFeatures: true,
 //      supportsMultiThreading: true)),
-//    ("MMCE-M", Experiment<Dataset>.Learner(
-//      createFn: { data in
-//        twoStepMmceFeaturizedLearner(
-//          data,
-//          predictorEmbeddingSize: 512,
-//          instanceHiddenUnitCounts: [512],
-//          predictorHiddenUnitCounts: [],
-//          confusionLatentSize: 1,
-//          gamma: 0.00)
-//      },
-//      requiresFeatures: true,
-//      supportsMultiThreading: true)),
+   ("MMCE-M", Experiment<Dataset>.Learner(
+     createFn: { data in
+       twoStepMmceFeaturizedLearner(
+         data,
+         predictorEmbeddingSize: 32,
+         instanceHiddenUnitCounts: [32, 32, 32, 32],
+         predictorHiddenUnitCounts: [32, 32, 32, 32],
+         confusionLatentSize: 1,
+         gamma: 0)
+     },
+     requiresFeatures: true,
+     supportsMultiThreading: true)),
 //    ("LNL-E", Experiment<Dataset>.Learner(
 //      createFn: { data in
 //        lnlLearner(
@@ -559,25 +564,25 @@ where Dataset.Loader.Predictor: Equatable {
       createFn: { data in
         featurizedLNLLearner(
           data,
-          predictorEmbeddingSize: 16,
-          instanceHiddenUnitCounts: [16, 16, 16, 16],
-          predictorHiddenUnitCounts: [16, 16, 16, 16],
+          predictorEmbeddingSize: 32,
+          instanceHiddenUnitCounts: [32, 32, 32, 32],
+          predictorHiddenUnitCounts: [32, 32, 32, 32],
           confusionLatentSize: 1,
           gamma: 0.1)
       },
       requiresFeatures: true,
       supportsMultiThreading: true)),
-    ("FullLNL", Experiment<Dataset>.Learner(
-      createFn: { data in
-        fullyFeaturizedLNLLearner(
-          data,
-          instanceHiddenUnitCounts: [16, 16, 16, 16],
-          predictorHiddenUnitCounts: [16, 16, 16, 16],
-          confusionLatentSize: 1,
-          gamma: 0.1)
-      },
-      requiresFeatures: true,
-      supportsMultiThreading: true))
+    // ("FullLNL", Experiment<Dataset>.Learner(
+    //   createFn: { data in
+    //     fullyFeaturizedLNLLearner(
+    //       data,
+    //       instanceHiddenUnitCounts: [16, 16, 16, 16],
+    //       predictorHiddenUnitCounts: [16, 16, 16, 16],
+    //       confusionLatentSize: 1,
+    //       gamma: 0.1)
+    //   },
+    //   requiresFeatures: true,
+    //   supportsMultiThreading: true))
   ]
 
 #if SNORKEL
@@ -600,6 +605,7 @@ where Dataset.Loader.Predictor == String {
     try Experiment(
       dataDir: dataDir,
       dataset: dataset,
+      trainDataPortion: trainDataPortion,
       syntheticPredictorsCount: syntheticPredictorsCount,
       useSyntheticPredictorFeatures: useSyntheticPredictorFeatures,
       learners: learners(),
@@ -613,10 +619,10 @@ where Dataset.Loader.Predictor == String {
       // .redundancy(maxRedundancy: 1, repetitionCount: 1),
       // .redundancy(maxRedundancy: 2, repetitionCount: 3),
       // .redundancy(maxRedundancy: 5, repetitionCount: 3),
-      // .redundancy(maxRedundancy: 10, repetitionCount: 3),
+      .redundancy(maxRedundancy: 10, repetitionCount: 1),
       // .redundancy(maxRedundancy: 20, repetitionCount: 3),
       // .redundancy(maxRedundancy: 40, repetitionCount: 1),
-      .predictorSubsampling(predictorCount: 100, repetitionCount: 10),
+      // .predictorSubsampling(predictorCount: 100, repetitionCount: 1),
     ],
     parallelismLimit: parallelismLimit,
     using: &generator)

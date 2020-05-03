@@ -18,7 +18,19 @@ import Darwin
 import Glibc
 #endif
 
+import SPMUtility
 import TensorFlow
+
+extension Float: ArgumentKind {
+  public init(argument: String) throws {
+    guard let float = Float(argument) else {
+      throw ArgumentConversionError.typeMismatch(value: argument, expectedType: Float.self)
+    }
+    self = float
+  }
+
+  public static let completion: ShellCompletion = .none
+}
 
 internal extension Array where Element == Float {
   var mean: Float { reduce(0, { $0 + $1 }) / Float(count) }

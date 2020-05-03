@@ -80,6 +80,10 @@ public struct InferenceData: TensorGroup {
   }
 }
 
+public enum DataPartition: String {
+  case all, train, test
+}
+
 public struct Data<Instance, Predictor, Label> {
   public let instances: [Instance]
   public let predictors: [Predictor]
@@ -98,6 +102,7 @@ public struct Data<Instance, Predictor, Label> {
   public let instanceFeatures: [Tensor<Float>]?
   public let predictorFeatures: [Tensor<Float>]?
   public let labelFeatures: [Tensor<Float>]?
+  public let partitions: [DataPartition: [Int]]?
 
   public init(
     instances: [Instance], 
@@ -108,8 +113,12 @@ public struct Data<Instance, Predictor, Label> {
     classCounts: [Int], 
     instanceFeatures: [Tensor<Float>]? = nil, 
     predictorFeatures: [Tensor<Float>]? = nil, 
-    labelFeatures: [Tensor<Float>]? = nil
+    labelFeatures: [Tensor<Float>]? = nil,
+    partitions: [DataPartition: [Int]]? = nil
   ) {
+    precondition(
+      partitions == nil || partitions!.keys.contains(.train),
+      "If data partitions are provided, a 'train' partition must be included.")
     self.instances = instances
     self.predictors = predictors
     self.labels = labels
@@ -119,6 +128,7 @@ public struct Data<Instance, Predictor, Label> {
     self.instanceFeatures = instanceFeatures
     self.predictorFeatures = predictorFeatures
     self.labelFeatures = labelFeatures
+    self.partitions = partitions
   }
 
   public var instanceIndices: [Int] {
@@ -171,14 +181,17 @@ public struct Data<Instance, Predictor, Label> {
     var hasIF = true
     var hasPF = true
     var hasLF = true
+    var hasP = true
     for dataset in datasets {
       hasIF = hasIF && dataset.instanceFeatures != nil
       hasPF = hasPF && dataset.predictorFeatures != nil
       hasLF = hasPF && dataset.labelFeatures != nil
+      hasP = hasP && dataset.partitions != nil
     }
     var instanceFeatures = hasIF ? [Tensor<Float>]() : nil
     var predictorFeatures = hasPF ? [Tensor<Float>]() : nil
     var labelFeatures = hasLF ? [Tensor<Float>]() : nil
+    var partitions = hasP ? [DataPartition: [Int]]() : nil
 
     for dataset in datasets {
       for (lOld, label) in dataset.labels.enumerated() {
@@ -250,6 +263,17 @@ public struct Data<Instance, Predictor, Label> {
         // Process the number of classes.
         classCounts = zip(classCounts, dataset.classCounts).map(+)
       }
+
+      if hasP {
+        for (partition, indices) in dataset.partitions! {
+          if !partitions!.keys.contains(partition) {
+            partitions![partition] = [Int]()
+          }
+          for iOld in indices {
+            partitions![partition]!.append(iIndices[iOld]!)
+          }
+        }
+      }
     }
 
     return Data(
@@ -261,22 +285,35 @@ public struct Data<Instance, Predictor, Label> {
       classCounts: classCounts,
       instanceFeatures: instanceFeatures,
       predictorFeatures: predictorFeatures,
-      labelFeatures: labelFeatures)
+      labelFeatures: labelFeatures,
+      partitions: partitions)
   }
-
-  // TODO: Support shuffling.
+  
   public func trainingData() -> TrainingData {
     var instances = [Int]()
     var predictors = [Int]()
     var labels = [Int]()
     var values = [Float]()
-    // Note: The following sorting operations are necessary to guarantee reproducibility.
-    for (l, allPredictions) in self.predictedLabels.sorted(by: { $0.key < $1.key }) {
+    // The following sorting operations are necessary to guarantee reproducibility.
+    for (l, allPredictions) in predictedLabels.sorted(by: { $0.key < $1.key }) {
       for (p, predictions) in allPredictions.sorted(by: { $0.key < $1.key }) {
-        instances.append(contentsOf: predictions.instances)
-        predictors.append(contentsOf: [Int](repeating: p, count: predictions.instances.count))
-        labels.append(contentsOf: [Int](repeating: l, count: predictions.instances.count))
-        values.append(contentsOf: predictions.values)
+        let filtered = { () -> (instances: [Int], values: [Float]) in
+          if let partitions = self.partitions {
+            let instanceSet = Set<Int>(partitions[.train]!)
+            return zip(predictions.instances, predictions.values)
+              .filter { instanceSet.contains($0.0) }
+              .reduce(into: (instances: [Int](), values: [Float]())) {
+                $0.instances.append($1.0)
+                $0.values.append($1.1)
+              }
+          } else {
+            return (instances: predictions.instances, values: predictions.values)
+          }
+        }()
+        instances.append(contentsOf: filtered.instances)
+        predictors.append(contentsOf: [Int](repeating: p, count: filtered.instances.count))
+        labels.append(contentsOf: [Int](repeating: l, count: filtered.instances.count))
+        values.append(contentsOf: filtered.values)
       }
     }
     return TrainingData(
@@ -288,58 +325,72 @@ public struct Data<Instance, Predictor, Label> {
 }
 
 extension Data {
-  public func computeBinaryQualities() -> Tensor<Float> {
-    var numCorrect = [Float](repeating: 0.0, count: labels.count * predictors.count)
-    var numTotal = [Float](repeating: 0.0, count: labels.count * predictors.count)
-    for l in labels.indices {
-      for (p, predictions) in predictedLabels[l]! {
-        for (i, v) in zip(predictions.instances, predictions.values) {
-          if let trueLabel = trueLabels[l]?[i] {
-            if trueLabel == (v >= 0.5 ? 1 : 0) {
-              numCorrect[l * predictors.count + p] += 1
+  public func computeBinaryQualities() -> [DataPartition: Tensor<Float>] {
+    let partitions = self.partitions ?? [.all: [Int](0..<instances.count)]
+    return [DataPartition: Tensor<Float>](uniqueKeysWithValues:
+      partitions.map { (partition, instances) -> (DataPartition, Tensor<Float>) in
+        let instanceSet = Set<Int>(instances)
+        var numCorrect = [Float](repeating: 0.0, count: labels.count * predictors.count)
+        var numTotal = [Float](repeating: 0.0, count: labels.count * predictors.count)
+        for l in labels.indices {
+          for (p, predictions) in predictedLabels[l]! {
+            for (i, v) in zip(predictions.instances, predictions.values) {
+              if instanceSet.contains(i) {
+                if let trueLabel = trueLabels[l]?[i] {
+                  if trueLabel == (v >= 0.5 ? 1 : 0) {
+                    numCorrect[l * predictors.count + p] += 1
+                  }
+                  numTotal[l * predictors.count + p] += 1
+                }
+              }
             }
-            numTotal[l * predictors.count + p] += 1
           }
         }
-      }
-    }
-    let l = labels.count
-    let p = predictors.count
-    let numCorrectTensor = Tensor<Float>(shape: [l, p], scalars: numCorrect)
-    let numTotalTensor = Tensor<Float>(shape: [l, p], scalars: numTotal)
-    return numCorrectTensor / numTotalTensor
+        let l = labels.count
+        let p = predictors.count
+        let numCorrectTensor = Tensor<Float>(shape: [l, p], scalars: numCorrect)
+        let numTotalTensor = Tensor<Float>(shape: [l, p], scalars: numTotal)
+        return (partition, numCorrectTensor / numTotalTensor)
+      })
   }
 
-  public func computeBinaryQualitiesFullConfusion() -> Tensor<Float> {
-    var numConfused = [Float](repeating: 0.0, count: labels.count * predictors.count * 4)
-    var numTotal = [Float](repeating: 0.0, count: labels.count * predictors.count)
-    for l in labels.indices {
-      for (p, predictions) in predictedLabels[l]! {
-        for (i, v) in zip(predictions.instances, predictions.values) {
-          if let trueLabel = trueLabels[l]?[i] {
-            if trueLabel == 0 {
-              if v >= 0.5 {
-                numConfused[l * predictors.count * 4 + p * 4 + 1] += 1
-              } else {
-                numConfused[l * predictors.count * 4 + p * 4] += 1
-              }
-            } else {
-              if v >= 0.5 {
-                numConfused[l * predictors.count * 4 + p * 4 + 3] += 1
-              } else {
-                numConfused[l * predictors.count * 4 + p * 4 + 2] += 1
+  public func computeBinaryQualitiesFullConfusion() -> [DataPartition: Tensor<Float>] {
+    let partitions = self.partitions ?? [.all: [Int](0..<instances.count)]
+    return [DataPartition: Tensor<Float>](uniqueKeysWithValues:
+      partitions.map { (partition, instances) -> (DataPartition, Tensor<Float>) in
+        let instanceSet = Set<Int>(instances)
+        var numConfused = [Float](repeating: 0.0, count: labels.count * predictors.count * 4)
+        var numTotal = [Float](repeating: 0.0, count: labels.count * predictors.count)
+        for l in labels.indices {
+          for (p, predictions) in predictedLabels[l]! {
+            for (i, v) in zip(predictions.instances, predictions.values) {
+              if instanceSet.contains(i) {
+                if let trueLabel = trueLabels[l]?[i] {
+                  if trueLabel == 0 {
+                    if v >= 0.5 {
+                      numConfused[l * predictors.count * 4 + p * 4 + 1] += 1
+                    } else {
+                      numConfused[l * predictors.count * 4 + p * 4] += 1
+                    }
+                  } else {
+                    if v >= 0.5 {
+                      numConfused[l * predictors.count * 4 + p * 4 + 3] += 1
+                    } else {
+                      numConfused[l * predictors.count * 4 + p * 4 + 2] += 1
+                    }
+                  }
+                  numTotal[l * predictors.count + p] += 1
+                }
               }
             }
-            numTotal[l * predictors.count + p] += 1
           }
         }
-      }
-    }
-    let l = labels.count
-    let p = predictors.count
-    let numConfusedTensor = Tensor<Float>(shape: [l, p, 2, 2], scalars: numConfused)
-    let numTotalTensor = Tensor<Float>(shape: [l, p, 1, 1], scalars: numTotal)
-    return numConfusedTensor / numTotalTensor
+        let l = labels.count
+        let p = predictors.count
+        let numConfusedTensor = Tensor<Float>(shape: [l, p, 2, 2], scalars: numConfused)
+        let numTotalTensor = Tensor<Float>(shape: [l, p, 1, 1], scalars: numTotal)
+        return (partition, numConfusedTensor / numTotalTensor)
+      })
   }
 }
 
@@ -358,9 +409,11 @@ extension Data where Label: Equatable {
     let hasIF = instanceFeatures != nil
     let hasPF = predictorFeatures != nil
     let hasLF = labelFeatures != nil
+    let hasP = partitions != nil
     var instanceFeatures = hasIF ? [Tensor<Float>]() : nil
     var predictorFeatures = hasPF ? [Tensor<Float>]() : nil
     var labelFeatures = hasLF ? [Tensor<Float>]() : nil
+    var partitions = hasP ? [DataPartition: [Int]]() : nil
 
     for (l, label) in labels.enumerated() {
       let lOld = self.labels.firstIndex(of: label)!
@@ -415,6 +468,19 @@ extension Data where Label: Equatable {
       }
     }
 
+    if hasP {
+      for (partition, indices) in self.partitions! {
+        if !partitions!.keys.contains(partition) {
+          partitions![partition] = [Int]()
+        }
+        for iOld in indices {
+          if let i = iIndices[iOld] {
+            partitions![partition]!.append(i)
+          }
+        }
+      }
+    }
+
     return Data(
       instances: instances,
       predictors: predictors,
@@ -424,7 +490,8 @@ extension Data where Label: Equatable {
       classCounts: classCounts,
       instanceFeatures: instanceFeatures,
       predictorFeatures: predictorFeatures,
-      labelFeatures: labelFeatures)
+      labelFeatures: labelFeatures,
+      partitions: partitions)
   }
 }
 
@@ -443,9 +510,11 @@ extension Data where Predictor: Equatable {
     let hasIF = instanceFeatures != nil
     let hasPF = predictorFeatures != nil
     let hasLF = labelFeatures != nil
+    let hasP = partitions != nil
     var instanceFeatures = hasIF ? [Tensor<Float>]() : nil
     var predictorFeatures = hasPF ? [Tensor<Float>]() : nil
     var labelFeatures = hasLF ? [Tensor<Float>]() : nil
+    var partitions = hasP ? [DataPartition: [Int]]() : nil
 
     if keepInstances {
       newInstances = instances
@@ -516,6 +585,19 @@ extension Data where Predictor: Equatable {
       }
     }
 
+    if hasP {
+      for (partition, indices) in self.partitions! {
+        if !partitions!.keys.contains(partition) {
+          partitions![partition] = [Int]()
+        }
+        for iOld in indices {
+          if let i = iIndices[iOld] {
+            partitions![partition]!.append(i)
+          }
+        }
+      }
+    }
+
     return Data(
       instances: newInstances,
       predictors: newPredictors,
@@ -525,7 +607,8 @@ extension Data where Predictor: Equatable {
       classCounts: classCounts,
       instanceFeatures: instanceFeatures,
       predictorFeatures: predictorFeatures,
-      labelFeatures: labelFeatures)
+      labelFeatures: labelFeatures,
+      partitions: partitions)
   }
 }
 
@@ -545,7 +628,7 @@ extension Data {
     var instanceAnnotations = [Int: [Int: [(predictor: Int, value: Float)]]]()
     for l in labels.indices {
       instanceAnnotations[l] = [Int: [(predictor: Int, value: Float)]]()
-      for i in self.instances.indices {
+      for i in instances.indices {
         instanceAnnotations[l]![i] = [(predictor: Int, value: Float)]()
       }
       // Note: The following sorting operation is necessary to guarantee reproducibility.
@@ -599,6 +682,41 @@ extension Data {
       classCounts: classCounts,
       instanceFeatures: instanceFeatures,
       predictorFeatures: predictorFeatures,
-      labelFeatures: labelFeatures)
+      labelFeatures: labelFeatures,
+      partitions: partitions)
+  }
+}
+
+extension Data {
+  public func partitioned<G: RandomNumberGenerator>(
+    trainPortion: Float,
+    using generator: inout G
+  ) -> Data {
+    precondition(trainPortion > 0 && trainPortion <= 1)
+    let instances = [Int](0..<self.instances.count).shuffled(using: &generator)
+    let trainCount = Int(Float(instances.count) * trainPortion)
+    let testCount = instances.count - trainCount
+    let partitions = { () -> [DataPartition: [Int]]? in
+      if testCount == 0 {
+        return nil
+      } else {
+        var partitions = [DataPartition: [Int]]()
+        partitions[.all] = instances
+        partitions[.train] = [Int](instances.prefix(trainCount))
+        partitions[.test] = [Int](instances.suffix(testCount))
+        return partitions
+      }
+    }()
+    return Data(
+      instances: self.instances,
+      predictors: self.predictors,
+      labels: self.labels,
+      trueLabels: self.trueLabels,
+      predictedLabels: self.predictedLabels,
+      classCounts: self.classCounts,
+      instanceFeatures: self.instanceFeatures,
+      predictorFeatures: self.predictorFeatures,
+      labelFeatures: self.labelFeatures,
+      partitions: partitions)
   }
 }

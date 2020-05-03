@@ -149,7 +149,7 @@ extension EvaluationResult: CustomStringConvertible {
 public extension Learner {
   func evaluatePerLabel<Instance, Predictor, Label>(
     using data: Data<Instance, Predictor, Label>
-  ) -> [EvaluationResult] {
+  ) -> [DataPartition: [EvaluationResult]] {
     // predictedLabelProbabilities is an array of tensors with shape: [BatchSize, ClassCount]
     // predictedQualities shape: [LabelCount, PredictorCount]
     // trueQualities shape: [LabelCount, PredictorCount]
@@ -163,29 +163,31 @@ public extension Learner {
     let predictedQualitiesMean = (
       predictedQualitiesMask * predictedQualities
     ).sum(squeezingAxes: 0) / predictedQualitiesMask.sum(squeezingAxes: 0)
-    let trueQualities = data.computeBinaryQualities()
-    var results = [EvaluationResult]()
-    for label in 0..<predictedLabelProbabilities.count {
-      let instances = data.trueLabels[label]!.keys
-      let trueLabels = Tensor<Int32>(instances.map { Int32(data.trueLabels[label]![$0]!) })
-      let predictedLabelProbabilities = predictedLabelProbabilities[label].gathering(
-        atIndices: Tensor<Int32>(instances.map(Int32.init)))
-      let predictedQualities = predictedQualitiesMean[label]
-      let trueQualities = trueQualities[label]
-      results.append(EvaluationResult(
-        madErrorRank: computeMADErrorRank(
-          estimatedQualities: predictedQualities,
-          trueQualities: trueQualities),
-        madError: computeMADError(
-          estimatedQualities: predictedQualities,
-          trueQualities: trueQualities),
-        accuracy: computeAccuracy(
-          estimatedLabelProbabilities: predictedLabelProbabilities,
-          trueLabels: trueLabels),
-        auc: computeAUC(
-          estimatedLabelProbabilities: predictedLabelProbabilities,
-          trueLabels: trueLabels)))
-    }
-    return results
+    return [DataPartition: [EvaluationResult]](uniqueKeysWithValues:
+      data.computeBinaryQualities().map { (partition, trueQualities) in
+        var results = [EvaluationResult]()
+        for label in 0..<predictedLabelProbabilities.count {
+          let instances = data.trueLabels[label]!.keys
+          let trueLabels = Tensor<Int32>(instances.map { Int32(data.trueLabels[label]![$0]!) })
+          let predictedLabelProbabilities = predictedLabelProbabilities[label].gathering(
+            atIndices: Tensor<Int32>(instances.map(Int32.init)))
+          let predictedQualities = predictedQualitiesMean[label]
+          let trueQualities = trueQualities[label]
+          results.append(EvaluationResult(
+            madErrorRank: computeMADErrorRank(
+              estimatedQualities: predictedQualities,
+              trueQualities: trueQualities),
+            madError: computeMADError(
+              estimatedQualities: predictedQualities,
+              trueQualities: trueQualities),
+            accuracy: computeAccuracy(
+              estimatedLabelProbabilities: predictedLabelProbabilities,
+              trueLabels: trueLabels),
+            auc: computeAUC(
+              estimatedLabelProbabilities: predictedLabelProbabilities,
+              trueLabels: trueLabels)))
+        }
+        return (partition, results)
+      })
   }
 }

@@ -52,7 +52,8 @@ public struct OraclesSyntheticDataGenerator: SyntheticDataGenerator {
       classCounts: data.classCounts,
       instanceFeatures: data.instanceFeatures,
       predictorFeatures: data.predictorFeatures, // TODO: Is this right?
-      labelFeatures: data.labelFeatures)
+      labelFeatures: data.labelFeatures,
+      partitions: data.partitions)
   }
 }
 
@@ -156,7 +157,8 @@ public struct SyntheticPredictorsDataGenerator: SyntheticDataGenerator {
       classCounts: data.classCounts,
       instanceFeatures: data.instanceFeatures,
       predictorFeatures: usePredictorFeatures ? predictorFeatures : nil,
-      labelFeatures: data.labelFeatures)
+      labelFeatures: data.labelFeatures,
+      partitions: data.partitions)
   }
 }
 
